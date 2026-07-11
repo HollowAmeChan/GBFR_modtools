@@ -123,14 +123,14 @@ function MakeListPanel($parent, [int]$x, [int]$y, [int]$w, [int]$h, [string]$ext
         }
         $p.BackColor = $C.PanelOk
         UpdateExtractBtn
-    }
-    $p.Add_DragEnter({ if ($_.Data.GetDataPresent([Windows.Forms.DataFormats]::FileDrop)) { $_.Effect = "Copy" } })
+    }.GetNewClosure()
+    $p.Add_DragEnter(({ if ($_.Data.GetDataPresent([Windows.Forms.DataFormats]::FileDrop)) { $_.Effect = "Copy" } }).GetNewClosure())
     $p.Add_DragDrop($dropHandler)
-    $box.Add_DragEnter({ if ($_.Data.GetDataPresent([Windows.Forms.DataFormats]::FileDrop)) { $_.Effect = "Copy" } })
+    $box.Add_DragEnter(({ if ($_.Data.GetDataPresent([Windows.Forms.DataFormats]::FileDrop)) { $_.Effect = "Copy" } }).GetNewClosure())
     $box.Add_DragDrop($dropHandler)
 
     # browse
-    $btnAdd.Add_Click({
+    $btnAdd.Add_Click(({
         $d = New-Object Windows.Forms.OpenFileDialog
         $d.Filter    = "$ext files (*$ext)|*$ext"
         $d.Multiselect = $true
@@ -141,20 +141,20 @@ function MakeListPanel($parent, [int]$x, [int]$y, [int]$w, [int]$h, [string]$ext
             if ($box.Items.Count -gt 0) { $p.BackColor = $C.PanelOk }
             UpdateExtractBtn
         }
-    })
+    }).GetNewClosure())
 
-    $btnDel.Add_Click({
+    $btnDel.Add_Click(({
         $sel = @($box.SelectedItems)
         foreach ($s in $sel) { $box.Items.Remove($s) }
         if ($box.Items.Count -eq 0) { $p.BackColor = $C.Panel }
         UpdateExtractBtn
-    })
+    }).GetNewClosure())
 
-    $btnCl.Add_Click({
+    $btnCl.Add_Click(({
         $box.Items.Clear()
         $p.BackColor = $C.Panel
         UpdateExtractBtn
-    })
+    }).GetNewClosure())
 
     return $box
 }
