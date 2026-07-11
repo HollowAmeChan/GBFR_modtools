@@ -1,94 +1,108 @@
 # GBFR_modtools
 
-Drag-and-drop texture extraction and packing tools for Granblue Fantasy Relink modding.
+GUI tools for Granblue Fantasy Relink texture modding.
 
 ## Setup
 
-Place the following release binaries in the root of this folder (next to the `.bat` files):
+Place these binaries in the root of this folder (next to `GBFR提取工具.bat`):
 
 | Binary | Download |
 |--------|----------|
 | `GraniteTextureReader.exe` | https://github.com/Nenkai/GraniteTextureReader/releases |
-| `nier_cli_mgrr_<ver>/` (folder) | https://github.com/ArthurHeitmann/nier_cli/releases/tag/v1.3.0_mgrr |
+| `flatc.exe` | https://github.com/google/flatbuffers/releases → `Windows.flatc.binary.zip` |
 
-Both are gitignored — replace with a newer release at any time, scripts use relative paths.
+All binaries are gitignored. `MMat_ModelMaterial.fbs` (FlatBuffers schema) is already in this repo.
 
-## Workflow
+## Usage
 
-### Step 1 — minfo → hash table
+Double-click `GBFR提取工具.bat` to open the GUI.
 
-Drag a `.minfo` file onto `01_minfo转Hash表.bat`.
+### Extract tab
 
-The `.minfo` must sit next to its `vars/` folder (standard GBFRDataTools unpack layout):
+- Left list: drop `.minfo` files (add all model components for a full character — `pl`, `fp`, `wp`, `fn`, `np`)
+- Right list: drop `.gts` files (can drop multiple to search across tile sets)
+- Click **Extract** — processes all minfo × gts combinations
+- Output: `output_textures/<charId>/<gts_name>/`
+
+Common `.gts` paths:
+```
+data/granite/2k/gts/1/1.gts   <- main characters / faces
+data/granite/2k/gts/0/0.gts
+data/granite/4k/gts/1/1.gts   <- 4K variants
+```
+
+### Pack tab
+
+**WTB Textures** (`data/texture/2k/*.texture`)
+
+These are the non-Granite textures (msk3/msk4/msk5). The format is WTB (PlatinumGames
+texture container with embedded DDS).
+
+1. Drop original `.texture` files into the left list
+2. Click **Extract DDS** → saves DDS files to `output_dds/`
+3. Edit the DDS files externally (Photoshop, Substance, etc.)
+4. Drop edited `.dds` files into the right list
+5. Click **Pack to .texture** → creates replacement files in `output_mod/data/texture/2k/`
+
+Naming: `pl1400_skin_lod0_msk2_0.dds` packs back into `pl1400_skin_lod0_msk2.texture`.
+
+**mmat Edit** (requires `flatc.exe`)
+
+1. Drop `.mmat` files into the left list, click **Decode to JSON**
+   - JSON files open automatically in Explorer
+2. Edit the JSON in any text editor
+3. Drop edited `.json` files into the right list, click **Encode to .mmat**
+   - Output: `output_mod/mmat_repacked/<n>.mmat`
+
+## Texture types and where they come from
+
+| Type | Source | Tool |
+|------|--------|------|
+| `_albd`, `_nrml`, `_msk1`, `_msk2` | Granite GTS tile system | GraniteTextureReader |
+| `_msk3`, `_msk4`, `_msk5` | `data/texture/2k/*.texture` (WTB) | built-in WTB packer |
+
+## Output mod structure
 
 ```
-pl1400/
-  pl1400.minfo   <- drag this
-  vars/
-    0.mmat
-    1.mmat
+output_mod/
+  data/
+    texture/
+      2k/
+        pl1400_skin_lod0_msk2.texture   <- repacked WTB
+        ...
+  mmat_repacked/
+    0.mmat                              <- edited material config
     ...
 ```
 
-Output: `output_hashes/<charname>_hashes.txt`
+Place `output_mod/data/` into your Reloaded-II mod folder.
 
-### Step 2 — hash table → extract textures
-
-Drag a `.gts` file onto `02_Hash表提取纹理.bat`.
-
-Common `.gts` locations inside the game data:
-```
-data/granite/2k/gts/0/0.gts
-data/granite/2k/gts/1/1.gts   <- characters / faces
-data/granite/2k/gts/2/2.gts   <- eyes
-data/granite/4k/gts/...
-```
-
-If a hash is not found in the chosen `.gts`, the tool reports it as failed — drag a
-different `.gts` to retry. If `output_hashes/` has multiple characters, you are
-prompted to pick one.
-
-Output: `output_textures/<charname>/`
-
-### Step 3 — pack modified textures back (nier_cli)
-
-After editing textures in Photoshop / Substance etc., use `nier_cli_mgrr` to repack
-them into the `.wtb` container that GBFR reads.
-
-```
-nier_cli_mgrr\nier_cli_mgrr.exe wtbPack -i <folder_with_dds> -o <output.wtb>
-```
-
-Useful flags:
-- `-i`  input folder (DDS files exported from GraniteTextureReader)
-- `-o`  output `.wtb` file
-- `--platform pc` (default for GBFR)
-
-The repacked `.wtb` goes into your mod's data directory alongside the other mod files
-and is loaded by the Reloaded-II mod loader.
-
-## How it works
+## How it works (Extract)
 
 `mmat` files are FlatBuffers binaries. String fields are stored as raw ASCII, so 64-char
 lowercase hex strings can be extracted with a simple regex — no flatc required.
 
-Those 64-char strings are simultaneously:
+Those 64-char hashes are simultaneously:
 - the filename suffix of `.gtp` tile packets (`N_<hash>.gtp`)
 - the `-f` argument to `GraniteTextureReader extract`
 
-Each hash maps to one full material variant (all texture layers: albedo, normal, mask,
-emissive, etc.). Passing `-l -1` extracts all layers at once.
+Each hash maps to one full material variant (all layers: albedo, normal, masks, emissive).
+`-l -1` extracts all layers at once.
 
 ## Folder structure
 
 ```
 GBFR_modtools/
-  01_minfo转Hash表.bat          <- step 1 entry (drag .minfo here)
-  02_Hash表提取纹理.bat           <- step 2 entry (drag .gts here)
-  _step1_parse_mmat.ps1         <- step 1 logic (internal)
-  _step2_extract_tex.ps1        <- step 2 logic (internal)
-  GraniteTextureReader.exe      <- you provide (gitignored)
-  nier_cli_mgrr_<ver>/          <- you provide (gitignored)
-  output_hashes/                <- step 1 output, auto-created (gitignored)
-  output_textures/              <- step 2 output, auto-created (gitignored)
+  GBFR提取工具.bat             <- main entry point
+  GBFR_Extractor.ps1          <- GUI logic
+  MMat_ModelMaterial.fbs      <- FlatBuffers schema for mmat
+  _step1_parse_mmat.ps1       <- CLI fallback: minfo -> hash table
+  _step2_extract_tex.ps1      <- CLI fallback: hash table -> textures
+  GraniteTextureReader.exe    <- you provide (gitignored)
+  flatc.exe                   <- you provide (gitignored)
+  nier_cli_mgrr_<ver>/        <- optional (gitignored)
+  output_hashes/              <- auto-created (gitignored)
+  output_textures/            <- auto-created (gitignored)
+  output_dds/                 <- auto-created (gitignored)
+  output_mod/                 <- auto-created (gitignored)
 ```

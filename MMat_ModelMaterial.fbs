@@ -1,0 +1,59 @@
+// all FlatSharp FBS attributes start with the 'fs_' prefix.
+attribute "fs_serializer";
+
+namespace GBFRDataTools.Entities;
+
+struct UnkIDPlusOther
+{
+    ID:uint;
+    ID2:uint;
+}
+
+table MatStruct1_A4
+{
+    Unk:[string];
+    Unk2:[int];
+    Unk3:byte;
+    Unk4:byte;
+    Unk5:byte;
+}
+
+table MatStruct1_A2
+{
+    ID:uint;
+    Name:string;
+}
+
+ table MatStruct1
+{
+    A1:[UnkIDPlusOther];
+    A2:[MatStruct1_A2];
+    A3:[int];
+    A4:MatStruct1_A4;
+    A5:uint;
+    A6:byte;
+    A7:byte;
+    A8:byte;
+    A9:byte;
+    A10:byte;
+    A11:byte;
+    A12:byte;
+} 
+
+table MatStruct2
+{
+    Buffer:[float];
+    ID:uint;
+
+}
+
+table ModelMaterial (fs_serializer) {
+    Magic:uint;
+    Entries1:[MatStruct1];
+    Entries2:[MatStruct2];
+    Unk:string;
+    Unk2:byte; // Not all .mmat sets this one, but 'em' mat files seems to do so
+    Unk3:byte;
+}
+
+root_type ModelMaterial;

@@ -1,4 +1,4 @@
-# GBFR_Extractor.ps1  —  multi-minfo x multi-gts GUI extractor + pack placeholder
+# GBFR_Extractor.ps1  —  multi-minfo x multi-gts GUI extractor + WTB packer + mmat editor
 # Drop multiple .minfo and .gts files into their lists, then Extract.
 # Output is organised as: output_textures/<charId>/<gts_stem>/
 
@@ -7,11 +7,15 @@ Add-Type -AssemblyName System.Drawing
 
 $scriptDir  = Split-Path $PSCommandPath -Parent
 $graniteExe = Join-Path $scriptDir "GraniteTextureReader.exe"
+$flatcExe   = Join-Path $scriptDir "flatc.exe"
+$schemaFbs  = Join-Path $scriptDir "MMat_ModelMaterial.fbs"
 $nierDir    = Get-ChildItem $scriptDir -Directory -Filter "nier_cli_mgrr_*" |
               Select-Object -First 1 -ExpandProperty FullName
 $nierExe    = if ($nierDir) { Join-Path $nierDir "nier_cli_mgrr.exe" } else { $null }
 $hashesDir  = Join-Path $scriptDir "output_hashes"
 $outputDir  = Join-Path $scriptDir "output_textures"
+$outputDds  = Join-Path $scriptDir "output_dds"
+$outputMod  = Join-Path $scriptDir "output_mod"
 
 $script:Working   = $false
 $script:LogQueue  = [System.Collections.Concurrent.ConcurrentQueue[string]]::new()
@@ -381,44 +385,302 @@ $btnEx.Add_Click({
 })
 
 # --------------------------------------------------------------------------
-#  PACK TAB  (nier_cli placeholder)
+#  PACK TAB
 # --------------------------------------------------------------------------
-$lblPackTitle = New-Object Windows.Forms.Label
-$lblPackTitle.Text     = "Pack textures  (nier_cli_mgrr)"
-$lblPackTitle.Font     = $fBig
-$lblPackTitle.Location = New-Object Drawing.Point(20, 20)
-$lblPackTitle.AutoSize = $true
-$tabPack.Controls.Add($lblPackTitle)
 
-$lblNierStatus = New-Object Windows.Forms.Label
-$lblNierStatus.Location = New-Object Drawing.Point(20, 55)
-$lblNierStatus.AutoSize = $true
+# -- WTB helper functions --------------------------------------------------
 
-if ($nierExe -and (Test-Path $nierExe)) {
-    $lblNierStatus.Text      = "nier_cli_mgrr found:  $nierExe"
-    $lblNierStatus.ForeColor = [Drawing.Color]::FromArgb(80,200,80)
-} else {
-    $lblNierStatus.Text      = "nier_cli_mgrr not found.  Place the nier_cli_mgrr_<ver>/ folder next to this script."
-    $lblNierStatus.ForeColor = $C.Warn
+function Invoke-WtbExtract([string]$texPath, [string]$outDir) {
+    # Read WTB, extract each non-empty DDS slot to <basename>_<i>.dds
+    $b       = [IO.File]::ReadAllBytes($texPath)
+    $count   = [BitConverter]::ToUInt32($b, 4)
+    $offTbl  = [BitConverter]::ToUInt32($b, 12)
+    $sizeTbl = [BitConverter]::ToUInt32($b, 16)
+    $base    = [IO.Path]::GetFileNameWithoutExtension($texPath)
+    New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+    $extracted = 0
+    for ($i = 0; $i -lt $count; $i++) {
+        $off  = [BitConverter]::ToUInt32($b, $offTbl  + $i * 4)
+        $size = [BitConverter]::ToUInt32($b, $sizeTbl + $i * 4)
+        if ($off -eq 0 -or $size -eq 0) { continue }
+        $outPath = Join-Path $outDir "${base}_${i}.dds"
+        [IO.File]::WriteAllBytes($outPath, $b[$off..($off + $size - 1)])
+        $extracted++
+    }
+    return $extracted
 }
-$tabPack.Controls.Add($lblNierStatus)
 
-$lblPackInfo = New-Object Windows.Forms.Label
-$lblPackInfo.Text = @"
-Workflow (coming in next version):
+function Invoke-WtbPack([string]$originalTex, [string]$ddsPath, [string]$outDir) {
+    # Replace slot-0 DDS in original WTB with new DDS, write to outDir
+    $orig    = [IO.File]::ReadAllBytes($originalTex)
+    $newDds  = [IO.File]::ReadAllBytes($ddsPath)
+    $offTbl  = [BitConverter]::ToUInt32($orig, 12)   # = 32
+    $sizeTbl = [BitConverter]::ToUInt32($orig, 16)   # = 64
+    $ddsOff  = [BitConverter]::ToUInt32($orig, $offTbl)  # = 4096
 
-  1. Edit textures extracted to output_textures/<charId>/<gts>/
-  2. Drop the edited folder here → nier_cli repacks to .wtb
-  3. Place .wtb in your Reloaded-II mod folder
+    # Copy header section (everything before the DDS data), patch size
+    $header = $orig[0..($ddsOff - 1)]
+    $sizeBytes = [BitConverter]::GetBytes([uint32]$newDds.Length)
+    [Array]::Copy($sizeBytes, 0, $header, $sizeTbl, 4)
 
-Manual command:
-  nier_cli_mgrr.exe wtbPack -i <folder_with_dds> -o <output.wtb>
-"@
-$lblPackInfo.Location  = New-Object Drawing.Point(20, 90)
-$lblPackInfo.Size      = New-Object Drawing.Size(700, 200)
-$lblPackInfo.ForeColor = $C.Sub
-$lblPackInfo.Font      = $fMono
-$tabPack.Controls.Add($lblPackInfo)
+    # Assemble: header + new DDS
+    $output = New-Object byte[] ($header.Length + $newDds.Length)
+    [Array]::Copy($header, 0, $output, 0, $header.Length)
+    [Array]::Copy($newDds, 0, $output, $header.Length, $newDds.Length)
+
+    New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+    $outPath = Join-Path $outDir ([IO.Path]::GetFileName($originalTex))
+    [IO.File]::WriteAllBytes($outPath, $output)
+    return $outPath
+}
+
+# -- Pack tab log box -------------------------------------------------------
+$txtPackLog = New-Object Windows.Forms.TextBox
+$txtPackLog.Multiline   = $true
+$txtPackLog.ScrollBars  = "Vertical"
+$txtPackLog.ReadOnly    = $true
+$txtPackLog.Font        = $fMono
+$txtPackLog.BackColor   = $C.LogBg
+$txtPackLog.ForeColor   = $C.Text
+$txtPackLog.BorderStyle = "None"
+
+function PLog($msg) {
+    if ($txtPackLog.InvokeRequired) {
+        $txtPackLog.Invoke([Action[string]]{ param($m) PLog $m }, $msg)
+        return
+    }
+    $txtPackLog.AppendText($msg + "`r`n")
+    $txtPackLog.SelectionStart = $txtPackLog.TextLength
+    $txtPackLog.ScrollToCaret()
+}
+
+# -- tool status banner ----------------------------------------------------
+$pStatus = New-Object Windows.Forms.Panel
+$pStatus.Location  = New-Object Drawing.Point(10, 8)
+$pStatus.Size      = New-Object Drawing.Size(750, 22)
+$pStatus.BackColor = $C.Bg
+$tabPack.Controls.Add($pStatus)
+
+function StatusLbl($text, $ok, $x) {
+    $l = New-Object Windows.Forms.Label
+    $l.Text      = $text
+    $l.Location  = New-Object Drawing.Point($x, 2)
+    $l.AutoSize  = $true
+    $l.Font      = $fUI
+    $l.ForeColor = if ($ok) { [Drawing.Color]::FromArgb(80,200,80) } else { $C.Warn }
+    $pStatus.Controls.Add($l)
+    return $l
+}
+
+$xCur = 0
+StatusLbl ("flatc: " + $(if (Test-Path $flatcExe) {"OK"} else {"missing (download from github.com/google/flatbuffers)"})) `
+    (Test-Path $flatcExe) $xCur | Out-Null
+$xCur += 380
+StatusLbl ("schema: " + $(if (Test-Path $schemaFbs) {"OK"} else {"missing"})) `
+    (Test-Path $schemaFbs) $xCur | Out-Null
+
+# ── SECTION 1: WTB Textures ────────────────────────────────────────────────
+$lblWtb = New-Object Windows.Forms.Label
+$lblWtb.Text     = "WTB Textures  (data/texture/2k/*.texture)"
+$lblWtb.Font     = $fBig
+$lblWtb.Location = New-Object Drawing.Point(10, 36)
+$lblWtb.AutoSize = $true
+$tabPack.Controls.Add($lblWtb)
+
+# WTB left panel: original .texture files
+$boxTexture = MakeListPanel $tabPack 10 62 360 130 ".texture" "Original .texture files  (from data/texture/2k/)"
+$tabPack.Controls[-1].Location = New-Object Drawing.Point(10, 62)
+
+# WTB right panel: edited DDS files
+$boxDds = MakeListPanel $tabPack 390 62 370 130 ".dds" "Edited .dds files  (one per original)"
+$tabPack.Controls[-1].Location = New-Object Drawing.Point(390, 62)
+
+$btnWtbExtract = New-Object Windows.Forms.Button
+$btnWtbExtract.Text      = "Extract DDS"
+$btnWtbExtract.Location  = New-Object Drawing.Point(10, 200)
+$btnWtbExtract.Size      = New-Object Drawing.Size(110, 28)
+$btnWtbExtract.BackColor = $C.Panel
+$btnWtbExtract.ForeColor = $C.Text
+$btnWtbExtract.FlatStyle = "Flat"
+$tabPack.Controls.Add($btnWtbExtract)
+
+$btnWtbPack = New-Object Windows.Forms.Button
+$btnWtbPack.Text      = "Pack to .texture"
+$btnWtbPack.Location  = New-Object Drawing.Point(130, 200)
+$btnWtbPack.Size      = New-Object Drawing.Size(130, 28)
+$btnWtbPack.BackColor = $C.Accent
+$btnWtbPack.ForeColor = $C.Text
+$btnWtbPack.FlatStyle = "Flat"
+$tabPack.Controls.Add($btnWtbPack)
+
+$btnOpenDds = New-Object Windows.Forms.Button
+$btnOpenDds.Text      = "Open DDS folder"
+$btnOpenDds.Location  = New-Object Drawing.Point(270, 200)
+$btnOpenDds.Size      = New-Object Drawing.Size(120, 28)
+$btnOpenDds.BackColor = $C.Panel
+$btnOpenDds.ForeColor = $C.Sub
+$btnOpenDds.FlatStyle = "Flat"
+$tabPack.Controls.Add($btnOpenDds)
+
+$btnOpenMod = New-Object Windows.Forms.Button
+$btnOpenMod.Text      = "Open output_mod"
+$btnOpenMod.Location  = New-Object Drawing.Point(400, 200)
+$btnOpenMod.Size      = New-Object Drawing.Size(120, 28)
+$btnOpenMod.BackColor = $C.Panel
+$btnOpenMod.ForeColor = $C.Sub
+$btnOpenMod.FlatStyle = "Flat"
+$tabPack.Controls.Add($btnOpenMod)
+
+# ── SECTION 2: mmat Edit ──────────────────────────────────────────────────
+$lblMmat = New-Object Windows.Forms.Label
+$lblMmat.Text     = "mmat Edit  (flatc decode/encode)"
+$lblMmat.Font     = $fBig
+$lblMmat.Location = New-Object Drawing.Point(10, 238)
+$lblMmat.AutoSize = $true
+$tabPack.Controls.Add($lblMmat)
+
+$boxMmat = MakeListPanel $tabPack 10 264 360 100 ".mmat" ".mmat files  (from model/pl/<char>/vars/)"
+$tabPack.Controls[-1].Location = New-Object Drawing.Point(10, 264)
+
+$boxMmatJson = MakeListPanel $tabPack 390 264 370 100 ".json" "Edited .json files  (to repack)"
+$tabPack.Controls[-1].Location = New-Object Drawing.Point(390, 264)
+
+$btnMmatDecode = New-Object Windows.Forms.Button
+$btnMmatDecode.Text      = "Decode to JSON"
+$btnMmatDecode.Location  = New-Object Drawing.Point(10, 372)
+$btnMmatDecode.Size      = New-Object Drawing.Size(130, 28)
+$btnMmatDecode.BackColor = $C.Panel
+$btnMmatDecode.ForeColor = $C.Text
+$btnMmatDecode.FlatStyle = "Flat"
+$tabPack.Controls.Add($btnMmatDecode)
+
+$btnMmatEncode = New-Object Windows.Forms.Button
+$btnMmatEncode.Text      = "Encode to .mmat"
+$btnMmatEncode.Location  = New-Object Drawing.Point(150, 372)
+$btnMmatEncode.Size      = New-Object Drawing.Size(130, 28)
+$btnMmatEncode.BackColor = $C.Accent
+$btnMmatEncode.ForeColor = $C.Text
+$btnMmatEncode.FlatStyle = "Flat"
+$tabPack.Controls.Add($btnMmatEncode)
+
+# pack log
+$txtPackLog.Location = New-Object Drawing.Point(10, 408)
+$txtPackLog.Size     = New-Object Drawing.Size(750, 152)
+$tabPack.Controls.Add($txtPackLog)
+
+# resize handler for Pack tab
+$tabPack.Add_Resize({
+    $w = $tabPack.ClientSize.Width
+    $h = $tabPack.ClientSize.Height
+    $half = [int](($w - 30) / 2)
+    $panels = $tabPack.Controls | Where-Object { $_ -is [Windows.Forms.Panel] -and $_.Tag -ne 'status' }
+    if ($panels.Count -ge 4) {
+        $panels[0].Width = $half; $panels[1].Width = $w - $half - 30
+        $panels[1].Left  = $panels[0].Right + 10
+        $panels[2].Width = $half; $panels[3].Width = $w - $half - 30
+        $panels[3].Left  = $panels[2].Right + 10
+        foreach ($pp in $panels) {
+            $lb = $pp.Controls | Where-Object { $_ -is [Windows.Forms.ListBox] }
+            if ($lb) { $lb.Width = $pp.Width - 12 }
+        }
+    }
+    $txtPackLog.Width  = $w - 20
+    $txtPackLog.Height = $h - 418
+})
+
+# ── button handlers ────────────────────────────────────────────────────────
+
+$btnWtbExtract.Add_Click({
+    if ($boxTexture.Items.Count -eq 0) { PLog "[WARN] No .texture files in the list."; return }
+    $outDir = $outputDds
+    $total = 0
+    foreach ($t in @($boxTexture.Items)) {
+        $n = Invoke-WtbExtract $t $outDir
+        PLog "Extracted $n DDS from: $([IO.Path]::GetFileName($t))"
+        $total += $n
+    }
+    PLog "Done. $total DDS files -> $outDir"
+}.GetNewClosure())
+
+$btnOpenDds.Add_Click(({ if (Test-Path $outputDds) { explorer.exe $outputDds } else { PLog "output_dds/ does not exist yet." } }).GetNewClosure())
+$btnOpenMod.Add_Click(({ if (Test-Path $outputMod) { explorer.exe $outputMod } else { PLog "output_mod/ does not exist yet." } }).GetNewClosure())
+
+$btnWtbPack.Add_Click({
+    if ($boxTexture.Items.Count -eq 0) { PLog "[WARN] No original .texture files."; return }
+    if ($boxDds.Items.Count -eq 0)     { PLog "[WARN] No edited .dds files."; return }
+
+    # Match DDS to .texture by base name:  pl1400_skin_lod0_msk2_0.dds → pl1400_skin_lod0_msk2.texture
+    $outDir = Join-Path $outputMod "data\texture\2k"
+    $ok = 0; $miss = 0
+
+    foreach ($tex in @($boxTexture.Items)) {
+        $baseTex = [IO.Path]::GetFileNameWithoutExtension($tex)
+        # find matching DDS (name starts with baseTex)
+        $match = @($boxDds.Items) | Where-Object { [IO.Path]::GetFileNameWithoutExtension($_) -match "^${baseTex}_\d+$" } | Select-Object -First 1
+        if (-not $match) {
+            PLog "  NO MATCH for $baseTex  (expected DDS named ${baseTex}_0.dds)"
+            $miss++
+            continue
+        }
+        $outPath = Invoke-WtbPack $tex $match $outDir
+        PLog "  PACKED: $([IO.Path]::GetFileName($outPath))"
+        $ok++
+    }
+    PLog "Done. Packed: $ok  Missing DDS: $miss"
+    PLog "Output: $outDir"
+}.GetNewClosure())
+
+$btnMmatDecode.Add_Click({
+    if ($boxMmat.Items.Count -eq 0) { PLog "[WARN] No .mmat files in the list."; return }
+    if (-not (Test-Path $flatcExe)) {
+        PLog "[ERROR] flatc.exe not found."
+        PLog "        Download: https://github.com/google/flatbuffers/releases -> Windows.flatc.binary.zip"
+        PLog "        Place flatc.exe next to this script."
+        return
+    }
+    if (-not (Test-Path $schemaFbs)) { PLog "[ERROR] MMat_ModelMaterial.fbs not found."; return }
+
+    $outDir = Join-Path $outputMod "mmat_json"
+    New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+
+    foreach ($mmat in @($boxMmat.Items)) {
+        PLog "Decoding: $([IO.Path]::GetFileName($mmat)) ..."
+        $result = & $flatcExe --json --strict-json --raw-binary $schemaFbs -- $mmat -o $outDir 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            PLog "  -> OK"
+        } else {
+            PLog "  -> ERROR: $result"
+        }
+    }
+    PLog "JSON files: $outDir"
+    if (Test-Path $outDir) { explorer.exe $outDir }
+}.GetNewClosure())
+
+$btnMmatEncode.Add_Click({
+    if ($boxMmatJson.Items.Count -eq 0) { PLog "[WARN] No .json files in the list."; return }
+    if (-not (Test-Path $flatcExe)) { PLog "[ERROR] flatc.exe not found."; return }
+    if (-not (Test-Path $schemaFbs)) { PLog "[ERROR] MMat_ModelMaterial.fbs not found."; return }
+
+    $outDir = Join-Path $outputMod "mmat_repacked"
+    New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+
+    foreach ($json in @($boxMmatJson.Items)) {
+        PLog "Encoding: $([IO.Path]::GetFileName($json)) ..."
+        $result = & $flatcExe --binary $schemaFbs $json -o $outDir 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            # flatc outputs <basename>.bin - rename to .mmat
+            $binName  = [IO.Path]::GetFileNameWithoutExtension($json) + ".bin"
+            $mmatName = [IO.Path]::GetFileNameWithoutExtension($json) + ".mmat"
+            $binPath  = Join-Path $outDir $binName
+            $mmatPath = Join-Path $outDir $mmatName
+            if (Test-Path $binPath) { Move-Item $binPath $mmatPath -Force }
+            PLog "  -> $mmatName"
+        } else {
+            PLog "  -> ERROR: $result"
+        }
+    }
+    PLog "mmat files: $outDir"
+}.GetNewClosure())
 
 # ── startup message ───────────────────────────────────────────────────────────
 AppendLog "GBFR Modtools ready."
