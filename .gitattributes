@@ -1,0 +1,5 @@
+# 保留 PS1 文件的 UTF-8 BOM，防止 git clone 时被剥离
+*.ps1 text working-tree-encoding=UTF-8
+
+# bat 文件保持 CRLF 换行
+*.bat text eol=crlf

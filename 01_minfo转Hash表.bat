@@ -5,4 +5,6 @@ if "%~1"=="" (
     pause & exit /b 1
 )
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0_step1_parse_mmat.ps1" "%~1"
-pause >nul
+echo.
+echo --- done (exit %ERRORLEVEL%) ---
+pause
