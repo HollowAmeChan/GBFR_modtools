@@ -1,9 +1,7 @@
-﻿# _step2_extract_tex.ps1
-# 输入：.gts 文件路径（拖拽传入）
-# 读取：output_hashes\*_hashes.txt（由第一步生成）
-# 输出：output_textures\<角色名>\（PNG/DDS，按层编号区分）
-#
-# 调用：GraniteTextureReader.exe extract -t <gts> -f <哈希> -l -1 -o <输出目录>
+# _step2_extract_tex.ps1
+# Input : .gts file path (drag-dropped via bat)
+# Reads : output_hashes\*_hashes.txt  (produced by step 1)
+# Output: output_textures\<charname>\
 
 param([string]$GtsPath)
 
@@ -11,63 +9,68 @@ $scriptDir  = Split-Path $PSCommandPath -Parent
 $graniteExe = Join-Path $scriptDir "GraniteTextureReader.exe"
 $hashesDir  = Join-Path $scriptDir "output_hashes"
 
-# --- 校验 GraniteTextureReader ---
-if (-not (Test-Path $graniteExe)) {
+function Finish {
     Write-Host ""
-    Write-Host " [错误] 未找到 GraniteTextureReader.exe："
-    Write-Host "   $graniteExe"
-    Write-Host ""
-    Write-Host " 请从以下地址下载后放入工具包根目录："
-    Write-Host "   https://github.com/Nenkai/GraniteTextureReader/releases"
-    exit 1
+    Read-Host " Press Enter to close"
 }
 
-# --- 校验 gts 文件 ---
+# --- validate GraniteTextureReader ---
+if (-not (Test-Path $graniteExe)) {
+    Write-Host ""
+    Write-Host " [ERROR] GraniteTextureReader.exe not found at:"
+    Write-Host "   $graniteExe"
+    Write-Host ""
+    Write-Host " Download from:"
+    Write-Host "   https://github.com/Nenkai/GraniteTextureReader/releases"
+    Write-Host " Then place GraniteTextureReader.exe in this folder."
+    Finish; exit 1
+}
+
+# --- validate gts file ---
 if (-not $GtsPath -or -not (Test-Path $GtsPath)) {
-    Write-Host " [错误] gts 文件不存在：$GtsPath"
-    exit 1
+    Write-Host " [ERROR] GTS file not found: $GtsPath"
+    Finish; exit 1
 }
 
 Write-Host ""
-Write-Host " gts 文件 : $GtsPath"
+Write-Host " GTS file  : $GtsPath"
 
-# --- 查找哈希表文件 ---
+# --- find hash table(s) ---
 $hashFiles = Get-ChildItem "$hashesDir\*_hashes.txt" -ErrorAction SilentlyContinue |
              Sort-Object LastWriteTime -Descending
 
 if ($hashFiles.Count -eq 0) {
     Write-Host ""
-    Write-Host " [错误] 未找到哈希表文件："
-    Write-Host "   $hashesDir"
+    Write-Host " [ERROR] No hash table found in: $hashesDir"
     Write-Host ""
-    Write-Host " 请先运行第一步：将 .minfo 文件拖拽到 01_minfo转Hash表.bat"
-    exit 1
+    Write-Host " Run step 1 first: drag a .minfo file onto 01_minfo转Hash表.bat"
+    Finish; exit 1
 }
 
-# 有多个哈希表时由用户选择
+# if multiple hash tables exist, let user pick
 if ($hashFiles.Count -gt 1) {
     Write-Host ""
-    Write-Host " 找到多个哈希表文件，请选择："
+    Write-Host " Multiple hash tables found:"
     for ($i = 0; $i -lt $hashFiles.Count; $i++) {
-        $age = (Get-Date) - $hashFiles[$i].LastWriteTime
-        $tag = if ($i -eq 0) { " <- 最新" } else { "" }
-        $ageStr = if ($age.TotalHours -lt 1)   { "$([int]$age.TotalMinutes) 分钟前" }
-                  elseif ($age.TotalDays -lt 1) { "$([int]$age.TotalHours) 小时前" }
-                  else                          { "$([int]$age.TotalDays) 天前" }
-        Write-Host ("   [{0}] {1,-40} ({2}){3}" -f $i, $hashFiles[$i].Name, $ageStr, $tag)
+        $age    = (Get-Date) - $hashFiles[$i].LastWriteTime
+        $tag    = if ($i -eq 0) { " <- most recent" } else { "" }
+        $ageStr = if ($age.TotalHours -lt 1)   { "$([int]$age.TotalMinutes)m ago" }
+                  elseif ($age.TotalDays -lt 1) { "$([int]$age.TotalHours)h ago" }
+                  else                          { "$([int]$age.TotalDays)d ago" }
+        Write-Host ("   [{0}] {1,-40}  ({2}){3}" -f $i, $hashFiles[$i].Name, $ageStr, $tag)
     }
     Write-Host ""
-    $raw = Read-Host " 输入编号（直接回车使用最新 [0]）"
-    $idx = if ($raw -match '^\d+$' -and [int]$raw -lt $hashFiles.Count) { [int]$raw } else { 0 }
+    $raw      = Read-Host " Enter number (Enter = most recent [0])"
+    $idx      = if ($raw -match '^\d+$' -and [int]$raw -lt $hashFiles.Count) { [int]$raw } else { 0 }
     $hashFile = $hashFiles[$idx]
 } else {
     $hashFile = $hashFiles[0]
 }
 
 $charName = $hashFile.BaseName -replace '_hashes$', ''
-Write-Host " 哈希表   : $($hashFile.Name)（角色：$charName）"
+Write-Host " Hash table: $($hashFile.Name)  (character: $charName)"
 
-# --- 读取哈希条目（跳过注释行） ---
+# --- read hash entries (skip comment lines) ---
 $entries = Get-Content $hashFile |
            Where-Object { $_ -notmatch '^\s*#' -and $_ -match '[0-9a-f]{64}' } |
            ForEach-Object {
@@ -76,19 +79,19 @@ $entries = Get-Content $hashFile |
            }
 
 if ($entries.Count -eq 0) {
-    Write-Host " [错误] 哈希表为空或格式错误：$($hashFile.FullName)"
-    exit 1
+    Write-Host " [ERROR] Hash table is empty or malformed: $($hashFile.FullName)"
+    Finish; exit 1
 }
 
-Write-Host " 条目数   : $($entries.Count)"
+Write-Host " Entries   : $($entries.Count)"
 
-# --- 准备输出目录 ---
+# --- prepare output directory ---
 $outDir = Join-Path $scriptDir "output_textures\$charName"
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-Write-Host " 输出目录 : $outDir"
+Write-Host " Output    : $outDir"
 Write-Host ""
 
-# --- 批量提取 ---
+# --- batch extract ---
 $success = 0
 $fail    = 0
 $total   = $entries.Count
@@ -96,16 +99,16 @@ $tmpErr  = Join-Path $env:TEMP "gtr_err_tmp.txt"
 
 foreach ($entry in $entries) {
     $idx = $success + $fail + 1
-    Write-Progress -Activity "正在提取纹理" `
+    Write-Progress -Activity "Extracting textures" `
                    -Status ("[{0}/{1}] {2}" -f $idx, $total, $entry.Name) `
                    -PercentComplete ([int](($idx / $total) * 100))
 
     $proc = Start-Process -FilePath $graniteExe `
         -ArgumentList @("extract",
-                        "-t", $GtsPath,
+                        "-t", "`"$GtsPath`"",
                         "-f", $entry.Hash,
                         "-l", "-1",
-                        "-o", $outDir) `
+                        "-o", "`"$outDir`"") `
         -Wait -PassThru -NoNewWindow `
         -RedirectStandardError $tmpErr
 
@@ -119,16 +122,18 @@ foreach ($entry in $entries) {
     }
 }
 
-Write-Progress -Activity "正在提取纹理" -Completed
+Write-Progress -Activity "Extracting textures" -Completed
 
 Write-Host ""
 if ($fail -eq 0) {
-    Write-Host (" 全部完成！共提取 {0} 个纹理。" -f $success) -ForegroundColor Green
+    Write-Host (" Done. {0} texture(s) extracted." -f $success) -ForegroundColor Green
 } else {
-    Write-Host (" 完成。成功：{0}，失败：{1}" -f $success, $fail) -ForegroundColor Yellow
-    Write-Host " 失败的条目可能不在此 .gts 文件中。"
-    Write-Host " 可尝试其他 gts 文件：granite\2k\gts\0\、granite\4k\gts\ 等。"
+    Write-Host (" Done. OK: {0}  Failed: {1}" -f $success, $fail) -ForegroundColor Yellow
+    Write-Host " Failed hashes may not exist in this .gts file."
+    Write-Host " Try other gts files: granite\2k\gts\0\, granite\4k\gts\, etc."
 }
 Write-Host ""
-Write-Host " 输出目录："
+Write-Host " Output folder:"
 Write-Host "   $outDir"
+
+Finish

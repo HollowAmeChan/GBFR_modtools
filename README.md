@@ -1,79 +1,94 @@
-# GBFR modtools
+# GBFR_modtools
 
-GBFR：Relink 模组工具包，拖拽即用。
+Drag-and-drop texture extraction and packing tools for Granblue Fantasy Relink modding.
 
-## 配置
+## Setup
 
-把此文件夹放在任意位置，然后将以下发行版可执行文件放进文件夹根目录（和 `.bat` 文件同级）：
+Place the following release binaries in the root of this folder (next to the `.bat` files):
 
-| 文件 | 下载地址 |
-|------|----------|
+| Binary | Download |
+|--------|----------|
 | `GraniteTextureReader.exe` | https://github.com/Nenkai/GraniteTextureReader/releases |
+| `nier_cli_mgrr_<ver>/` (folder) | https://github.com/ArthurHeitmann/nier_cli/releases/tag/v1.3.0_mgrr |
 
-这是唯一的外部依赖。不需要 flatc、不需要 GBFRDataTools、不需要 Python。
+Both are gitignored — replace with a newer release at any time, scripts use relative paths.
 
-更新时直接替换 `.exe` 即可，脚本通过相对路径引用，无需任何修改。
+## Workflow
 
-## 使用流程
+### Step 1 — minfo → hash table
 
-### 第一步 —— minfo 转哈希表
+Drag a `.minfo` file onto `01_minfo转Hash表.bat`.
 
-将 `.minfo` 文件拖拽到 `01_minfo转Hash表.bat` 上运行。
-
-`.minfo` 必须和它的 `vars/` 文件夹在同一目录下（即 GBFRDataTools 解包后的标准结构）：
+The `.minfo` must sit next to its `vars/` folder (standard GBFRDataTools unpack layout):
 
 ```
 pl1400/
-  pl1400.minfo   ← 拖这个
+  pl1400.minfo   <- drag this
   vars/
     0.mmat
     1.mmat
     ...
 ```
 
-输出：`output_hashes/<角色名>_hashes.txt`
+Output: `output_hashes/<charname>_hashes.txt`
 
-### 第二步 —— 哈希表提取纹理
+### Step 2 — hash table → extract textures
 
-将 `.gts` 文件拖拽到 `02_Hash表提取纹理.bat` 上运行。
+Drag a `.gts` file onto `02_Hash表提取纹理.bat`.
 
-游戏数据中常见的 `.gts` 文件位置：
+Common `.gts` locations inside the game data:
 ```
 data/granite/2k/gts/0/0.gts
-data/granite/2k/gts/1/1.gts   ← 角色 / 脸部
-data/granite/2k/gts/2/2.gts   ← 眼睛
+data/granite/2k/gts/1/1.gts   <- characters / faces
+data/granite/2k/gts/2/2.gts   <- eyes
 data/granite/4k/gts/...
 ```
 
-如果某个哈希在当前 `.gts` 中找不到，工具会报告失败。换一个 `.gts` 文件重新拖入即可。
+If a hash is not found in the chosen `.gts`, the tool reports it as failed — drag a
+different `.gts` to retry. If `output_hashes/` has multiple characters, you are
+prompted to pick one.
 
-`output_hashes/` 中若有多个角色的哈希文件，工具会列出并提示选择。
+Output: `output_textures/<charname>/`
 
-输出：`output_textures/<角色名>/`
+### Step 3 — pack modified textures back (nier_cli)
 
-## 原理简述
-
-`mmat` 是 FlatBuffers 二进制格式，但其中的字符串字段以 ASCII 明文存储，因此可以直接用正则提取 64 位十六进制字符串，无需 flatc 解析。
-
-这些 64 位字符串同时也是：
-- `.gtp` 瓦片文件的文件名组成部分（`N_<hash>.gtp`）
-- `GraniteTextureReader.exe extract -f <哈希>` 的参数值
-
-每个哈希对应一个完整的材质变体（包含所有纹理层：漫反射、法线、遮罩、自发光等），使用 `-l -1` 参数一次性提取全部层。
-
-## 目录结构
+After editing textures in Photoshop / Substance etc., use `nier_cli_mgrr` to repack
+them into the `.wtb` container that GBFR reads.
 
 ```
-modtoolspack/
-  01_minfo转Hash表.bat        ← 第一步入口（拖 .minfo 到此）
-  02_Hash表提取纹理.bat         ← 第二步入口（拖 .gts 到此）
-  _step1_parse_mmat.ps1       ← 第一步逻辑（内部）
-  _step2_extract_tex.ps1      ← 第二步逻辑（内部）
-  GraniteTextureReader.exe    ← 自行下载放入（见配置）
-  output_hashes/              ← 第一步输出，自动创建
-  output_textures/            ← 第二步输出，自动创建
+nier_cli_mgrr\nier_cli_mgrr.exe wtbPack -i <folder_with_dds> -o <output.wtb>
 ```
 
-以 `_` 开头的文件为内部脚本，用户只需关注两个 `.bat` 文件。
+Useful flags:
+- `-i`  input folder (DDS files exported from GraniteTextureReader)
+- `-o`  output `.wtb` file
+- `--platform pc` (default for GBFR)
 
-`output_hashes/` 和 `output_textures/` 已加入 `.gitignore`，提交仓库时不会包含。
+The repacked `.wtb` goes into your mod's data directory alongside the other mod files
+and is loaded by the Reloaded-II mod loader.
+
+## How it works
+
+`mmat` files are FlatBuffers binaries. String fields are stored as raw ASCII, so 64-char
+lowercase hex strings can be extracted with a simple regex — no flatc required.
+
+Those 64-char strings are simultaneously:
+- the filename suffix of `.gtp` tile packets (`N_<hash>.gtp`)
+- the `-f` argument to `GraniteTextureReader extract`
+
+Each hash maps to one full material variant (all texture layers: albedo, normal, mask,
+emissive, etc.). Passing `-l -1` extracts all layers at once.
+
+## Folder structure
+
+```
+GBFR_modtools/
+  01_minfo转Hash表.bat          <- step 1 entry (drag .minfo here)
+  02_Hash表提取纹理.bat           <- step 2 entry (drag .gts here)
+  _step1_parse_mmat.ps1         <- step 1 logic (internal)
+  _step2_extract_tex.ps1        <- step 2 logic (internal)
+  GraniteTextureReader.exe      <- you provide (gitignored)
+  nier_cli_mgrr_<ver>/          <- you provide (gitignored)
+  output_hashes/                <- step 1 output, auto-created (gitignored)
+  output_textures/              <- step 2 output, auto-created (gitignored)
+```
