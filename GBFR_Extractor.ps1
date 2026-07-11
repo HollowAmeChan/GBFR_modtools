@@ -645,7 +645,7 @@ $btnMmatDecode.Add_Click({
 
     foreach ($mmat in @($boxMmat.Items)) {
         PLog "Decoding: $([IO.Path]::GetFileName($mmat)) ..."
-        $result = & $flatcExe --json --strict-json --raw-binary $schemaFbs -- $mmat -o $outDir 2>&1
+        $result = & $flatcExe --json --strict-json --raw-binary -o $outDir $schemaFbs -- $mmat 2>&1
         if ($LASTEXITCODE -eq 0) {
             PLog "  -> OK"
         } else {
@@ -666,7 +666,7 @@ $btnMmatEncode.Add_Click({
 
     foreach ($json in @($boxMmatJson.Items)) {
         PLog "Encoding: $([IO.Path]::GetFileName($json)) ..."
-        $result = & $flatcExe --binary $schemaFbs $json -o $outDir 2>&1
+        $result = & $flatcExe --binary -o $outDir $schemaFbs $json 2>&1
         if ($LASTEXITCODE -eq 0) {
             # flatc outputs <basename>.bin - rename to .mmat
             $binName  = [IO.Path]::GetFileNameWithoutExtension($json) + ".bin"
