@@ -8,33 +8,40 @@ echo.
 echo ============================================================
 echo  GBFR extract-all helper
 echo  Extracts ALL inline tiles from every gts file (layer 0)
-echo  This will take a while and use significant disk space.
+echo  Covers both 2k and 4k.  Takes ~10-20 min, ~10GB disk.
 echo ============================================================
 echo.
-echo Output folder: %OUT%
+echo Output: %OUT%
 echo.
 
 if not exist "%GR%" (
-    echo [ERROR] GraniteTextureReader.exe not found in this folder.
+    echo [ERROR] GraniteTextureReader.exe not found.
     pause & exit /b 1
 )
 
 mkdir "%OUT%" 2>nul
 
-echo --- 2k gts files ---
+echo --- 2k ---
 for /L %%n in (0,1,11) do (
-    set GTS=%BASE%\2k\gts\%%n\%%n.gts
     if exist "%BASE%\2k\gts\%%n\%%n.gts" (
-        echo.
-        echo [%%n/11] %BASE%\2k\gts\%%n\%%n.gts
+        echo [2k/%%n] ...
         "%GR%" extract-all -t "%BASE%\2k\gts\%%n\%%n.gts" -l 0 -o "%OUT%\2k_%%n"
     )
 )
 
 echo.
-echo --- Done! ---
-echo Results in: %OUT%
+echo --- 4k ---
+for /L %%n in (0,1,11) do (
+    if exist "%BASE%\4k\gts\%%n\%%n.gts" (
+        echo [4k/%%n] ...
+        "%GR%" extract-all -t "%BASE%\4k\gts\%%n\%%n.gts" -l 0 -o "%OUT%\4k_%%n"
+    )
+)
+
 echo.
-echo Now checking for pl1400_body and pl1400_sheath files...
-dir /b "%OUT%\*\*pl1400_body*" "%OUT%\*\*pl1400_sheath*" 2>nul
+echo === Done! Searching for pl1400_body and pl1400_sheath... ===
+for /R "%OUT%" %%f in (*pl1400_body* *pl1400_sheath*) do (
+    echo %%f
+)
+echo.
 pause
