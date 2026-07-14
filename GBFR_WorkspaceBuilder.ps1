@@ -8,6 +8,11 @@ $ErrorActionPreference = "Stop"
 
 $libRoot = Join-Path $PSScriptRoot "_lib"
 $flatcExe = Join-Path $libRoot "flatc.exe"
+$nierCliExe = Get-ChildItem -LiteralPath $libRoot -Directory -Filter "nier_cli_mgrr_*" -ErrorAction SilentlyContinue |
+    Sort-Object Name -Descending |
+    ForEach-Object { Join-Path $_.FullName "nier_cli_mgrr.exe" } |
+    Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+    Select-Object -First 1
 $schemaFbs = Join-Path $libRoot "MMat_ModelMaterial.fbs"
 $B = ConvertFrom-Json ([IO.File]::ReadAllText((Join-Path $libRoot "builder_strings_zh.json"), [Text.Encoding]::UTF8))
 . (Join-Path $libRoot "workspace_lib.ps1")
@@ -68,6 +73,23 @@ function Get-WorkspaceOperations([string]$Manifest) {
         })
     }
 
+    if ($workspace.PSObject.Properties.Name -contains "NewTextures") {
+        foreach ($texture in @($workspace.NewTextures)) {
+            $inputPath = Resolve-WorkspaceFile $root ([string]$texture.Input)
+            if (-not (Test-Path -LiteralPath $inputPath -PathType Leaf)) { $missing++; continue }
+            $changed = (Get-WorkspaceSha256 $inputPath) -ne [string]$texture.BaselineSha256
+            $operations.Add([PSCustomObject]@{
+                Kind = "new_texture"
+                TypeLabel = $B.type_new_texture
+                InputLabel = [IO.Path]::GetFileName($inputPath)
+                OutputLabel = [string]$texture.Output
+                Changed = $changed
+                Record = $texture
+                DdsPath = $inputPath
+            })
+        }
+    }
+
     return [PSCustomObject]@{
         Root = $root
         Workspace = $workspace
@@ -93,6 +115,9 @@ function Invoke-WorkspaceBuild([object]$Context, [object[]]$Operations, [scriptb
                 $slots = @{}
                 foreach ($slot in @($operation.Slots)) { $slots[[int]$slot.Index] = [string]$slot.Path }
                 New-WtbTexture $sourcePath $slots $outputPath | Out-Null
+            } elseif ($operation.Kind -eq "new_texture") {
+                if (-not $nierCliExe) { throw $B.err_nier_cli_missing }
+                New-WtbTextureFromDds $nierCliExe ([string]$operation.DdsPath) $outputPath ([uint32]$operation.Record.TextureId) | Out-Null
             } elseif ($operation.Kind -eq "mmat") {
                 if (-not (Test-Path -LiteralPath $flatcExe)) { throw $B.err_flatc_missing }
                 if (-not (Test-Path -LiteralPath $schemaFbs)) { throw $B.err_schema_missing }

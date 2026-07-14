@@ -143,6 +143,60 @@ function New-WtbTexture(
     return $OutputTexture
 }
 
+function New-WtbTextureFromDds(
+    [string]$NierCliPath,
+    [string]$DdsPath,
+    [string]$OutputTexture,
+    [uint32]$TextureId = 0
+) {
+    if (-not (Test-Path -LiteralPath $NierCliPath -PathType Leaf)) {
+        throw "nier_cli_mgrr.exe not found: $NierCliPath"
+    }
+    $dds = [IO.File]::ReadAllBytes($DdsPath)
+    if ($dds.Length -lt 4 -or [Text.Encoding]::ASCII.GetString($dds, 0, 4) -ne 'DDS ') {
+        throw "Input is not a DDS file: $DdsPath"
+    }
+
+    $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("gbfr_wtb_" + [Guid]::NewGuid().ToString('N'))
+    $inputDir = Join-Path $tempRoot "texture.wtb_extracted"
+    $generatedWtb = Join-Path $tempRoot "texture.wtb"
+    try {
+        New-Item -ItemType Directory -Force -Path $inputDir | Out-Null
+        $ddsName = "0_{0:x8}.dds" -f $TextureId
+        [IO.File]::WriteAllBytes((Join-Path $inputDir $ddsName), $dds)
+
+        $oldErrorAction = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $result = @(& $NierCliPath $inputDir 2>&1)
+            $exitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $oldErrorAction
+        }
+        if ($exitCode -ne 0 -or -not (Test-Path -LiteralPath $generatedWtb -PathType Leaf)) {
+            throw "nier_cli WTB build failed for $DdsPath`n$($result -join [Environment]::NewLine)"
+        }
+
+        $outputBytes = [IO.File]::ReadAllBytes($generatedWtb)
+        Assert-Wtb $outputBytes $generatedWtb | Out-Null
+        $payloadOffsetTable = [BitConverter]::ToUInt32($outputBytes, 12)
+        $payloadOffset = [BitConverter]::ToUInt32($outputBytes, $payloadOffsetTable)
+        if (($payloadOffset + 4) -gt $outputBytes.Length -or
+            [Text.Encoding]::ASCII.GetString($outputBytes, $payloadOffset, 4) -ne 'DDS ') {
+            throw "nier_cli output does not contain a DDS payload: $generatedWtb"
+        }
+
+        $outputDir = [IO.Path]::GetDirectoryName($OutputTexture)
+        New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
+        $tempOutput = "$OutputTexture.tmp"
+        [IO.File]::WriteAllBytes($tempOutput, $outputBytes)
+        Move-Item -LiteralPath $tempOutput -Destination $OutputTexture -Force
+        return $OutputTexture
+    } finally {
+        if (Test-Path -LiteralPath $tempRoot) { Remove-Item -LiteralPath $tempRoot -Recurse -Force }
+    }
+}
+
 function Convert-MmatToJson(
     [string]$FlatcPath,
     [string]$SchemaPath,

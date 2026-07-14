@@ -165,6 +165,7 @@ data/model/pl/pl1400/pl1400.mmesh
 以下情况才需要额外构建材质或贴图：
 
 - 修改贴图内容：编辑 `unpack/data/texture/.../*.dds`，再用构建器封回 `.texture`。
+- 将 Granite 贴图改为普通贴图：编辑或保留 `unpack/data/granite/.../*.dds`，在构建器中勾选对应“新建贴图”，并删除 mmat 条目中的 `A4`。
 - 修改贴图引用或 Granite 映射：编辑对应的 `*.mmat.json`。
 - 新增、删除或重新排序材质槽：必须同时确认 `.minfo` 的 `chunks[].material_id`、`materials[]` 与 `vars/*.mmat` 是否仍然对应。
 

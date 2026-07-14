@@ -334,11 +334,15 @@ function Expand-GraniteTextures {
     $missingGroups = [System.Collections.Generic.List[PSCustomObject]]::new()
     $decodeErrors = [System.Collections.Generic.List[string]]::new()
     $decodedFiles = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $newTextures = [System.Collections.Generic.List[PSCustomObject]]::new()
     $graniteRoot = Join-Path $dataRoot "granite"
     $tempRoot = Join-Path $outDir ".granite_tmp"
 
     if ($references.Count -eq 0) {
-        return [PSCustomObject]@{ ReferenceCount = 0; GroupCount = 0; FileCount = 0; MissingCount = 0; ErrorCount = 0 }
+        return [PSCustomObject]@{
+            ReferenceCount = 0; GroupCount = 0; FileCount = 0
+            MissingCount = 0; ErrorCount = 0; NewTextureCount = 0
+        }
     }
     if (-not (Test-Path -LiteralPath $graniteExe) -or -not (Test-Path -LiteralPath $texconvExe)) {
         $missing = @()
@@ -452,9 +456,24 @@ function Expand-GraniteTextures {
     }
 
     $workspace = ConvertFrom-Json ([IO.File]::ReadAllText($workspaceJson, [Text.Encoding]::UTF8))
+    foreach ($relativeDds in ($decodedFiles | Sort-Object)) {
+        $ddsPath = Resolve-WorkspaceFile $outDir $relativeDds
+        $res = [IO.Path]::GetFileName([IO.Path]::GetDirectoryName($ddsPath))
+        $baseName = [IO.Path]::GetFileNameWithoutExtension($ddsPath)
+        $sourceTexture = Join-Path $sourceRoot "data\texture\$res\$baseName.texture"
+        if (Test-Path -LiteralPath $sourceTexture -PathType Leaf) { continue }
+
+        $newTextures.Add([PSCustomObject]@{
+            Input = $relativeDds
+            Output = ConvertTo-WorkspacePath (Join-Path "build\data\texture\$res" "$baseName.texture")
+            BaselineSha256 = Get-WorkspaceSha256 $ddsPath
+            TextureId = 0
+        })
+    }
     $workspace | Add-Member -NotePropertyName GraniteTextures -NotePropertyValue @($decodedGroups) -Force
     $workspace | Add-Member -NotePropertyName GraniteMissing -NotePropertyValue @($missingGroups) -Force
     $workspace | Add-Member -NotePropertyName GraniteDecodeErrors -NotePropertyValue @($decodeErrors) -Force
+    $workspace | Add-Member -NotePropertyName NewTextures -NotePropertyValue @($newTextures) -Force
     [IO.File]::WriteAllText($workspaceJson, ($workspace | ConvertTo-Json -Depth 10), [System.Text.UTF8Encoding]::new($false))
 
     return [PSCustomObject]@{
@@ -463,6 +482,7 @@ function Expand-GraniteTextures {
         FileCount = $decodedFiles.Count
         MissingCount = $missingGroups.Count
         ErrorCount = $decodeErrors.Count
+        NewTextureCount = $newTextures.Count
     }
 }
 
@@ -869,6 +889,7 @@ L "|---|---|"
 L "| **$($S.granite_references)** | $($graniteResult.ReferenceCount) |"
 L "| **$($S.granite_groups)** | $($graniteResult.GroupCount) |"
 L "| **$($S.granite_files)** | $($graniteResult.FileCount) |"
+L "| **$($S.granite_new_textures)** | $($graniteResult.NewTextureCount) |"
 L "| **$($S.granite_missing)** | $($graniteResult.MissingCount) |"
 if ($graniteResult.ErrorCount -gt 0) {
     L "| **$($S.decode_failed)** | $($graniteResult.ErrorCount) |"

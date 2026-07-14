@@ -12,13 +12,15 @@
 _lib/flatc.exe
 _lib/GraniteTextureReader.exe
 _lib/texconv.exe
+_lib/nier_cli_mgrr_1.3.0/nier_cli_mgrr.exe
 ```
 
 - `flatc.exe`：从 [FlatBuffers Releases](https://github.com/google/flatbuffers/releases) 下载 Windows 版。
 - `GraniteTextureReader.exe`：使用已验证的 [1.1.5](https://github.com/Nenkai/GraniteTextureReader/releases/tag/1.1.5)。
 - `texconv.exe`：使用已验证的 [DirectXTex May 2026](https://github.com/microsoft/DirectXTex/releases/tag/may2026)。
+- `nier_cli_mgrr.exe`：下载 [v1.3.0_mgrr](https://github.com/ArthurHeitmann/nier_cli/releases/tag/v1.3.0_mgrr)，解压到上述版本目录。
 
-仓库已经包含对应的 `MMat_ModelMaterial.fbs`。当前流程不依赖 nier_cli。
+仓库已经包含对应的 `MMat_ModelMaterial.fbs`。
 
 ## 1. 探索角色资源
 
@@ -75,7 +77,9 @@ unpack/data/model/pl/pl1400/vars/0.mmat.json
 
 `source/` 是不可编辑的原始模板。删除 `unpack/` 中不需要的中间文件，会让它退出构建候选清单。
 
-Granite DDS 是可编辑中间态，但当前构建器不会直接把它封回 GTS/GTP，也不能把 GraniteTextureReader 输出的 TGA 直接封成 `.texture`。要把 Granite 流式贴图改为普通 `.texture`，还需要为目标 DDS 建立 WTB 模板并构建到 `data/texture/{2k,4k}/`，同时在对应 `.mmat.json` 材质条目中删除 `A4`。
+Granite DDS 是可编辑中间态，构建器不会修改 GTS/GTP。对于 `source/data/texture` 中没有同名原件的 DDS，探索器会把它登记为“新建贴图”候选；构建器使用 nier_cli 创建新的 WTB `.texture` 到 `build/data/texture/{2k,4k}/`。同时在对应 `.mmat.json` 材质条目中删除 `A4`，材质就会改用 `A2.Name` 指向的普通贴图。
+
+新建贴图默认只在 DDS 内容变化后自动勾选。若 DDS 无需编辑、只是要从 Granite 改为普通贴图，需要在构建器中手动勾选对应“新建贴图”项目。
 
 ## 3. 构建 Mod
 
@@ -83,7 +87,7 @@ Granite DDS 是可编辑中间态，但当前构建器不会直接把它封回 G
 
 构建器会：
 
-- 列出贴图封包与 mmat 编码操作。
+- 分别列出已有贴图封回、新建贴图与 mmat 编码操作。
 - 默认勾选哈希已变化的中间文件。
 - 允许手动勾选未修改项目以强制构建。
 - 在写入前显示完整目标清单。
@@ -115,6 +119,7 @@ GBFR_modtools/
     flatc.exe                 mmat FlatBuffers 编解码
     GraniteTextureReader.exe Granite GTS/GTP 图层提取
     texconv.exe               TGA 到指定 BC 格式 DDS 转换
+    nier_cli_mgrr_1.3.0/      从 DDS 新建 WTB texture
     MMat_ModelMaterial.fbs    mmat FlatBuffers schema
     workspace_lib.ps1         WTB 与 mmat 共享读写逻辑
     explore_strings_zh.json   探索器中文文案
@@ -128,5 +133,5 @@ GBFR_modtools/
 - 自动解码和封回 `data/texture` 下的 WTB `.texture`。
 - 自动解码和编码角色 `vars/*.mmat`。
 - 自动从 Granite GTS/GTP 提取可用的 `albd/msk1/msk2/nrml`，并转换为对应格式的 DDS。
-- Granite DDS 当前只用于编辑与后续转换，不自动封回 GTS/GTP 或新建 WTB `.texture`。
+- 为没有普通贴图原件的 Granite DDS 选择性新建 WTB `.texture`，不修改 GTS/GTP。
 - WTB 构建以 `source` 原件为模板，按槽位替换 DDS，并保留未编辑槽位。
