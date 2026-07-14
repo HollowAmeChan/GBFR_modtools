@@ -2,6 +2,8 @@
 
 用于建立《碧蓝幻想：Relink》角色资源工作区，并把编辑后的 DDS 与 mmat JSON 构建为可直接安装的 Mod 文件。
 
+模型与骨架的 Blender 编辑、导出和安装流程见 [`模型与骨架Mod制作流程.md`](模型与骨架Mod制作流程.md)。
+
 ## 准备
 
 下载 FlatBuffers 的 Windows 版 `flatc.exe`，放到：
