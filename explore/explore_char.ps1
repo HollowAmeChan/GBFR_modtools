@@ -341,6 +341,71 @@ L ""
             }
         }
 
+        # Mot ID range analysis
+        if ($motFiles.Count -gt 0) {
+            $MOT_CAT = @{
+                0x00 = $S.mot_cat_0000; 0x05 = $S.mot_cat_0500
+                0x06 = $S.mot_cat_0600; 0x0a = $S.mot_cat_0a00
+                0x0b = $S.mot_cat_0b00; 0x18 = $S.mot_cat_1800
+                0x30 = $S.mot_cat_3000; 0x31 = $S.mot_cat_3100
+                0x32 = $S.mot_cat_3200; 0x33 = $S.mot_cat_3300
+                0x34 = $S.mot_cat_3400; 0x35 = $S.mot_cat_3500
+                0x3a = $S.mot_cat_3a00; 0x3f = $S.mot_cat_3f00
+                0xa5 = $S.mot_cat_a500; 0xb0 = $S.mot_cat_b000
+                0xb5 = $S.mot_cat_b500; 0xb6 = $S.mot_cat_b600
+                0xba = $S.mot_cat_ba00; 0xbb = $S.mot_cat_bb00
+                0xe3 = $S.mot_cat_e300; 0xe4 = $S.mot_cat_e400
+                0xea = $S.mot_cat_ea00; 0xeb = $S.mot_cat_eb00
+                0xec = $S.mot_cat_ec00; 0xed = $S.mot_cat_ed00
+                0xfa = $S.mot_cat_fa00
+            }
+
+            L ""
+            L "$($S.mot_id_breakdown)"
+            L ""
+            L "| ID范围 | 数量 | 总KB | 分类推断 |"
+            L "|---|---|---|---|"
+
+            $motGroups = $motFiles | Group-Object {
+                $m = [regex]::Match($_.BaseName, "_([0-9a-f]{4})$")
+                if ($m.Success) { "0x{0:x2}" -f [Convert]::ToInt32($m.Groups[1].Value.Substring(0,2),16) }
+                else { "other" }
+            } | Sort-Object {
+                if ($_.Name -eq "other") { 0xffff }
+                else { [Convert]::ToInt32(($_.Name -replace '^0x',''), 16) }
+            }
+
+            foreach ($g in $motGroups) {
+                $hiKey  = if ($g.Name -eq "other") { -1 } else { [Convert]::ToInt32(($g.Name -replace '^0x',''), 16) }
+                $cat    = if ($MOT_CAT.ContainsKey($hiKey)) { $MOT_CAT[$hiKey] } else { $S.mot_cat_unknown }
+                $kb     = [int](($g.Group | Measure-Object Length -Sum).Sum / 1024)
+                $sorted = @($g.Group | Sort-Object Name)
+                $id0    = [regex]::Match($sorted[0].BaseName,   "_([0-9a-f]{4})$").Groups[1].Value
+                $id1    = [regex]::Match($sorted[-1].BaseName,  "_([0-9a-f]{4})$").Groups[1].Value
+                L "| ``$($g.Name)xx`` ($id0~$id1) | $($g.Count) | $kb | $cat |"
+            }
+
+            L ""
+            L "> $($S.mot_note_ids)"
+            L "> $($S.mot_note_sba)"
+            L "> $($S.mot_note_ed)"
+
+            L ""
+            L "$($S.mot_top_largest)"
+            L ""
+            L "| $($S.col_file) | $($S.col_size) | 分类 |"
+            L "|---|---|---|"
+            $top10 = $motFiles | Sort-Object Length -Descending | Select-Object -First 10
+            foreach ($t in $top10) {
+                $m2   = [regex]::Match($t.BaseName, "_([0-9a-f]{4})$")
+                $cat2 = if ($m2.Success) {
+                    $hi2 = [Convert]::ToInt32($m2.Groups[1].Value.Substring(0,2),16)
+                    if ($MOT_CAT.ContainsKey($hi2)) { $MOT_CAT[$hi2] } else { $S.mot_cat_unknown }
+                } else { $S.mot_cat_unknown }
+                L "| ``$($t.Name)`` | $(Format-FileSize $t.Length) | $cat2 |"
+            }
+        }
+
         # Cloth Physics
         $clothDir = Join-Path $plDir "cloth"
         L ""
