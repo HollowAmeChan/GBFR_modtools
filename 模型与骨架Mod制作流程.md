@@ -68,15 +68,26 @@ data/model/pl/pl1400/pl1400.skeleton
 
 ## 4. 插件导出结果
 
-插件会生成：
+导出时需要在插件中选择一个已经包含同名 `.minfo` 的文件夹。例如导出 `pl1400` 时，所选目录中必须先存在：
 
 ```text
-_Exported_MInfo/
-  pl1400.mmesh
+工作目录/
   pl1400.minfo
-  pl1400.skeleton
-  pl1400.json
 ```
+
+插件会读取这份原始 `.minfo` 作为模型描述模板。导出完成后，它会自动在所选目录下创建 `_Exported_MInfo`，不需要用户提前创建该文件夹：
+
+```text
+工作目录/
+  pl1400.minfo               原始模板
+  _Exported_MInfo/
+    pl1400.mmesh
+    pl1400.minfo             合并 Blender 网格信息后的新文件
+    pl1400.skeleton
+    pl1400.json
+```
+
+如果导出位置和原始 `.minfo` 不在同一目录，插件的 MInfo 转换步骤会直接报错。
 
 各文件职责：
 
@@ -107,6 +118,7 @@ _Exported_MInfo/
 ```text
 Blender 网格
   -> 生成新的 mmesh 与网格布局 JSON
+  -> 从所选目录读取同名原始 minfo
   -> flatc 将原始 minfo 解码为 JSON
   -> 用 Blender 导出的网格布局替换原 minfo 对应字段
   -> flatc 将合并后的 JSON 编码为新 minfo
