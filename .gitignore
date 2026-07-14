@@ -3,3 +3,5 @@ explore_output/
 
 # Third-party runtime binary (see README)
 _lib/flatc.exe
+_lib/GraniteTextureReader.exe
+_lib/texconv.exe

@@ -10,6 +10,8 @@ $ErrorActionPreference = "Stop"
 
 $libRoot = Join-Path $PSScriptRoot "_lib"
 $flatcExe = Join-Path $libRoot "flatc.exe"
+$graniteExe = Join-Path $libRoot "GraniteTextureReader.exe"
+$texconvExe = Join-Path $libRoot "texconv.exe"
 $schemaFbs = Join-Path $libRoot "MMat_ModelMaterial.fbs"
 . (Join-Path $libRoot "workspace_lib.ps1")
 
@@ -284,6 +286,183 @@ function Initialize-WorkspaceArtifacts {
         MaterialCount = $materials.Count
         ErrorCount = $errors.Count
         Errors = $errors
+    }
+}
+
+function Get-GraniteTextureReferences {
+    $references = @{}
+    $jsonFiles = @(Get-ChildItem (Join-Path $unpackRoot "data\model") -Recurse -Filter "*.mmat.json" -File -ErrorAction SilentlyContinue)
+
+    foreach ($jsonFile in $jsonFiles) {
+        try {
+            $mmat = ConvertFrom-Json ([IO.File]::ReadAllText($jsonFile.FullName, [Text.Encoding]::UTF8))
+            foreach ($entry in @($mmat.Entries1)) {
+                if ($null -eq $entry -or -not ($entry.PSObject.Properties.Name -contains "A4") -or $null -eq $entry.A4) { continue }
+                if (-not ($entry.A4.PSObject.Properties.Name -contains "Unk")) { continue }
+
+                $names = if ($entry.PSObject.Properties.Name -contains "A2") {
+                    @($entry.A2 | Where-Object {
+                        $null -ne $_ -and $_.Name -match "_(albd|msk1|msk2|nrml)$"
+                    } | ForEach-Object { [string]$_.Name })
+                } else { @() }
+
+                foreach ($hashValue in @($entry.A4.Unk)) {
+                    $hash = ([string]$hashValue).ToLowerInvariant()
+                    if ($hash -notmatch "^[0-9a-f]{64}$") { continue }
+                    if (-not $references.ContainsKey($hash)) {
+                        $references[$hash] = [PSCustomObject]@{
+                            Hash = $hash
+                            Names = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+                            Sources = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+                        }
+                    }
+                    foreach ($name in $names) { $references[$hash].Names.Add($name) | Out-Null }
+                    $references[$hash].Sources.Add($jsonFile.FullName.Substring($unpackRoot.Length + 1)) | Out-Null
+                }
+            }
+        } catch {
+            Write-Host "  [warn] Granite reference parse failed: $($jsonFile.Name)" -ForegroundColor DarkYellow
+        }
+    }
+
+    return @($references.Values | Sort-Object Hash)
+}
+
+function Expand-GraniteTextures {
+    $references = @(Get-GraniteTextureReferences)
+    $decodedGroups = [System.Collections.Generic.List[PSCustomObject]]::new()
+    $missingGroups = [System.Collections.Generic.List[PSCustomObject]]::new()
+    $decodeErrors = [System.Collections.Generic.List[string]]::new()
+    $decodedFiles = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $graniteRoot = Join-Path $dataRoot "granite"
+    $tempRoot = Join-Path $outDir ".granite_tmp"
+
+    if ($references.Count -eq 0) {
+        return [PSCustomObject]@{ ReferenceCount = 0; GroupCount = 0; FileCount = 0; MissingCount = 0; ErrorCount = 0 }
+    }
+    if (-not (Test-Path -LiteralPath $graniteExe) -or -not (Test-Path -LiteralPath $texconvExe)) {
+        $missing = @()
+        if (-not (Test-Path -LiteralPath $graniteExe)) { $missing += "GraniteTextureReader.exe" }
+        if (-not (Test-Path -LiteralPath $texconvExe)) { $missing += "texconv.exe" }
+        $decodeErrors.Add("Missing tool(s) in _lib: $($missing -join ', ')")
+    } elseif (-not (Test-Path -LiteralPath $graniteRoot)) {
+        $decodeErrors.Add("Granite data directory not found: $graniteRoot")
+    } else {
+        try {
+            foreach ($res in @("2k", "4k")) {
+                $gtsRoot = Join-Path $graniteRoot "$res\gts"
+                if (-not (Test-Path -LiteralPath $gtsRoot)) {
+                    foreach ($reference in $references) {
+                        $missingGroups.Add([PSCustomObject]@{
+                            Hash = $reference.Hash; Resolution = $res; Reason = "gts directory not found"
+                            Expected = @($reference.Names | Sort-Object); Sources = @($reference.Sources | Sort-Object)
+                        })
+                    }
+                    continue
+                }
+
+                Write-Host "  [scan] data/granite/$res/gts" -ForegroundColor Gray
+                $gtpIndex = @{}
+                foreach ($gtp in (Get-ChildItem -LiteralPath $gtsRoot -Recurse -Filter "*.gtp" -File -ErrorAction SilentlyContinue | Sort-Object FullName)) {
+                    if ($gtp.BaseName -match "^\d+_([0-9a-f]{64})$") {
+                        $hash = $Matches[1].ToLowerInvariant()
+                        if (-not $gtpIndex.ContainsKey($hash)) { $gtpIndex[$hash] = $gtp }
+                    }
+                }
+
+                $groupIndex = 0
+                foreach ($reference in $references) {
+                    $groupIndex++
+                    Write-Progress -Activity $S.granite_extracting -Status "${res}: $groupIndex/$($references.Count)" -PercentComplete ([int](100 * $groupIndex / $references.Count))
+                    if (-not $gtpIndex.ContainsKey($reference.Hash)) {
+                        $missingGroups.Add([PSCustomObject]@{
+                            Hash = $reference.Hash; Resolution = $res; Reason = "gtp not found"
+                            Expected = @($reference.Names | Sort-Object); Sources = @($reference.Sources | Sort-Object)
+                        })
+                        continue
+                    }
+
+                    $gtp = $gtpIndex[$reference.Hash]
+                    $gtsStem = $gtp.BaseName.Substring(0, $gtp.BaseName.IndexOf('_'))
+                    $gtsPath = Join-Path $gtp.DirectoryName "$gtsStem.gts"
+                    if (-not (Test-Path -LiteralPath $gtsPath)) {
+                        $missingGroups.Add([PSCustomObject]@{
+                            Hash = $reference.Hash; Resolution = $res; Reason = "gts not found"
+                            Expected = @($reference.Names | Sort-Object); Sources = @($reference.Sources | Sort-Object)
+                        })
+                        continue
+                    }
+
+                    $tempDir = Join-Path $tempRoot "$res\$($reference.Hash)"
+                    New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
+                    try {
+                        $toolOutput = @(& $graniteExe extract -t $gtsPath -f $reference.Hash -o $tempDir -l -1 2>&1)
+                        $tgaFiles = @(Get-ChildItem -LiteralPath $tempDir -Filter "*.tga" -File -ErrorAction SilentlyContinue | Where-Object {
+                            $_.BaseName -match "_(albd|msk1|msk2|nrml)$"
+                        })
+                        if ($tgaFiles.Count -eq 0) {
+                            $message = ($toolOutput | Select-Object -Last 1) -join " "
+                            if (-not $message) { $message = "no supported layers extracted" }
+                            $missingGroups.Add([PSCustomObject]@{
+                                Hash = $reference.Hash; Resolution = $res; Reason = $message
+                                Expected = @($reference.Names | Sort-Object); Sources = @($reference.Sources | Sort-Object)
+                            })
+                            continue
+                        }
+
+                        $ddsDir = Join-Path $unpackRoot "data\granite\$res"
+                        New-Item -ItemType Directory -Force -Path $ddsDir | Out-Null
+                        $groupFiles = [System.Collections.Generic.List[string]]::new()
+                        foreach ($tga in $tgaFiles) {
+                            $slot = [regex]::Match($tga.BaseName, "_(albd|msk1|msk2|nrml)$").Groups[1].Value
+                            $format = switch ($slot) {
+                                "albd" { "BC7_UNORM_SRGB" }
+                                "nrml" { "BC5_UNORM" }
+                                default { "BC7_UNORM" }
+                            }
+                            $ddsPath = Join-Path $ddsDir ($tga.BaseName + ".dds")
+                            if (-not (Test-Path -LiteralPath $ddsPath)) {
+                                $convertOutput = @(& $texconvExe -nologo -y -m 0 -dx10 -f $format -o $ddsDir $tga.FullName 2>&1)
+                                if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $ddsPath)) {
+                                    throw "texconv failed for $($tga.Name): $(($convertOutput | Select-Object -Last 1) -join ' ')"
+                                }
+                            }
+                            $relativeDds = ConvertTo-WorkspacePath ($ddsPath.Substring($outDir.Length + 1))
+                            $groupFiles.Add($relativeDds)
+                            $decodedFiles.Add($relativeDds) | Out-Null
+                        }
+
+                        $decodedGroups.Add([PSCustomObject]@{
+                            Hash = $reference.Hash
+                            Resolution = $res
+                            Gts = ConvertTo-WorkspacePath ($gtsPath.Substring($dataRootPrefix.Length))
+                            Expected = @($reference.Names | Sort-Object)
+                            Sources = @($reference.Sources | Sort-Object)
+                            Files = @($groupFiles | Sort-Object -Unique)
+                        })
+                    } catch {
+                        $decodeErrors.Add("$res/$($reference.Hash): $($_.Exception.Message)")
+                    }
+                }
+                Write-Progress -Activity $S.granite_extracting -Completed
+            }
+        } finally {
+            if (Test-Path -LiteralPath $tempRoot) { Remove-Item -LiteralPath $tempRoot -Recurse -Force }
+        }
+    }
+
+    $workspace = ConvertFrom-Json ([IO.File]::ReadAllText($workspaceJson, [Text.Encoding]::UTF8))
+    $workspace | Add-Member -NotePropertyName GraniteTextures -NotePropertyValue @($decodedGroups) -Force
+    $workspace | Add-Member -NotePropertyName GraniteMissing -NotePropertyValue @($missingGroups) -Force
+    $workspace | Add-Member -NotePropertyName GraniteDecodeErrors -NotePropertyValue @($decodeErrors) -Force
+    [IO.File]::WriteAllText($workspaceJson, ($workspace | ConvertTo-Json -Depth 10), [System.Text.UTF8Encoding]::new($false))
+
+    return [PSCustomObject]@{
+        ReferenceCount = $references.Count
+        GroupCount = $decodedGroups.Count
+        FileCount = $decodedFiles.Count
+        MissingCount = $missingGroups.Count
+        ErrorCount = $decodeErrors.Count
     }
 }
 
@@ -678,6 +857,24 @@ if (Test-Path $texRoot) {
 
 $copyResult = Copy-DiscoveredSources
 $artifactResult = Initialize-WorkspaceArtifacts
+$graniteResult = Expand-GraniteTextures
+
+L ""
+L "### $($S.granite_title)"
+L ""
+L "$($S.granite_path_note)"
+L ""
+L "| $($S.col_field) | $($S.col_value) |"
+L "|---|---|"
+L "| **$($S.granite_references)** | $($graniteResult.ReferenceCount) |"
+L "| **$($S.granite_groups)** | $($graniteResult.GroupCount) |"
+L "| **$($S.granite_files)** | $($graniteResult.FileCount) |"
+L "| **$($S.granite_missing)** | $($graniteResult.MissingCount) |"
+if ($graniteResult.ErrorCount -gt 0) {
+    L "| **$($S.decode_failed)** | $($graniteResult.ErrorCount) |"
+}
+L ""
+L "> $($S.granite_format_note)"
 
 # ================================================================
 # Summary
@@ -693,8 +890,9 @@ L "| **$($S.workspace_path)** | ``$outDir`` |"
 L "| **$($S.copy_count)** | $($copyResult.Copied) |"
 L "| **$($S.copy_total_size)** | $(Format-FileSize $copyResult.TotalBytes) |"
 L "| **$($S.decoded_textures)** | $($artifactResult.TextureCount) |"
+L "| **$($S.decoded_granite)** | $($graniteResult.FileCount) |"
 L "| **$($S.decoded_materials)** | $($artifactResult.MaterialCount) |"
-L "| **$($S.decode_failed)** | $($artifactResult.ErrorCount) |"
+L "| **$($S.decode_failed)** | $($artifactResult.ErrorCount + $graniteResult.ErrorCount) |"
 if ($copyResult.Failed.Count -gt 0) {
     L "| **$($S.copy_failed)** | $($copyResult.Failed.Count) |"
     L ""
@@ -761,8 +959,12 @@ if ($copyResult.Failed.Count -gt 0) {
 }
 Write-Host "$($S.decode_done): texture $($artifactResult.TextureCount), mmat $($artifactResult.MaterialCount)" -ForegroundColor Green
 Write-Host "  $unpackRoot" -ForegroundColor Green
+Write-Host "$($S.granite_done): $($graniteResult.FileCount) DDS, $($graniteResult.MissingCount) $($S.granite_missing)" -ForegroundColor Green
 if ($artifactResult.ErrorCount -gt 0) {
     Write-Host "$($S.decode_failed): $($artifactResult.ErrorCount)" -ForegroundColor Yellow
+}
+if ($graniteResult.ErrorCount -gt 0) {
+    Write-Host "$($S.decode_failed): Granite $($graniteResult.ErrorCount)" -ForegroundColor Yellow
 }
 Write-Host "$($S.workspace_ready)" -ForegroundColor Green
 Write-Host "  $outDir" -ForegroundColor Green

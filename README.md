@@ -6,13 +6,19 @@
 
 ## 准备
 
-下载 FlatBuffers 的 Windows 版 `flatc.exe`，放到：
+运行时工具统一放在 `_lib/`，这些第三方 EXE 不提交到仓库：
 
 ```text
 _lib/flatc.exe
+_lib/GraniteTextureReader.exe
+_lib/texconv.exe
 ```
 
-仓库已经包含对应的 `MMat_ModelMaterial.fbs`。当前流程不依赖 GraniteTextureReader 或 nier_cli。
+- `flatc.exe`：从 [FlatBuffers Releases](https://github.com/google/flatbuffers/releases) 下载 Windows 版。
+- `GraniteTextureReader.exe`：使用已验证的 [1.1.5](https://github.com/Nenkai/GraniteTextureReader/releases/tag/1.1.5)。
+- `texconv.exe`：使用已验证的 [DirectXTex May 2026](https://github.com/microsoft/DirectXTex/releases/tag/may2026)。
+
+仓库已经包含对应的 `MMat_ModelMaterial.fbs`。当前流程不依赖 nier_cli。
 
 ## 1. 探索角色资源
 
@@ -29,7 +35,7 @@ explore_output/
   manifest.md                 资源报告，也是构建器入口
   workspace.json              路径映射与初始文件哈希
   source/data/                原始资源副本，只作封包模板
-  unpack/data/                可编辑的 DDS 与 *.mmat.json
+  unpack/data/                可编辑的普通贴图、Granite DDS 与 *.mmat.json
   build/data/                 最终 Mod 输出
 ```
 
@@ -37,8 +43,17 @@ explore_output/
 
 - 按游戏的 `data/...` 路径复制找到的资源。
 - 将 `data/texture/{2k,4k}/*.texture` 解码为 DDS。
+- 根据 mmat 的 `A4` 哈希，从 `data/granite/{2k,4k}/gts` 提取 `albd/msk1/msk2/nrml` 并转换为 DDS。
 - 将 `data/model/**/vars/*.mmat` 解码为 `*.mmat.json`。
 - 记录中间态 SHA-256，用于识别真实修改。
+
+Granite DDS 输出到 `unpack/data/granite/{2k,4k}/`，格式为：
+
+- `albd`：BC7 sRGB，DX10 头。
+- `msk1`、`msk2`：BC7 线性，DX10 头。
+- `nrml`：BC5 UNORM 线性，DX10 头。
+
+转换时会生成完整 mip 链。某些 A4 哈希在当前游戏数据中没有对应 GTP，探索器会把它们记入 `workspace.json` 的 `GraniteMissing`，其余贴图继续处理。
 
 正式网格统一从 `data/model_streaming/lod*/` 收集。为了让 Blender 导入器工作，用户有时会把 LOD0 `.mmesh` 手动复制到 `.minfo` 同目录；探索器会在报告中标记这种辅助副本，但不会将它复制到 `source`，避免与正式流式网格重复。
 
@@ -53,12 +68,14 @@ explore_output/
 ```text
 unpack/data/texture/2k/foo_0.dds
 unpack/data/texture/4k/foo_0.dds
+unpack/data/granite/2k/foo_albd.dds
+unpack/data/granite/4k/foo_nrml.dds
 unpack/data/model/pl/pl1400/vars/0.mmat.json
 ```
 
 `source/` 是不可编辑的原始模板。删除 `unpack/` 中不需要的中间文件，会让它退出构建候选清单。
 
-要把 Granite 流式贴图改为普通 `.texture` 时，可在对应 `.mmat.json` 材质条目中删除 `A4`，同时保证 `A2.Name` 对应的普通贴图会构建到 `data/texture/{2k,4k}/`。
+Granite DDS 是可编辑中间态，但当前构建器不会直接把它封回 GTS/GTP，也不能把 GraniteTextureReader 输出的 TGA 直接封成 `.texture`。要把 Granite 流式贴图改为普通 `.texture`，还需要为目标 DDS 建立 WTB 模板并构建到 `data/texture/{2k,4k}/`，同时在对应 `.mmat.json` 材质条目中删除 `A4`。
 
 ## 3. 构建 Mod
 
@@ -95,7 +112,9 @@ GBFR_modtools/
   README.md
 
   _lib/
-    flatc.exe                 第三方运行时，自行下载
+    flatc.exe                 mmat FlatBuffers 编解码
+    GraniteTextureReader.exe Granite GTS/GTP 图层提取
+    texconv.exe               TGA 到指定 BC 格式 DDS 转换
     MMat_ModelMaterial.fbs    mmat FlatBuffers schema
     workspace_lib.ps1         WTB 与 mmat 共享读写逻辑
     explore_strings_zh.json   探索器中文文案
@@ -108,5 +127,6 @@ GBFR_modtools/
 
 - 自动解码和封回 `data/texture` 下的 WTB `.texture`。
 - 自动解码和编码角色 `vars/*.mmat`。
-- Granite GTS/GTP 流式贴图目前只在 manifest 中记录引用，不自动解码或封包。
+- 自动从 Granite GTS/GTP 提取可用的 `albd/msk1/msk2/nrml`，并转换为对应格式的 DDS。
+- Granite DDS 当前只用于编辑与后续转换，不自动封回 GTS/GTP 或新建 WTB `.texture`。
 - WTB 构建以 `source` 原件为模板，按槽位替换 DDS，并保留未编辑槽位。
