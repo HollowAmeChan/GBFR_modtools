@@ -38,6 +38,10 @@ explore_output/
 - 将 `data/model/**/vars/*.mmat` 解码为 `*.mmat.json`。
 - 记录中间态 SHA-256，用于识别真实修改。
 
+正式网格统一从 `data/model_streaming/lod*/` 收集。为了让 Blender 导入器工作，用户有时会把 LOD0 `.mmesh` 手动复制到 `.minfo` 同目录；探索器会在报告中标记这种辅助副本，但不会将它复制到 `source`，避免与正式流式网格重复。
+
+角色面部分为两套资源：`fn` 是 NPC 面部/头部模型，`fp` 是玩家面部/头部模型。这里的 `fn` 不是“面部法线”缩写；两者的正式 `.mmesh` 都位于 `model_streaming`。
+
 `explore_output` 一次只保存一个角色。探索另一个角色会重建该目录；需要保留时，先复制并重命名整个工作区。
 
 ## 2. 编辑

@@ -321,7 +321,7 @@ function Scan-ModelDir([string]$dp, [string]$dc, [string]$sectionLabel) {
     L ""
     L "| $($S.col_file) | $($S.col_size) | $($S.col_desc) |"
     L "|------|------|-------------|"
-    foreach ($ext in @(".minfo",".mmesh",".skeleton",".sop")) {
+    foreach ($ext in @(".minfo",".skeleton",".sop")) {
         $f = Join-Path $dir "$dc$ext"
         if (Test-Path $f) {
             Add-SourceFile $f
