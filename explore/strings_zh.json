@@ -163,5 +163,11 @@
   "mot_cat_unknown": "未知分组",
   "mot_note_ids": "注：ID 为十六进制，文件内无语义名称，分类依 GBFR 社区约定推断。",
   "mot_note_sba": "0x18xx 范围通常为 Skybound Art 奥义动画（帧数最多，文件最大）。",
-  "mot_note_ed": "0xedxx 范围为 Event Demo 过场动画，部分可能跨角色共用骨架。"
+  "mot_note_ed": "0xedxx 范围为 Event Demo 过场动画，部分可能跨角色共用骨架。",
+  "copy_path": "源资源副本",
+  "copy_count": "复制文件数",
+  "copy_total_size": "复制总大小",
+  "copy_done": "已按 data 原路径复制源资源",
+  "copy_files": "个文件",
+  "copy_failed": "复制失败"
 }

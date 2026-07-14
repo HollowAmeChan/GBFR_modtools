@@ -146,9 +146,67 @@ $scriptDir = $PSScriptRoot
 $outDir    = Join-Path $scriptDir "explore_output"
 if (-not (Test-Path $outDir)) { New-Item -ItemType Directory -Force -Path $outDir | Out-Null }
 $outMd     = Join-Path $outDir "$($charId)_manifest.md"
+$copyRoot  = Join-Path $outDir "$($charId)_sources"
 $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 $lines     = [System.Collections.Generic.List[string]]::new()
 function L([string]$s = "") { $lines.Add($s) }
+
+# Collect only files that the explorer actually discovers. They are copied
+# after scanning so the output can preserve paths starting at data/.
+$sourceFiles   = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+$dataRootFull  = [IO.Path]::GetFullPath($dataRoot).TrimEnd([char[]]@('\','/'))
+$dataRootPrefix = $dataRootFull + [IO.Path]::DirectorySeparatorChar
+
+function Add-SourceFile([object]$path) {
+    if ($null -eq $path) { return }
+    $candidate = if ($path -is [IO.FileSystemInfo]) { $path.FullName } else { [string]$path }
+    if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { return }
+
+    $fullPath = [IO.Path]::GetFullPath($candidate)
+    if ($fullPath.StartsWith($dataRootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        $sourceFiles.Add($fullPath) | Out-Null
+    }
+}
+
+function Add-SourceFiles([object[]]$files) {
+    foreach ($file in @($files)) { Add-SourceFile $file }
+}
+
+function Copy-DiscoveredSources {
+    if (Test-Path -LiteralPath $copyRoot) {
+        Remove-Item -LiteralPath $copyRoot -Recurse -Force
+    }
+
+    $dataOut = Join-Path $copyRoot "data"
+    New-Item -ItemType Directory -Force -Path $dataOut | Out-Null
+
+    $copied = 0
+    $totalBytes = [long]0
+    $failed = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($source in ($sourceFiles | Sort-Object)) {
+        $relative = $source.Substring($dataRootPrefix.Length)
+        $dest = Join-Path $dataOut $relative
+        $destDir = [IO.Path]::GetDirectoryName($dest)
+        if (-not (Test-Path -LiteralPath $destDir)) {
+            New-Item -ItemType Directory -Force -Path $destDir | Out-Null
+        }
+
+        try {
+            [IO.File]::Copy($source, $dest, $true)
+            $copied++
+            $totalBytes += (Get-Item -LiteralPath $source).Length
+        } catch {
+            $failed.Add("$source -- $($_.Exception.Message)")
+        }
+    }
+
+    return [PSCustomObject]@{
+        Copied     = $copied
+        TotalBytes = $totalBytes
+        Failed     = $failed
+    }
+}
 
 # Markdown header
 L "# $charId $($S.title_suffix)"
@@ -187,6 +245,7 @@ function Scan-ModelDir([string]$dp, [string]$dc, [string]$sectionLabel) {
     foreach ($ext in @(".minfo",".mmesh",".skeleton",".sop")) {
         $f = Join-Path $dir "$dc$ext"
         if (Test-Path $f) {
+            Add-SourceFile $f
             $sz     = Format-FileSize (Get-Item $f).Length
             $extKey = $ext.TrimStart(".")
             $d      = if ($DESC.ContainsKey($extKey)) { $DESC[$extKey] } else { $ext }
@@ -198,6 +257,7 @@ function Scan-ModelDir([string]$dp, [string]$dc, [string]$sectionLabel) {
     if (Test-Path $varsDir) {
         $mmats = Get-ChildItem $varsDir -Filter "*.mmat" | Sort-Object Name
         foreach ($mmat in $mmats) {
+            Add-SourceFile $mmat
             $idx  = try { [int][IO.Path]::GetFileNameWithoutExtension($mmat.Name) } catch { -1 }
             $sz   = Format-FileSize $mmat.Length
             $slot = if ($MMAT_SLOT.ContainsKey($idx)) { $MMAT_SLOT[$idx] } else { "$($S.mat_variant) $idx" }
@@ -236,6 +296,7 @@ function Scan-ModelDir([string]$dp, [string]$dc, [string]$sectionLabel) {
         L "| $($S.col_file) | $($S.col_size) | $($S.col_desc) |"
         L "|------|------|------|"
         foreach ($e in $extras) {
+            Add-SourceFile $e
             $extKey = $e.Extension.TrimStart(".")
             $d = if ($DESC.ContainsKey($extKey)) { $DESC[$extKey] } else { $e.Extension }
             L "| ``$($e.Name)`` | $(Format-FileSize $e.Length) | $d |"
@@ -273,6 +334,7 @@ if (Test-Path $lodRoot) {
         foreach ($rp in $relPrefixes) {
             $f = Join-Path $lodDir.FullName "$rp.mmesh"
             if (Test-Path $f) {
+                Add-SourceFile $f
                 $sz    = Format-FileSize (Get-Item $f).Length
                 $rpPfx = [regex]::Match($rp, "^[a-z]+").Value
                 $d     = if ($MMESH_DESC.ContainsKey($rpPfx)) { $MMESH_DESC[$rpPfx] } else { "$rpPfx mesh" }
@@ -304,6 +366,10 @@ L ""
         $bxmFiles   = @(Get-ChildItem $plDir -Filter "*.bxm"  -File)
         $lstFiles   = @(Get-ChildItem $plDir -Filter "*.lst"  -File)
         $otherFiles = @(Get-ChildItem $plDir -File | Where-Object { $_.Extension -notin @(".mot",".bxm",".lst") })
+        Add-SourceFiles $motFiles
+        Add-SourceFiles $bxmFiles
+        Add-SourceFiles $lstFiles
+        Add-SourceFiles $otherFiles
 
         L "| $($S.col_type) | $($S.col_count) | $($S.col_total) | $($S.col_desc) |"
         L "|------|-------|----------|-------------|"
@@ -422,6 +488,7 @@ L ""
             L "| $($S.col_file) | $($S.col_size) | $($S.col_desc) |"
             L "|------|------|------|"
             foreach ($cf in $clothFiles) {
+                Add-SourceFile $cf
                 $sz = Format-FileSize $cf.Length
                 $d = switch -Regex ($cf.Name) {
                     "_clp\.bxm$"   { $DESC["clp"] }
@@ -476,6 +543,7 @@ if (Test-Path $texRoot) {
         foreach ($sid in $searchIds) {
             $files = Get-ChildItem $resDir -Filter "*$sid*.texture" -File -ErrorAction SilentlyContinue
             foreach ($f in $files) {
+                Add-SourceFile $f
                 $allTex.Add([PSCustomObject]@{
                     Res      = $res
                     Name     = $f.Name
@@ -531,6 +599,8 @@ if (Test-Path $texRoot) {
     L "> $($S.tex_not_found): ``$texRoot``"
 }
 
+$copyResult = Copy-DiscoveredSources
+
 # ================================================================
 # Summary
 # ================================================================
@@ -539,7 +609,16 @@ L "---"
 L ""
 L "## $H_SUMMARY"
 L ""
-L ""
+L "| $($S.col_field) | $($S.col_value) |"
+L "|---|---|"
+L "| **$($S.copy_path)** | ``$copyRoot`` |"
+L "| **$($S.copy_count)** | $($copyResult.Copied) |"
+L "| **$($S.copy_total_size)** | $(Format-FileSize $copyResult.TotalBytes) |"
+if ($copyResult.Failed.Count -gt 0) {
+    L "| **$($S.copy_failed)** | $($copyResult.Failed.Count) |"
+    L ""
+    foreach ($failure in $copyResult.Failed) { L "> $failure" }
+}
 L ""
 L "---"
 L "*$($S.generated_by)*"
@@ -593,6 +672,12 @@ if ($prefix -eq "pl") {
 Write-Host ""
 Write-Host $S.report_saved -ForegroundColor Green
 Write-Host "  $outMd" -ForegroundColor Green
+Write-Host ""
+Write-Host "$($S.copy_done): $($copyResult.Copied) $($S.copy_files) ($(Format-FileSize $copyResult.TotalBytes))" -ForegroundColor Green
+Write-Host "  $copyRoot" -ForegroundColor Green
+if ($copyResult.Failed.Count -gt 0) {
+    Write-Host "$($S.copy_failed): $($copyResult.Failed.Count)" -ForegroundColor Yellow
+}
 Write-Host ""
 
 Finish 0
