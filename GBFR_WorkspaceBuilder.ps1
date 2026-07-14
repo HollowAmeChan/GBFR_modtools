@@ -6,10 +6,11 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$flatcExe = Join-Path $PSScriptRoot "flatc.exe"
-$schemaFbs = Join-Path $PSScriptRoot "MMat_ModelMaterial.fbs"
-$B = ConvertFrom-Json ([IO.File]::ReadAllText((Join-Path $PSScriptRoot "builder_strings_zh.json"), [Text.Encoding]::UTF8))
-. (Join-Path $PSScriptRoot "workspace_lib.ps1")
+$libRoot = Join-Path $PSScriptRoot "_lib"
+$flatcExe = Join-Path $libRoot "flatc.exe"
+$schemaFbs = Join-Path $libRoot "MMat_ModelMaterial.fbs"
+$B = ConvertFrom-Json ([IO.File]::ReadAllText((Join-Path $libRoot "builder_strings_zh.json"), [Text.Encoding]::UTF8))
+. (Join-Path $libRoot "workspace_lib.ps1")
 
 function Get-WorkspaceOperations([string]$Manifest) {
     if (-not (Test-Path -LiteralPath $Manifest -PathType Leaf)) {

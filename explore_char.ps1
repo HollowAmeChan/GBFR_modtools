@@ -1,20 +1,20 @@
 ﻿# explore_char.ps1
 # Explore all assets related to a GBFR character starting from its .minfo file
 # Usage: drag a .minfo file onto explore_char.bat
-# All user-visible strings are loaded from strings_zh.json at runtime
+# All user-visible strings are loaded from _lib/explore_strings_zh.json at runtime
 
 param([string]$MinfoPath = "")
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$toolRoot = Split-Path $PSScriptRoot -Parent
-$flatcExe = Join-Path $toolRoot "flatc.exe"
-$schemaFbs = Join-Path $toolRoot "MMat_ModelMaterial.fbs"
-. (Join-Path $toolRoot "workspace_lib.ps1")
+$libRoot = Join-Path $PSScriptRoot "_lib"
+$flatcExe = Join-Path $libRoot "flatc.exe"
+$schemaFbs = Join-Path $libRoot "MMat_ModelMaterial.fbs"
+. (Join-Path $libRoot "workspace_lib.ps1")
 
 # Load Chinese strings from JSON at runtime (no parse-time encoding issues)
-$stringsFile = Join-Path $PSScriptRoot "strings_zh.json"
+$stringsFile = Join-Path $libRoot "explore_strings_zh.json"
 $S = ConvertFrom-Json ([IO.File]::ReadAllText($stringsFile, [Text.Encoding]::UTF8))
 
 # Section headers via codepoints
