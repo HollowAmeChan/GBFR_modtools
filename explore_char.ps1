@@ -386,7 +386,6 @@ function Scan-ModelDir([string]$dp, [string]$dc, [string]$sectionLabel) {
 Scan-ModelDir $prefix $charId $S.sec_main
 if ($prefix -eq "pl") {
     Scan-ModelDir "fp" "fp$numId" $S.sec_fp
-    Scan-ModelDir "np" "np$numId" $S.sec_np
     Scan-ModelDir "wp" "wp$numId" $S.sec_wp
 }
 
@@ -408,7 +407,7 @@ if (Test-Path $lodRoot) {
     foreach ($lodDir in (Get-ChildItem $lodRoot -Directory | Sort-Object Name)) {
         $lod         = $lodDir.Name
         $relPrefixes = @($charId)
-        if ($prefix -eq "pl") { $relPrefixes += @("fp$numId","np$numId","wp$numId") }
+        if ($prefix -eq "pl") { $relPrefixes += @("fp$numId","wp$numId") }
         foreach ($rp in $relPrefixes) {
             $f = Join-Path $lodDir.FullName "$rp.mmesh"
             if (Test-Path $f) {
@@ -610,7 +609,7 @@ $MSK_DESC = @{
 }
 
 $searchIds = @($charId)
-if ($prefix -eq "pl") { $searchIds += @("fp$numId","np$numId","wp$numId") }
+if ($prefix -eq "pl") { $searchIds += @("fp$numId","wp$numId") }
 
 if (Test-Path $texRoot) {
     Write-Host "  [scan] data/texture/" -ForegroundColor Gray
@@ -728,7 +727,7 @@ if ($prefix -eq "pl") {
     Write-Host ""
     Write-Host $S.mesh_layer -ForegroundColor Yellow
     $lod0 = Join-Path $dataRoot "model_streaming\lod0"
-    foreach ($mp in @($charId,"fp$numId","np$numId","wp$numId")) {
+    foreach ($mp in @($charId,"fp$numId","wp$numId")) {
         $f = Join-Path $lod0 "$mp.mmesh"
         if (Test-Path $f) {
             Write-Host ("  {0,-40} {1,10}" -f "$mp.mmesh", (Format-FileSize (Get-Item $f).Length))
