@@ -169,5 +169,11 @@
   "copy_total_size": "复制总大小",
   "copy_done": "已按 data 原路径复制源资源",
   "copy_files": "个文件",
-  "copy_failed": "复制失败"
+  "copy_failed": "复制失败",
+  "workspace_path": "工作区",
+  "decoded_textures": "已解码 texture",
+  "decoded_materials": "已解码 mmat",
+  "decode_done": "可编辑中间态已生成",
+  "decode_failed": "解码失败",
+  "workspace_ready": "工作区已就绪"
 }

@@ -15,9 +15,56 @@
 
 `MMat_ModelMaterial.fbs`（FlatBuffers schema）已包含在仓库中。
 
-## 使用方法
+## 推荐工作流
 
-双击 `GBFR提取工具.bat` 打开 GUI。
+### 1. 建立角色工作区
+
+将角色主体 `.minfo` 拖到 `explore/探索角色资源.bat`。工具会重建单一工作区：
+
+```text
+explore/explore_output/
+  manifest.md                 人类可读的角色资源报告
+  workspace.json              构建器使用的路径与初始哈希
+  source/data/                按游戏路径复制的原始资源，只作封包模板
+  unpack/data/                可编辑中间态（DDS、*.mmat.json）
+  build/data/                 最终 Mod 输出
+```
+
+探索阶段会自动执行：
+
+- 将找到的实体资源复制到 `source/data/`。
+- 将 `source/data/texture/{2k,4k}/*.texture` 解码为同路径的 `unpack/data/**/*.dds`。
+- 将 `source/data/model/**/vars/*.mmat` 解码为同路径的 `unpack/data/**/*.mmat.json`。
+- 记录所有中间态的 SHA-256，供构建器识别真实修改。
+
+`explore_output` 一次只保存一个角色。开始探索另一个角色前，如需保留当前工作区，请复制并重命名整个目录。
+
+### 2. 编辑与构建
+
+编辑 `unpack/data/` 中需要修改的 DDS 或 `.mmat.json`，然后双击 `GBFR编辑封包工具.bat`：
+
+1. 选择工作区的 `manifest.md`（也可以将它拖到 bat 上）。
+2. 构建器列出贴图封包和 mmat 编码操作。
+3. 已修改项目默认勾选；未修改项目可手动勾选以强制构建。
+4. 确认目标清单后点击 **构建勾选项目**。
+
+构建器只覆盖 UI 中明确勾选的目标，不会清空 `build`，也不会修改 `source`。`build/` 可以直接作为 Mod 根目录使用：
+
+```text
+build/
+  data/
+    texture/2k/*.texture
+    texture/4k/*.texture
+    model/<类型>/<角色>/vars/*.mmat
+```
+
+封包以 `source` 中的原始 WTB 为模板，支持按槽位写回并保留未编辑槽位。删除 `unpack` 中不需要的文件会让它们退出候选清单。
+
+---
+
+## 旧版工具
+
+`GBFR提取工具.bat` 是旧版 Granite 提取与手动 Pack GUI，仍保留用于兼容。新的角色 Mod 流程建议使用上面的探索工作区与独立构建器。
 
 ---
 
@@ -48,7 +95,7 @@ data/granite/4k/gts/1/1.gts   ← 4K 高分辨率版
 
 ---
 
-### Pack 标签页 — 打包贴图 & 编辑材质
+### 旧版 Pack 标签页 — 手动打包贴图与编辑材质
 
 #### WTB 贴图（data/texture/2k/*.texture）
 
@@ -121,6 +168,10 @@ output_mod/
 GBFR_modtools/
   GBFR提取工具.bat              ← 主入口，双击打开 GUI
   GBFR_Extractor.ps1           ← GUI 全部逻辑
+  GBFR编辑封包工具.bat          ← 工作区构建入口
+  GBFR_WorkspaceBuilder.ps1    ← DDS/JSON 变更检测与选择性构建 GUI
+  workspace_lib.ps1            ← WTB 与 mmat 共享读写逻辑
+  builder_strings_zh.json      ← 构建器中文界面文案
   MMat_ModelMaterial.fbs       ← mmat 的 FlatBuffers schema（已内置）
   _step1_parse_mmat.ps1        ← 命令行备用：minfo → 哈希表
   _step2_extract_tex.ps1       ← 命令行备用：哈希表 → 提取贴图
@@ -130,5 +181,8 @@ GBFR_modtools/
   output_hashes/               ← 自动创建，已 gitignore
   output_textures/             ← 自动创建，已 gitignore
   output_dds/                  ← 自动创建，已 gitignore
-  output_mod/                  ← 自动创建，已 gitignore
+  output_mod/                  ← 旧版 GUI 输出，已 gitignore
+  explore/
+    探索角色资源.bat            ← 建立单角色工作区
+    explore_output/            ← source/unpack/build 工作区，已 gitignore
 ```

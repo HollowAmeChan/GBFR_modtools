@@ -3,7 +3,7 @@ output_hashes/
 output_textures/
 output_dds/
 output_mod/
-explore/explore_output/*_sources/
+explore/explore_output/
 
 # third-party release binaries - download separately (see README)
 GraniteTextureReader.exe

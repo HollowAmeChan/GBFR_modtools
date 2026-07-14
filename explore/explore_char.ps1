@@ -8,6 +8,11 @@ param([string]$MinfoPath = "")
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+$toolRoot = Split-Path $PSScriptRoot -Parent
+$flatcExe = Join-Path $toolRoot "flatc.exe"
+$schemaFbs = Join-Path $toolRoot "MMat_ModelMaterial.fbs"
+. (Join-Path $toolRoot "workspace_lib.ps1")
+
 # Load Chinese strings from JSON at runtime (no parse-time encoding issues)
 $stringsFile = Join-Path $PSScriptRoot "strings_zh.json"
 $S = ConvertFrom-Json ([IO.File]::ReadAllText($stringsFile, [Text.Encoding]::UTF8))
@@ -144,9 +149,16 @@ Write-Host ""
 
 $scriptDir = $PSScriptRoot
 $outDir    = Join-Path $scriptDir "explore_output"
-if (-not (Test-Path $outDir)) { New-Item -ItemType Directory -Force -Path $outDir | Out-Null }
-$outMd     = Join-Path $outDir "$($charId)_manifest.md"
-$copyRoot  = Join-Path $outDir "$($charId)_sources"
+if (Test-Path -LiteralPath $outDir) { Remove-Item -LiteralPath $outDir -Recurse -Force }
+$sourceRoot = Join-Path $outDir "source"
+$unpackRoot = Join-Path $outDir "unpack"
+$buildRoot  = Join-Path $outDir "build"
+New-Item -ItemType Directory -Force -Path (Join-Path $sourceRoot "data") | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $unpackRoot "data") | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $buildRoot "data") | Out-Null
+$outMd     = Join-Path $outDir "manifest.md"
+$workspaceJson = Join-Path $outDir "workspace.json"
+$copyRoot  = $sourceRoot
 $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 $lines     = [System.Collections.Generic.List[string]]::new()
 function L([string]$s = "") { $lines.Add($s) }
@@ -173,13 +185,7 @@ function Add-SourceFiles([object[]]$files) {
 }
 
 function Copy-DiscoveredSources {
-    if (Test-Path -LiteralPath $copyRoot) {
-        Remove-Item -LiteralPath $copyRoot -Recurse -Force
-    }
-
     $dataOut = Join-Path $copyRoot "data"
-    New-Item -ItemType Directory -Force -Path $dataOut | Out-Null
-
     $copied = 0
     $totalBytes = [long]0
     $failed = [System.Collections.Generic.List[string]]::new()
@@ -205,6 +211,79 @@ function Copy-DiscoveredSources {
         Copied     = $copied
         TotalBytes = $totalBytes
         Failed     = $failed
+    }
+}
+
+function Initialize-WorkspaceArtifacts {
+    $textures = [System.Collections.Generic.List[PSCustomObject]]::new()
+    $materials = [System.Collections.Generic.List[PSCustomObject]]::new()
+    $errors = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($source in ($sourceFiles | Sort-Object)) {
+        $relativeDataPath = $source.Substring($dataRootPrefix.Length)
+        $sourceRelative = ConvertTo-WorkspacePath (Join-Path "source\data" $relativeDataPath)
+        $sourceCopy = Resolve-WorkspaceFile $outDir $sourceRelative
+
+        if ([IO.Path]::GetExtension($source) -ieq ".texture") {
+            try {
+                $relativeDir = [IO.Path]::GetDirectoryName($relativeDataPath)
+                $unpackDir = Join-Path (Join-Path $unpackRoot "data") $relativeDir
+                $slots = @(Expand-WtbTexture $sourceCopy $unpackDir)
+                $slotRecords = @($slots | ForEach-Object {
+                    [PSCustomObject]@{
+                        Index = $_.Index
+                        Path = ConvertTo-WorkspacePath ($_.Path.Substring($outDir.Length + 1))
+                        BaselineSha256 = $_.Sha256
+                    }
+                })
+                $textures.Add([PSCustomObject]@{
+                    Source = $sourceRelative
+                    Output = ConvertTo-WorkspacePath (Join-Path "build\data" $relativeDataPath)
+                    SourceSha256 = Get-WorkspaceSha256 $sourceCopy
+                    Slots = $slotRecords
+                })
+            } catch {
+                $errors.Add("texture: $relativeDataPath -- $($_.Exception.Message)")
+            }
+        } elseif ([IO.Path]::GetExtension($source) -ieq ".mmat") {
+            try {
+                if (-not (Test-Path -LiteralPath $flatcExe)) { throw "flatc.exe not found" }
+                if (-not (Test-Path -LiteralPath $schemaFbs)) { throw "MMat_ModelMaterial.fbs not found" }
+                $jsonRelative = ConvertTo-WorkspacePath (Join-Path "unpack\data" ($relativeDataPath + ".json"))
+                $jsonPath = Resolve-WorkspaceFile $outDir $jsonRelative
+                Convert-MmatToJson $flatcExe $schemaFbs $sourceCopy $jsonPath | Out-Null
+                $materials.Add([PSCustomObject]@{
+                    Source = $sourceRelative
+                    Json = $jsonRelative
+                    Output = ConvertTo-WorkspacePath (Join-Path "build\data" $relativeDataPath)
+                    BaselineSha256 = Get-WorkspaceSha256 $jsonPath
+                })
+            } catch {
+                $errors.Add("mmat: $relativeDataPath -- $($_.Exception.Message)")
+            }
+        }
+    }
+
+    $workspace = [ordered]@{
+        Version = 1
+        CharacterId = $charId
+        GeneratedAt = (Get-Date).ToString("o")
+        Manifest = "manifest.md"
+        SourceRoot = "source"
+        UnpackRoot = "unpack"
+        BuildRoot = "build"
+        Textures = @($textures)
+        Materials = @($materials)
+        DecodeErrors = @($errors)
+    }
+    $json = $workspace | ConvertTo-Json -Depth 8
+    [IO.File]::WriteAllText($workspaceJson, $json, [System.Text.UTF8Encoding]::new($false))
+
+    return [PSCustomObject]@{
+        TextureCount = $textures.Count
+        MaterialCount = $materials.Count
+        ErrorCount = $errors.Count
+        Errors = $errors
     }
 }
 
@@ -600,6 +679,7 @@ if (Test-Path $texRoot) {
 }
 
 $copyResult = Copy-DiscoveredSources
+$artifactResult = Initialize-WorkspaceArtifacts
 
 # ================================================================
 # Summary
@@ -611,9 +691,12 @@ L "## $H_SUMMARY"
 L ""
 L "| $($S.col_field) | $($S.col_value) |"
 L "|---|---|"
-L "| **$($S.copy_path)** | ``$copyRoot`` |"
+L "| **$($S.workspace_path)** | ``$outDir`` |"
 L "| **$($S.copy_count)** | $($copyResult.Copied) |"
 L "| **$($S.copy_total_size)** | $(Format-FileSize $copyResult.TotalBytes) |"
+L "| **$($S.decoded_textures)** | $($artifactResult.TextureCount) |"
+L "| **$($S.decoded_materials)** | $($artifactResult.MaterialCount) |"
+L "| **$($S.decode_failed)** | $($artifactResult.ErrorCount) |"
 if ($copyResult.Failed.Count -gt 0) {
     L "| **$($S.copy_failed)** | $($copyResult.Failed.Count) |"
     L ""
@@ -674,10 +757,17 @@ Write-Host $S.report_saved -ForegroundColor Green
 Write-Host "  $outMd" -ForegroundColor Green
 Write-Host ""
 Write-Host "$($S.copy_done): $($copyResult.Copied) $($S.copy_files) ($(Format-FileSize $copyResult.TotalBytes))" -ForegroundColor Green
-Write-Host "  $copyRoot" -ForegroundColor Green
+Write-Host "  $sourceRoot" -ForegroundColor Green
 if ($copyResult.Failed.Count -gt 0) {
     Write-Host "$($S.copy_failed): $($copyResult.Failed.Count)" -ForegroundColor Yellow
 }
+Write-Host "$($S.decode_done): texture $($artifactResult.TextureCount), mmat $($artifactResult.MaterialCount)" -ForegroundColor Green
+Write-Host "  $unpackRoot" -ForegroundColor Green
+if ($artifactResult.ErrorCount -gt 0) {
+    Write-Host "$($S.decode_failed): $($artifactResult.ErrorCount)" -ForegroundColor Yellow
+}
+Write-Host "$($S.workspace_ready)" -ForegroundColor Green
+Write-Host "  $outDir" -ForegroundColor Green
 Write-Host ""
 
 Finish 0
