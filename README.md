@@ -90,8 +90,16 @@ Granite DDS 是可编辑中间态，构建器不会修改 GTS/GTP。对于 `sour
 - 分别列出已有贴图封回、新建贴图与 mmat 编码操作。
 - 默认勾选哈希已变化的中间文件。
 - 允许手动勾选未修改项目以强制构建。
+- “刷新列表”会重新读取当前 DDS/JSON 状态，并保留手动勾选。
+- “恢复选中项”会逐项把 `unpack` 恢复为探索时内容：普通 DDS/JSON 来自 `source`，Granite DDS 按原 GTS/hash 重新提取；已删除文件会以“缺少输入”保留在列表中，也可以勾选恢复。
 - 在写入前显示完整目标清单。
 - 只覆盖明确勾选的目标，不清空 `build` 中其他文件。
+
+恢复操作会覆盖所选 `unpack` 文件，但不会修改 `source`、`build` 或游戏目录。命令行可使用：
+
+```powershell
+.\GBFR_WorkspaceBuilder.ps1 -ManifestPath .\explore_output\manifest.md -RestoreChanged
+```
 
 输出路径保持游戏结构：
 

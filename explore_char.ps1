@@ -256,6 +256,7 @@ function Initialize-WorkspaceArtifacts {
                 Convert-MmatToJson $flatcExe $schemaFbs $sourceCopy $jsonPath | Out-Null
                 $materials.Add([PSCustomObject]@{
                     Source = $sourceRelative
+                    SourceSha256 = Get-WorkspaceSha256 $sourceCopy
                     Json = $jsonRelative
                     Output = ConvertTo-WorkspacePath (Join-Path "build\data" $relativeDataPath)
                     BaselineSha256 = Get-WorkspaceSha256 $jsonPath
@@ -270,6 +271,7 @@ function Initialize-WorkspaceArtifacts {
         Version = 1
         CharacterId = $charId
         GeneratedAt = (Get-Date).ToString("o")
+        GameDataRoot = $dataRoot
         Manifest = "manifest.md"
         SourceRoot = "source"
         UnpackRoot = "unpack"
@@ -456,18 +458,29 @@ function Expand-GraniteTextures {
     }
 
     $workspace = ConvertFrom-Json ([IO.File]::ReadAllText($workspaceJson, [Text.Encoding]::UTF8))
+    $graniteSourceByFile = @{}
+    foreach ($group in $decodedGroups) {
+        foreach ($file in @($group.Files)) {
+            if (-not $graniteSourceByFile.ContainsKey([string]$file)) {
+                $graniteSourceByFile[[string]$file] = $group
+            }
+        }
+    }
     foreach ($relativeDds in ($decodedFiles | Sort-Object)) {
         $ddsPath = Resolve-WorkspaceFile $outDir $relativeDds
         $res = [IO.Path]::GetFileName([IO.Path]::GetDirectoryName($ddsPath))
         $baseName = [IO.Path]::GetFileNameWithoutExtension($ddsPath)
         $sourceTexture = Join-Path $sourceRoot "data\texture\$res\$baseName.texture"
         if (Test-Path -LiteralPath $sourceTexture -PathType Leaf) { continue }
+        $graniteSource = $graniteSourceByFile[[string]$relativeDds]
 
         $newTextures.Add([PSCustomObject]@{
             Input = $relativeDds
             Output = ConvertTo-WorkspacePath (Join-Path "build\data\texture\$res" "$baseName.texture")
             BaselineSha256 = Get-WorkspaceSha256 $ddsPath
             TextureId = 0
+            GraniteHash = [string]$graniteSource.Hash
+            GraniteGts = [string]$graniteSource.Gts
         })
     }
     $workspace | Add-Member -NotePropertyName GraniteTextures -NotePropertyValue @($decodedGroups) -Force
