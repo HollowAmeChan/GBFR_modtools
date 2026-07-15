@@ -77,6 +77,27 @@ unpack/data/model/pl/pl1400/vars/0.mmat.json
 
 `source/` 是不可编辑的原始模板。删除 `unpack/` 中不需要的中间文件，会让它退出构建候选清单。
 
+### `vars/*.mmat` 编号与配色
+
+`vars/0.mmat` 是角色默认配色使用的完整材质配置。`vars/1.mmat` 到 `vars/10.mmat` 是其他配色的并列完整配置，并不是继承 `0.mmat` 的差异补丁。
+
+不同编号通常保持相同的材质条目、Shader 参数、法线和遮罩，只替换需要变色部件的 albedo 与对应 Granite hash。例如：
+
+```text
+vars/0.mmat   -> pl1400_body01_lod0_albd
+vars/1.mmat   -> pl1400_body01_lod0_c01_albd
+vars/2.mmat   -> pl1400_body01_lod0_c02_albd
+...
+vars/10.mmat  -> pl1400_body01_lod0_c10_albd
+```
+
+并非每个部件在所有配色中都会变化；皮肤、部分刀鞘或某些配色下的头发仍可能引用基础贴图。以 `pl1400` 为例，主体 `pl` 与面部 `fp` 都有 `0–10.mmat`，武器 `wp` 只有 `0.mmat`。
+
+- 只修改默认配色：编辑 `vars/0.mmat.json`。
+- 希望所有配色使用相同材质逻辑：同步检查并修改 `vars/0–10.mmat.json`。
+- 删除 Granite `A4`：必须在希望生效的每个编号中分别删除；只修改 `0` 不会影响其他配色。
+- 多个编号引用同名 nrml/msk 时，共享 DDS 可以只生成一份，但每个编号的 mmat 引用仍独立生效。
+
 Granite DDS 是可编辑中间态，构建器不会修改 GTS/GTP。对于 `source/data/texture` 中没有同名原件的 DDS，探索器会把它登记为“新建贴图”候选；构建器使用 nier_cli 创建新的 WTB `.texture` 到 `build/data/texture/{2k,4k}/`。同时在对应 `.mmat.json` 材质条目中删除 `A4`，材质就会改用 `A2.Name` 指向的普通贴图。
 
 新建贴图默认只在 DDS 内容变化后自动勾选。若 DDS 无需编辑、只是要从 Granite 改为普通贴图，需要在构建器中手动勾选对应“新建贴图”项目。
