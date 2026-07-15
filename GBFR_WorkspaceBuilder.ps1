@@ -1,7 +1,8 @@
 param(
     [string]$ManifestPath = "",
     [switch]$BuildChanged,
-    [switch]$RestoreChanged
+    [switch]$RestoreChanged,
+    [switch]$UiSmokeTest
 )
 
 Set-StrictMode -Version Latest
@@ -267,6 +268,43 @@ function Restore-WorkspaceGraniteTexture([object]$Context, [object]$Operation) {
     }
 }
 
+function Get-WorkspaceMaterialA4Count([object]$Context, [object]$Operation) {
+    if ([string]$Operation.Kind -ne "mmat" -or -not $Operation.Available) { return 0 }
+    $jsonPath = Resolve-WorkspaceFile $Context.Root ([string]$Operation.Record.Json)
+    $material = ConvertFrom-Json ([IO.File]::ReadAllText($jsonPath, [Text.Encoding]::UTF8))
+    return @($material.Entries1 | Where-Object {
+        $null -ne $_ -and $_.PSObject.Properties.Name -contains "A4" -and $null -ne $_.A4
+    }).Count
+}
+
+function Remove-WorkspaceMaterialA4([object]$Context, [object]$Operation) {
+    if ([string]$Operation.Kind -ne "mmat") { throw $B.err_a4_mmat_only }
+    if (-not $Operation.Available) { throw $B.err_missing_input_build }
+    $jsonPath = Resolve-WorkspaceFile $Context.Root ([string]$Operation.Record.Json)
+    $material = ConvertFrom-Json ([IO.File]::ReadAllText($jsonPath, [Text.Encoding]::UTF8))
+    $removed = 0
+    foreach ($entry in @($material.Entries1)) {
+        if ($null -ne $entry -and
+            $entry.PSObject.Properties.Name -contains "A4" -and
+            $null -ne $entry.A4) {
+            $entry.PSObject.Properties.Remove("A4")
+            $removed++
+        }
+    }
+    if ($removed -eq 0) { return 0 }
+
+    $tempPath = "$jsonPath.tmp"
+    try {
+        $json = $material | ConvertTo-Json -Depth 100
+        [IO.File]::WriteAllText($tempPath, $json, [Text.UTF8Encoding]::new($false))
+        ConvertFrom-Json ([IO.File]::ReadAllText($tempPath, [Text.Encoding]::UTF8)) | Out-Null
+        Move-Item -LiteralPath $tempPath -Destination $jsonPath -Force
+    } finally {
+        if (Test-Path -LiteralPath $tempPath) { Remove-Item -LiteralPath $tempPath -Force }
+    }
+    return $removed
+}
+
 function Restore-WorkspaceOperations([object]$Context, [object[]]$Operations, [scriptblock]$Logger = $null) {
     $ok = 0
     $failed = 0
@@ -347,20 +385,71 @@ $lblSummary.Size = New-Object Drawing.Size(948, 24)
 $lblSummary.Anchor = "Top,Left,Right"
 $form.Controls.Add($lblSummary)
 
-$list = New-Object Windows.Forms.ListView
-$list.Location = New-Object Drawing.Point(14, 82)
-$list.Size = New-Object Drawing.Size(948, 390)
-$list.Anchor = "Top,Bottom,Left,Right"
-$list.View = "Details"
-$list.CheckBoxes = $true
-$list.FullRowSelect = $true
-$list.GridLines = $true
-$list.HideSelection = $false
-[void]$list.Columns.Add($B.col_state, 80)
-[void]$list.Columns.Add($B.col_operation, 100)
-[void]$list.Columns.Add($B.col_input, 280)
-[void]$list.Columns.Add($B.col_output, 450)
-$form.Controls.Add($list)
+$grid = New-Object Windows.Forms.DataGridView
+$grid.Location = New-Object Drawing.Point(14, 82)
+$grid.Size = New-Object Drawing.Size(948, 390)
+$grid.Anchor = "Top,Bottom,Left,Right"
+$grid.AllowUserToAddRows = $false
+$grid.AllowUserToDeleteRows = $false
+$grid.AllowUserToResizeRows = $false
+$grid.AutoGenerateColumns = $false
+$grid.MultiSelect = $true
+$grid.RowHeadersVisible = $false
+$grid.SelectionMode = "FullRowSelect"
+$grid.EditMode = "EditOnEnter"
+$grid.BackgroundColor = [Drawing.SystemColors]::Window
+$grid.BorderStyle = "Fixed3D"
+$grid.RowTemplate.Height = 28
+$grid.ColumnHeadersHeight = 32
+
+$colSelected = New-Object Windows.Forms.DataGridViewCheckBoxColumn
+$colSelected.Name = "Selected"
+$colSelected.HeaderText = $B.col_select
+$colSelected.Width = 50
+$colSelected.SortMode = "NotSortable"
+[void]$grid.Columns.Add($colSelected)
+
+foreach ($definition in @(
+    @{ Name = "State"; Header = $B.col_state; Width = 75 },
+    @{ Name = "Operation"; Header = $B.col_operation; Width = 90 },
+    @{ Name = "Input"; Header = $B.col_input; Width = 230 }
+)) {
+    $column = New-Object Windows.Forms.DataGridViewTextBoxColumn
+    $column.Name = $definition.Name
+    $column.HeaderText = $definition.Header
+    $column.Width = $definition.Width
+    $column.ReadOnly = $true
+    $column.SortMode = "NotSortable"
+    [void]$grid.Columns.Add($column)
+}
+
+$colOutput = New-Object Windows.Forms.DataGridViewTextBoxColumn
+$colOutput.Name = "Output"
+$colOutput.HeaderText = $B.col_output
+$colOutput.MinimumWidth = 260
+$colOutput.AutoSizeMode = "Fill"
+$colOutput.ReadOnly = $true
+$colOutput.SortMode = "NotSortable"
+[void]$grid.Columns.Add($colOutput)
+
+$colRestore = New-Object Windows.Forms.DataGridViewButtonColumn
+$colRestore.Name = "Restore"
+$colRestore.HeaderText = $B.col_restore
+$colRestore.Width = 70
+$colRestore.ReadOnly = $true
+$colRestore.FlatStyle = "Flat"
+$colRestore.SortMode = "NotSortable"
+[void]$grid.Columns.Add($colRestore)
+
+$colA4 = New-Object Windows.Forms.DataGridViewButtonColumn
+$colA4.Name = "A4Action"
+$colA4.HeaderText = $B.col_mmat_action
+$colA4.Width = 110
+$colA4.ReadOnly = $true
+$colA4.FlatStyle = "Flat"
+$colA4.SortMode = "NotSortable"
+[void]$grid.Columns.Add($colA4)
+$form.Controls.Add($grid)
 
 $btnModified = New-Object Windows.Forms.Button
 $btnModified.Text = $B.select_modified
@@ -383,16 +472,9 @@ $btnRefresh.Size = New-Object Drawing.Size(100, 32)
 $btnRefresh.Anchor = "Bottom,Left"
 $form.Controls.Add($btnRefresh)
 
-$btnRestore = New-Object Windows.Forms.Button
-$btnRestore.Text = $B.restore_selected
-$btnRestore.Location = New-Object Drawing.Point(356, 484)
-$btnRestore.Size = New-Object Drawing.Size(130, 32)
-$btnRestore.Anchor = "Bottom,Left"
-$form.Controls.Add($btnRestore)
-
 $btnOpenBuild = New-Object Windows.Forms.Button
 $btnOpenBuild.Text = $B.open_build
-$btnOpenBuild.Location = New-Object Drawing.Point(495, 484)
+$btnOpenBuild.Location = New-Object Drawing.Point(356, 484)
 $btnOpenBuild.Size = New-Object Drawing.Size(105, 32)
 $btnOpenBuild.Anchor = "Bottom,Left"
 $form.Controls.Add($btnOpenBuild)
@@ -424,7 +506,7 @@ function Add-Log([string]$Message) {
 
 function Update-SelectionSummary {
     if ($null -eq $script:context) { $btnBuild.Enabled = $false; return }
-    $checked = @($list.CheckedItems).Count
+    $checked = @(Get-CheckedGridOperations).Count
     $btnBuild.Enabled = $checked -gt 0
     $changed = @($script:context.Operations | Where-Object { $_.Changed }).Count
     $lblSummary.Text = "$($script:context.Workspace.CharacterId) | $($B.candidate) $($script:context.Operations.Count) | $($B.modified_count) $changed | $($B.selected_count) $checked | $($B.missing_count) $($script:context.MissingCount)"
@@ -434,47 +516,83 @@ function Get-OperationKey([object]$Operation) {
     return "$($Operation.Kind)|$($Operation.OutputLabel)"
 }
 
+function Get-CheckedGridOperations {
+    return @($grid.Rows | Where-Object {
+        $null -ne $_.Tag -and [bool]$_.Cells["Selected"].Value
+    } | ForEach-Object { $_.Tag })
+}
+
 function Load-Manifest([string]$Path, [switch]$PreserveSelection) {
     try {
         $checkedKeys = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         $knownKeys = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         if ($PreserveSelection) {
-            foreach ($existingItem in @($list.Items)) {
-                $key = Get-OperationKey $existingItem.Tag
+            foreach ($existingRow in @($grid.Rows)) {
+                if ($null -eq $existingRow.Tag) { continue }
+                $key = Get-OperationKey $existingRow.Tag
                 $knownKeys.Add($key) | Out-Null
-                if ($existingItem.Checked) { $checkedKeys.Add($key) | Out-Null }
+                if ([bool]$existingRow.Cells["Selected"].Value) { $checkedKeys.Add($key) | Out-Null }
             }
         }
 
         $script:context = Get-WorkspaceOperations $Path
         $txtManifest.Text = [IO.Path]::GetFullPath($Path)
-        $list.BeginUpdate()
-        $list.Items.Clear()
+        $grid.SuspendLayout()
+        $grid.Rows.Clear()
         foreach ($operation in @($script:context.Operations)) {
             $state = if (-not $operation.Available) { $B.state_missing }
                      elseif ($operation.Changed) { $B.state_modified }
                      else { $B.state_unchanged }
-            $item = New-Object Windows.Forms.ListViewItem($state)
-            [void]$item.SubItems.Add($operation.TypeLabel)
-            [void]$item.SubItems.Add($operation.InputLabel)
-            [void]$item.SubItems.Add($operation.OutputLabel)
-            $item.Tag = $operation
             $key = Get-OperationKey $operation
-            $item.Checked = if ($PreserveSelection -and $knownKeys.Contains($key)) {
+            $isChecked = if ($PreserveSelection -and $knownKeys.Contains($key)) {
                 $checkedKeys.Contains($key)
             } else {
                 [bool]$operation.Changed
             }
-            if (-not $operation.Available) { $item.ForeColor = [Drawing.Color]::DarkOrange }
-            elseif (-not $operation.Changed) { $item.ForeColor = [Drawing.Color]::Gray }
-            [void]$list.Items.Add($item)
+
+            $a4Label = ""
+            $a4ActionEnabled = $false
+            if ([string]$operation.Kind -eq "mmat" -and $operation.Available) {
+                try {
+                    $a4Count = Get-WorkspaceMaterialA4Count $script:context $operation
+                    if ($a4Count -gt 0) {
+                        $a4Label = "$($B.clear_a4) ($a4Count)"
+                        $a4ActionEnabled = $true
+                    } else {
+                        $a4Label = $B.a4_cleared
+                    }
+                } catch {
+                    $a4Label = $B.a4_json_error
+                }
+            }
+
+            $rowIndex = $grid.Rows.Add(
+                $isChecked, $state, $operation.TypeLabel, $operation.InputLabel,
+                $operation.OutputLabel, $B.restore_row, $a4Label
+            )
+            $row = $grid.Rows[$rowIndex]
+            $row.Tag = $operation
+            $row.Cells["Input"].ToolTipText = $operation.InputLabel
+            $row.Cells["Output"].ToolTipText = $operation.OutputLabel
+            $row.Cells["Restore"].Style.ForeColor = [Drawing.SystemColors]::ControlText
+            if (-not $a4ActionEnabled) {
+                $textCell = New-Object Windows.Forms.DataGridViewTextBoxCell
+                $textCell.Value = $a4Label
+                $row.Cells["A4Action"] = $textCell
+                $row.Cells["A4Action"].ReadOnly = $true
+            } else {
+                $row.Cells["A4Action"].Style.ForeColor = [Drawing.SystemColors]::ControlText
+            }
+            if (-not $operation.Available) { $row.DefaultCellStyle.ForeColor = [Drawing.Color]::DarkOrange }
+            elseif (-not $operation.Changed) { $row.DefaultCellStyle.ForeColor = [Drawing.Color]::Gray }
         }
-        $list.EndUpdate()
+        $grid.ResumeLayout()
         if ($PreserveSelection) { Add-Log $B.workspace_refreshed }
         else { Add-Log "$($B.workspace_loaded): $($script:context.Root)" }
         Update-SelectionSummary
     } catch {
-        try { $list.EndUpdate() } catch {}
+        try { $grid.ResumeLayout() } catch {}
+        if ($UiSmokeTest) { throw }
         [Windows.Forms.MessageBox]::Show($_.Exception.Message, $B.load_failed, "OK", "Error") | Out-Null
     }
 }
@@ -498,39 +616,69 @@ $txtManifest.AllowDrop = $true
 $txtManifest.Add_DragEnter({ if ($_.Data.GetDataPresent([Windows.Forms.DataFormats]::FileDrop)) { $_.Effect = "Copy" } })
 $txtManifest.Add_DragDrop($dropHandler)
 
-$list.Add_ItemChecked({
-    if ($form.IsHandleCreated) {
-        $form.BeginInvoke([Action]{ Update-SelectionSummary }) | Out-Null
+$grid.Add_CurrentCellDirtyStateChanged({
+    if ($grid.IsCurrentCellDirty -and $grid.CurrentCell.ColumnIndex -eq $grid.Columns["Selected"].Index) {
+        $grid.CommitEdit([Windows.Forms.DataGridViewDataErrorContexts]::Commit) | Out-Null
+    }
+})
+$grid.Add_CellValueChanged({
+    if ($_.RowIndex -ge 0 -and $_.ColumnIndex -eq $grid.Columns["Selected"].Index) {
+        Update-SelectionSummary
     }
 })
 $btnModified.Add_Click({
-    foreach ($item in $list.Items) { $item.Checked = [bool]$item.Tag.Changed }
+    foreach ($row in $grid.Rows) {
+        if ($null -ne $row.Tag) { $row.Cells["Selected"].Value = [bool]$row.Tag.Changed }
+    }
     Update-SelectionSummary
 })
-$btnClear.Add_Click({ foreach ($item in $list.Items) { $item.Checked = $false }; Update-SelectionSummary })
+$btnClear.Add_Click({
+    foreach ($row in $grid.Rows) { $row.Cells["Selected"].Value = $false }
+    Update-SelectionSummary
+})
 $btnRefresh.Add_Click({
     if ($txtManifest.Text) { Load-Manifest $txtManifest.Text -PreserveSelection }
 })
-$btnRestore.Add_Click({
-    if ($null -eq $script:context) { return }
-    $selectedItems = @($list.CheckedItems)
-    $selected = @($selectedItems | ForEach-Object { $_.Tag })
-    if ($selected.Count -eq 0) { return }
-    $targets = ($selected | ForEach-Object { "- $($_.InputLabel)" }) -join "`r`n"
-    $answer = [Windows.Forms.MessageBox]::Show(
-        "$($B.confirm_restore_prefix) $($selected.Count) $($B.confirm_restore_suffix):`r`n`r`n$targets",
-        $B.confirm_title, "OKCancel", "Warning"
-    )
-    if ($answer -ne "OK") { return }
+$grid.Add_CellContentClick({
+    if ($_.RowIndex -lt 0) { return }
+    $row = $grid.Rows[$_.RowIndex]
+    $operation = $row.Tag
+    if ($null -eq $operation) { return }
+    $columnName = $grid.Columns[$_.ColumnIndex].Name
 
-    $btnRestore.Enabled = $false
-    $result = Restore-WorkspaceOperations $script:context $selected { param($message) Add-Log $message }
-    Add-Log "$($B.restore_finished): $($B.success) $($result.Success), $($B.failed) $($result.Failed)"
-    foreach ($item in $selectedItems) { $item.Checked = $false }
-    Load-Manifest $txtManifest.Text -PreserveSelection
-    $btnRestore.Enabled = $true
-    if ($result.Failed -gt 0) {
-        [Windows.Forms.MessageBox]::Show($B.partial_failure, $B.restore_finished, "OK", "Warning") | Out-Null
+    if ($columnName -eq "Restore") {
+        $answer = [Windows.Forms.MessageBox]::Show(
+            "$($B.confirm_restore_one):`r`n`r`n$($operation.InputLabel)",
+            $B.confirm_title, "OKCancel", "Warning"
+        )
+        if ($answer -ne "OK") { return }
+        $result = Restore-WorkspaceOperations $script:context @($operation) { param($message) Add-Log $message }
+        Add-Log "$($B.restore_finished): $($B.success) $($result.Success), $($B.failed) $($result.Failed)"
+        if ($result.Failed -eq 0) { $row.Cells["Selected"].Value = $false }
+        Load-Manifest $txtManifest.Text -PreserveSelection
+        if ($result.Failed -gt 0) {
+            [Windows.Forms.MessageBox]::Show($B.partial_failure, $B.restore_finished, "OK", "Warning") | Out-Null
+        }
+        return
+    }
+
+    if ($columnName -eq "A4Action" -and [string]$operation.Kind -eq "mmat" -and $operation.Available) {
+        try {
+            $a4Count = Get-WorkspaceMaterialA4Count $script:context $operation
+            if ($a4Count -le 0) { return }
+            $answer = [Windows.Forms.MessageBox]::Show(
+                "$($B.confirm_clear_a4_prefix) $a4Count $($B.confirm_clear_a4_suffix):`r`n`r`n$($operation.InputLabel)",
+                $B.confirm_title, "OKCancel", "Warning"
+            )
+            if ($answer -ne "OK") { return }
+            $removed = Remove-WorkspaceMaterialA4 $script:context $operation
+            Add-Log "[OK] $($B.a4_removed): $($operation.InputLabel) ($removed)"
+            $row.Cells["Selected"].Value = $true
+            Load-Manifest $txtManifest.Text -PreserveSelection
+        } catch {
+            Add-Log "[$($B.failed)] $($operation.InputLabel): $($_.Exception.Message)"
+            [Windows.Forms.MessageBox]::Show($_.Exception.Message, $B.a4_remove_failed, "OK", "Error") | Out-Null
+        }
     }
 })
 $btnOpenBuild.Add_Click({
@@ -541,7 +689,7 @@ $btnOpenBuild.Add_Click({
     }
 })
 $btnBuild.Add_Click({
-    $selected = @($list.CheckedItems | ForEach-Object { $_.Tag })
+    $selected = @(Get-CheckedGridOperations)
     if ($selected.Count -eq 0) { return }
     $unavailable = @($selected | Where-Object { -not $_.Available })
     if ($unavailable.Count -gt 0) {
@@ -564,4 +712,11 @@ $btnBuild.Add_Click({
 })
 
 if ($ManifestPath -and (Test-Path -LiteralPath $ManifestPath)) { Load-Manifest $ManifestPath }
+if ($UiSmokeTest) {
+    $mmatRows = @($grid.Rows | Where-Object { $null -ne $_.Tag -and [string]$_.Tag.Kind -eq "mmat" })
+    $restoreButtons = @($grid.Rows | Where-Object { $_.Cells["Restore"].Value -eq $B.restore_row })
+    $a4Buttons = @($mmatRows | Where-Object { [string]$_.Cells["A4Action"].Value -like "$($B.clear_a4)*" })
+    Write-Host "UI smoke: rows=$($grid.Rows.Count), restore=$($restoreButtons.Count), mmat=$($mmatRows.Count), clearA4=$($a4Buttons.Count)"
+    exit 0
+}
 [void]$form.ShowDialog()
