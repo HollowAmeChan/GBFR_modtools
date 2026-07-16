@@ -3,6 +3,7 @@
 #include <gbfr/formats/model.hpp>
 #include <gbfr/formats/material.hpp>
 #include <gbfr/formats/cloth.hpp>
+#include <gbfr/formats/animation.hpp>
 #include <gbfr/render/preview_renderer.hpp>
 #include <nlohmann/json.hpp>
 #include <wrl/client.h>
@@ -10,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <cmath>
+#include <algorithm>
 
 namespace fs = std::filesystem;
 
@@ -20,7 +22,9 @@ int main() {
     if(!gbfr::is_color_variant_texture("pl1400_body_lod0_c01_albd")||
        gbfr::is_color_variant_texture("pl1400_body_lod0_albd"))return 14;
 
-    const fs::path root = fs::temp_directory_path() / L"gbfr_workspace_test";
+    const fs::path test_temp = fs::current_path() / L".gbfr_test_temp";
+    const fs::path root = test_temp / L"workspace";
+    fs::remove_all(test_temp);
     fs::remove_all(root);
     fs::create_directories(root / L"source");
     fs::create_directories(root / L"unpack");
@@ -108,11 +112,30 @@ int main() {
         const auto clh_path=cloth_root/L"pl1400_0_0_clh.bxm.xml",clp_path=cloth_root/L"pl1400_0_0_clp.bxm.xml";
         const auto clh=gbfr::load_clh(clh_path);const auto clp=gbfr::load_clp(clp_path);
         if(clh.collisions.size()!=8||clp.nodes.size()!=60)return 9;
-        const auto editable=fs::temp_directory_path()/L"gbfr_clh_test.xml";fs::copy_file(clh_path,editable,fs::copy_options::overwrite_existing);auto collision=clh.collisions.front();collision.radius=.123f;gbfr::save_clh_collision(editable,collision);if(std::abs(gbfr::load_clh(editable).collisions.front().radius-.123f)>.0001f)return 10;fs::remove(editable);
+        const auto editable=test_temp/L"gbfr_clh_test.xml";fs::copy_file(clh_path,editable,fs::copy_options::overwrite_existing);auto collision=clh.collisions.front();collision.radius=.123f;gbfr::save_clh_collision(editable,collision);if(std::abs(gbfr::load_clh(editable).collisions.front().radius-.123f)>.0001f)return 10;fs::remove(editable);
+        const auto motion_root=integration.parent_path()/L"source/data/pl/pl1400";
+        const auto idle=gbfr::load_mot(motion_root/L"pl1400_0000.mot");
+        if(idle.version!=0x20200619u||idle.frame_count!=86||idle.tracks.size()!=219||idle.name!="pl1400_0000")return 22;
+        const auto first_motion_track=std::find_if(idle.tracks.begin(),idle.tracks.end(),[](const auto& track){return track.bone_id==0&&track.property==0;});
+        if(first_motion_track==idle.tracks.end()||first_motion_track->compression!=1||std::abs(first_motion_track->sample(1.0f)-(-.000534661114f))>1e-7f)return 23;
+        if(!preview.load(mesh,skeleton,preview_materials))return 27;
+        const auto rest_bones=preview.bone_positions();
+        for(std::size_t i=0;i<rest_bones.size();++i){const auto& actual=rest_bones[i];const auto& expected=skeleton.bones[i].world_position;if(std::abs(actual.x-expected.x)+std::abs(actual.y-expected.y)+std::abs(actual.z-expected.z)>1e-4f)return 31;}
+        if(!preview.apply_animation(&idle,42.0f)||preview.bone_positions().size()!=skeleton.bones.size())return 30;
+        bool pose_changed=false;for(std::size_t i=0;i<rest_bones.size();++i){const auto& a=rest_bones[i];const auto& b=preview.bone_positions()[i];if(std::abs(a.x-b.x)+std::abs(a.y-b.y)+std::abs(a.z-b.z)>1e-5f){pose_changed=true;break;}}
+        if(!pose_changed)return 28;
+        preview.render(camera,true,gbfr::PreviewShadingMode::lit,true,true);
+        if(!preview.apply_animation(nullptr,0.0f))return 29;
+        std::size_t motion_count{},track_count{};std::array<bool,9> compression_types{};
+        for(const auto& entry:fs::directory_iterator(motion_root))if(entry.path().extension()==L".mot"){
+            const auto clip=gbfr::load_mot(entry.path());++motion_count;track_count+=clip.tracks.size();
+            for(const auto& track:clip.tracks){if(track.compression<0||track.compression>8)return 24;compression_types[static_cast<std::size_t>(track.compression)]=true;if(!std::isfinite(track.sample(static_cast<float>(clip.frame_count-1)*.5f)))return 25;}
+        }
+        if(motion_count!=524||track_count!=248401||!std::all_of(compression_types.begin(),compression_types.end(),[](bool value){return value;}))return 26;
     }
-    const auto corrupt = fs::temp_directory_path() / L"gbfr_corrupt.skeleton";
+    const auto corrupt = test_temp / L"gbfr_corrupt.skeleton";
     std::ofstream(corrupt, std::ios::binary | std::ios::trunc) << "bad";
     try { (void)gbfr::load_skeleton(corrupt); return 8; } catch (const std::exception&) {}
-    fs::remove(corrupt);
+    fs::remove_all(test_temp);
     return 0;
 }

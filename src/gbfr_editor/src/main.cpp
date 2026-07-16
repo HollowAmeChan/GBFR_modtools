@@ -3,6 +3,7 @@
 #include <gbfr/formats/model.hpp>
 #include <gbfr/formats/material.hpp>
 #include <gbfr/formats/cloth.hpp>
+#include <gbfr/formats/animation.hpp>
 #include <gbfr/render/d3d11_context.hpp>
 #include <gbfr/render/preview_renderer.hpp>
 
@@ -56,6 +57,15 @@ bool g_show_mesh = true;
 gbfr::PreviewShadingMode g_preview_shading = gbfr::PreviewShadingMode::lit;
 bool g_show_skeleton = true;
 bool g_show_collisions = true;
+std::vector<std::filesystem::path> g_motion_files;
+std::optional<gbfr::AnimationClip> g_motion;
+std::array<char,128> g_motion_search{};
+int g_selected_motion = -1;
+float g_motion_frame = 0.0f;
+float g_motion_speed = 1.0f;
+float g_applied_motion_frame = -1.0f;
+bool g_motion_playing = false;
+bool g_motion_loop = true;
 struct ClhFile { std::filesystem::path path; gbfr::ClhAsset data; };
 struct ClpFile { std::filesystem::path path; gbfr::ClpAsset data; };
 std::vector<ClhFile> g_clh_files;
@@ -72,6 +82,8 @@ std::array<char,32768> g_minfo_path{};
 std::array<char,32768> g_workspace_path{};
 HANDLE g_extract_process = nullptr;
 std::string g_start_status;
+
+void clear_motion_state();
 
 std::filesystem::path tool_root() {
     wchar_t module[32768]{}; GetModuleFileNameW(nullptr,module,32768);
@@ -116,6 +128,7 @@ void set_path_input(std::array<char,32768>& input,const std::filesystem::path& p
 bool load_workspace(const std::filesystem::path& path) {
     try {
         g_workspace = std::make_unique<gbfr::Workspace>(gbfr::Workspace::load(path));
+        clear_motion_state();
         g_selected_asset.reset();
         g_asset_function=AssetFunction::all;g_asset_search.fill('\0');
         g_preview_mode=PreviewMode::none;g_loaded_model.reset();g_loaded_texture.clear();
@@ -232,6 +245,40 @@ std::filesystem::path resolve_base_albedo(const std::filesystem::path& workspace
     return {};
 }
 
+void clear_motion_state() {
+    g_motion_files.clear();g_motion.reset();g_motion_search.fill('\0');g_selected_motion=-1;g_motion_frame=0.0f;g_applied_motion_frame=-1.0f;g_motion_playing=false;
+}
+
+void discover_motions(const ModelPreviewKey& key) {
+    clear_motion_state();
+    if(!g_workspace)return;
+    const auto model_id=key.minfo.stem().wstring();
+    if(model_id.size()<2||model_id.substr(0,2)!=L"pl")return;
+    const auto directory=g_workspace->root()/L"source/data/pl"/model_id;
+    if(!std::filesystem::is_directory(directory))return;
+    for(const auto& entry:std::filesystem::directory_iterator(directory))if(entry.is_regular_file()&&entry.path().extension()==L".mot")g_motion_files.push_back(entry.path());
+    std::sort(g_motion_files.begin(),g_motion_files.end(),[](const auto& a,const auto& b){return a.filename()<b.filename();});
+}
+
+bool select_motion(int index) {
+    if(!g_preview||index<0||index>=static_cast<int>(g_motion_files.size()))return false;
+    try {
+        auto motion=gbfr::load_mot(g_motion_files[static_cast<std::size_t>(index)]);
+        if(!g_preview->apply_animation(&motion,0.0f))throw std::runtime_error("动画姿态应用失败");
+        g_motion=std::move(motion);g_selected_motion=index;g_motion_frame=0.0f;g_applied_motion_frame=0.0f;g_motion_playing=false;
+        update_collision_debug();
+        gbfr::Log::write(gbfr::LogLevel::info,"动画已加载："+g_motion->name+"，"+std::to_string(g_motion->frame_count)+" 帧");
+        return true;
+    } catch(const std::exception& error) { gbfr::Log::write(gbfr::LogLevel::error,std::string("动画加载失败：")+error.what());return false; }
+}
+
+void reset_motion_pose() {
+    g_motion.reset();g_selected_motion=-1;g_motion_frame=0.0f;g_applied_motion_frame=-1.0f;g_motion_playing=false;
+    if(g_preview&&g_preview->apply_animation(nullptr,0.0f)) {
+        if(g_show_collisions)update_collision_debug();
+    }
+}
+
 ModelPreviewKey resolve_model_preview_key(const gbfr::WorkspaceAsset& selected) {
     if(!g_workspace||selected.kind!=gbfr::AssetKind::model) throw std::runtime_error("选中项不是模型文件");
     ModelPreviewKey key;
@@ -275,6 +322,7 @@ bool load_model_preview(std::size_t index,bool force) {
         for(const auto& chunk:mesh.chunks) if(chunk.material>=materials.entries.size()) throw std::runtime_error("minfo MaterialID 超出 0.mmat 条目范围");
         if (!g_preview->load(mesh, skeleton, preview_materials)) throw std::runtime_error("GPU 预览资源创建失败");
         g_skeleton=skeleton;g_loaded_model=key;g_loaded_texture.clear();g_preview_mode=PreviewMode::model;
+        discover_motions(key);
         g_preview->frame(g_camera);
         g_clh_files.clear(); g_clp_files.clear(); g_selected_collision=-1; g_selected_bone=-1; g_selected_clh=0;
         for(const auto& asset:g_workspace->assets()) if(asset.kind==gbfr::AssetKind::cloth&&asset.available) {
@@ -326,7 +374,8 @@ bool asset_matches_search(const gbfr::WorkspaceAsset& asset) {
 }
 
 gbfr::Vec3 collision_point(int id,const gbfr::Vec4& offset) {
-    for(const auto& bone:g_skeleton.bones) if(cloth_bone_id(bone.name)==id) return {bone.world_position.x+offset.x,bone.world_position.y+offset.y,bone.world_position.z+offset.z};
+    const auto* pose=g_preview?&g_preview->bone_positions():nullptr;
+    for(std::size_t i=0;i<g_skeleton.bones.size();++i) if(cloth_bone_id(g_skeleton.bones[i].name)==id) {const auto& p=pose&&i<pose->size()?(*pose)[i]:g_skeleton.bones[i].world_position;return {p.x+offset.x,p.y+offset.y,p.z+offset.z};}
     return {offset.x,offset.y,offset.z};
 }
 
@@ -395,10 +444,42 @@ void build_start_dock_layout(ImGuiID dockspace) {
     g_start_layout_built=true;
 }
 
+void draw_motion_controls() {
+    const std::string current=g_selected_motion>=0?utf8(g_motion_files[static_cast<std::size_t>(g_selected_motion)].filename().wstring()):"静止姿态";
+    ImGui::SetNextItemWidth(220.0f);
+    if(ImGui::BeginCombo("##motion",current.c_str())){
+        ImGui::SetNextItemWidth(-1.0f);
+        ImGui::InputTextWithHint("##motion_search","筛选动画名称",g_motion_search.data(),g_motion_search.size());
+        if(ImGui::Selectable("静止姿态",g_selected_motion<0))reset_motion_pose();
+        const std::string filter=g_motion_search.data();
+        for(int i=0;i<static_cast<int>(g_motion_files.size());++i){
+            const auto name=utf8(g_motion_files[static_cast<std::size_t>(i)].filename().wstring());
+            if(!filter.empty()&&name.find(filter)==std::string::npos)continue;
+            if(ImGui::Selectable(name.c_str(),i==g_selected_motion))select_motion(i);
+        }
+        ImGui::EndCombo();
+    }
+    const bool available=g_motion.has_value();
+    ImGui::SameLine();ImGui::BeginDisabled(!available);
+    if(ImGui::Button(g_motion_playing?"暂停":"播放"))g_motion_playing=!g_motion_playing;
+    ImGui::SameLine();if(ImGui::Button("回到开头")){g_motion_playing=false;g_motion_frame=0.0f;}
+    ImGui::SameLine();ImGui::Checkbox("循环",&g_motion_loop);
+    ImGui::SameLine();ImGui::SetNextItemWidth(90.0f);ImGui::SliderFloat("速度",&g_motion_speed,.1f,2.0f,"%.1fx");
+    if(available){
+        const float frame_count=static_cast<float>(std::max(1u,static_cast<unsigned>(g_motion->frame_count)));
+        const float end=frame_count-1.0f;
+        if(g_motion_playing&&end>0.0f){g_motion_frame+=ImGui::GetIO().DeltaTime*60.0f*g_motion_speed;if(g_motion_frame>=frame_count){if(g_motion_loop)g_motion_frame=std::fmod(g_motion_frame,frame_count);else{g_motion_frame=end;g_motion_playing=false;}}}
+        ImGui::SetNextItemWidth(-110.0f);if(ImGui::SliderFloat("##motion_frame",&g_motion_frame,0.0f,end,"帧 %.1f"))g_motion_playing=false;
+        ImGui::SameLine();ImGui::Text("%.2f / %.2f 秒",g_motion_frame/60.0f,g_motion->duration_seconds());
+        if(std::abs(g_motion_frame-g_applied_motion_frame)>1e-4f){if(g_preview->apply_animation(&*g_motion,g_motion_frame)){g_applied_motion_frame=g_motion_frame;if(g_show_collisions)update_collision_debug();}else{g_motion_playing=false;gbfr::Log::write(gbfr::LogLevel::error,"动画姿态更新失败");}}
+    }
+    ImGui::EndDisabled();
+}
+
 void return_to_start() {
     if(!g_imgui_ini.empty()) ImGui::SaveIniSettingsToDisk(g_imgui_ini.c_str());
     g_workspace.reset(); g_selected_asset.reset(); g_skeleton.bones.clear(); g_clh_files.clear(); g_clp_files.clear();
-    g_preview_mode=PreviewMode::none;g_loaded_model.reset();g_loaded_texture.clear();
+    g_preview_mode=PreviewMode::none;g_loaded_model.reset();g_loaded_texture.clear();clear_motion_state();
     g_imgui_ini.clear(); ImGui::GetIO().IniFilename=nullptr; g_start_layout_built=false;
     if(g_preview) g_preview->clear();
 }
@@ -520,8 +601,9 @@ void draw_editor_shell() {
         const char* modes[]={"无光照","柔和光照","线框"};int mode=static_cast<int>(g_preview_shading);ImGui::SetNextItemWidth(120);
         if(ImGui::Combo("显示模式",&mode,modes,3))g_preview_shading=static_cast<gbfr::PreviewShadingMode>(mode);ImGui::SameLine();
         ImGui::Checkbox("骨架", &g_show_skeleton); ImGui::SameLine();
-        ImGui::Checkbox("碰撞体", &g_show_collisions); ImGui::SameLine();
+        if(ImGui::Checkbox("碰撞体", &g_show_collisions)&&g_show_collisions)update_collision_debug(); ImGui::SameLine();
         if (g_preview && g_preview->has_model() && ImGui::Button("取景")) g_preview->frame(g_camera);
+        if(!g_motion_files.empty())draw_motion_controls();
     }else if(g_preview_mode==PreviewMode::texture&&g_preview&&g_preview->texture_image()){
         ImGui::Text("%s  |  %u x %u",utf8(g_loaded_texture.filename().wstring()).c_str(),g_preview->texture_width(),g_preview->texture_height());
     }
@@ -551,7 +633,7 @@ void draw_editor_shell() {
             }
             if (g_show_skeleton && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
                 const float mx=io.MousePos.x-image_origin.x,my=io.MousePos.y-image_origin.y;float best=144.0f;int picked=-1;
-                for(const auto& bone:g_skeleton.bones){gbfr::Vec2 point{};if(!g_preview->project(bone.world_position,g_camera,point))continue;const float dx=point.x-mx,dy=point.y-my,distance=dx*dx+dy*dy;if(distance<best){best=distance;picked=cloth_bone_id(bone.name);}}
+                const auto& pose=g_preview->bone_positions();for(std::size_t i=0;i<g_skeleton.bones.size();++i){const auto& bone=g_skeleton.bones[i];const auto world=i<pose.size()?pose[i]:bone.world_position;gbfr::Vec2 point{};if(!g_preview->project(world,g_camera,point))continue;const float dx=point.x-mx,dy=point.y-my,distance=dx*dx+dy*dy;if(distance<best){best=distance;picked=cloth_bone_id(bone.name);}}
                 if(picked>=0){g_selected_bone=picked;g_all_bones=false;update_collision_debug();}
             }
         }

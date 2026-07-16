@@ -6,6 +6,8 @@
 #include <cstring>
 #include <fstream>
 #include <limits>
+#include <charconv>
+#include <unordered_map>
 #include <vector>
 
 using Microsoft::WRL::ComPtr;
@@ -49,6 +51,32 @@ template<class T> bool create_buffer(ID3D11Device* device,const std::vector<T>& 
     D3D11_BUFFER_DESC desc{}; desc.ByteWidth=static_cast<UINT>(data.size()*sizeof(T)); desc.Usage=D3D11_USAGE_DEFAULT; desc.BindFlags=bind;
     D3D11_SUBRESOURCE_DATA initial{data.data()}; return SUCCEEDED(device->CreateBuffer(&desc,&initial,&output));
 }
+
+template<class T> bool create_dynamic_buffer(ID3D11Device* device,const std::vector<T>& data,UINT bind,ComPtr<ID3D11Buffer>& output) {
+    if(data.empty()) return false;
+    D3D11_BUFFER_DESC desc{};desc.ByteWidth=static_cast<UINT>(data.size()*sizeof(T));desc.Usage=D3D11_USAGE_DYNAMIC;desc.BindFlags=bind;desc.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
+    D3D11_SUBRESOURCE_DATA initial{data.data()};return SUCCEEDED(device->CreateBuffer(&desc,&initial,&output));
+}
+
+int bone_name_id(const std::string& name) {
+    if(name.size()<2||name.front()!='_')return -1;int value{};const auto result=std::from_chars(name.data()+1,name.data()+name.size(),value,16);return result.ec==std::errc{}&&result.ptr==name.data()+name.size()?value:-1;
+}
+
+XMFLOAT3 quaternion_to_euler(const gbfr::Vec4& q) {
+    const float x=std::atan2(2.0f*(q.w*q.x+q.y*q.z),1.0f-2.0f*(q.x*q.x+q.y*q.y));
+    const float y=std::asin(std::clamp(2.0f*(q.w*q.y-q.z*q.x),-1.0f,1.0f));
+    const float z=std::atan2(2.0f*(q.w*q.z+q.x*q.y),1.0f-2.0f*(q.y*q.y+q.z*q.z));
+    return {x,y,z};
+}
+
+XMVECTOR euler_to_quaternion(const XMFLOAT3& euler) {
+    const float sx=std::sin(euler.x*.5f),cx=std::cos(euler.x*.5f),sy=std::sin(euler.y*.5f),cy=std::cos(euler.y*.5f),sz=std::sin(euler.z*.5f),cz=std::cos(euler.z*.5f);
+    return XMVectorSet(sx*cy*cz-cx*sy*sz,cx*sy*cz+sx*cy*sz,cx*cy*sz-sx*sy*cz,cx*cy*cz+sx*sy*sz);
+}
+
+XMMATRIX local_matrix(const gbfr::Vec3& position,const gbfr::Vec3& scale,FXMVECTOR rotation) {
+    return XMMatrixScaling(scale.x,scale.y,scale.z)*XMMatrixRotationQuaternion(rotation)*XMMatrixTranslation(position.x,position.y,position.z);
+}
 }
 
 namespace gbfr {
@@ -84,10 +112,11 @@ void PreviewRenderer::resize(unsigned width,unsigned height) { width=std::max(1u
 
 bool PreviewRenderer::load(const MeshAsset& mesh,const SkeletonAsset& skeleton,const std::vector<PreviewMaterialTextures>& materials) {
     clear();
+    source_mesh_=mesh;skeleton_=skeleton;
     std::vector<GpuVertex> vertices; vertices.reserve(mesh.vertices.size());
     bounds_min_={std::numeric_limits<float>::max(),std::numeric_limits<float>::max(),std::numeric_limits<float>::max()}; bounds_max_={-bounds_min_.x,-bounds_min_.y,-bounds_min_.z};
     for(const auto& v:mesh.vertices) { vertices.push_back({{v.position.x,v.position.y,v.position.z},{v.normal.x,v.normal.y,v.normal.z},{v.uv.x,v.uv.y}}); bounds_min_.x=std::min(bounds_min_.x,v.position.x);bounds_min_.y=std::min(bounds_min_.y,v.position.y);bounds_min_.z=std::min(bounds_min_.z,v.position.z);bounds_max_.x=std::max(bounds_max_.x,v.position.x);bounds_max_.y=std::max(bounds_max_.y,v.position.y);bounds_max_.z=std::max(bounds_max_.z,v.position.z); }
-    if(!create_buffer(device_,vertices,D3D11_BIND_VERTEX_BUFFER,vertices_)||!create_buffer(device_,mesh.indices,D3D11_BIND_INDEX_BUFFER,indices_)) return false;
+    if(!create_dynamic_buffer(device_,vertices,D3D11_BIND_VERTEX_BUFFER,vertices_)||!create_buffer(device_,mesh.indices,D3D11_BIND_INDEX_BUFFER,indices_)) return false;
     index_count_=static_cast<unsigned>(mesh.indices.size());
     draw_ranges_.reserve(mesh.chunks.size());
     for(const auto& chunk:mesh.chunks) {
@@ -111,10 +140,10 @@ bool PreviewRenderer::load(const MeshAsset& mesh,const SkeletonAsset& skeleton,c
     for(std::size_t i=0;i<skeleton.bones.size();++i) { const auto& b=skeleton.bones[i]; if(b.parent==0xffff||b.parent>=skeleton.bones.size()) continue; const auto& p=skeleton.bones[b.parent].world_position; lines.push_back({{p.x,p.y,p.z},{0,1,0},{0,0}});lines.push_back({{b.world_position.x,b.world_position.y,b.world_position.z},{0,1,0},{0,0}}); }
     line_vertex_count_=static_cast<unsigned>(lines.size()); if(!lines.empty()) create_buffer(device_,lines,D3D11_BIND_VERTEX_BUFFER,lines_);
     const float dx=bounds_max_.x-bounds_min_.x,dy=bounds_max_.y-bounds_min_.y,dz=bounds_max_.z-bounds_min_.z;
-    const float marker=std::max(.001f,std::sqrt(dx*dx+dy*dy+dz*dz)*.004f);std::vector<GpuVertex> points;points.reserve(skeleton.bones.size()*6);
-    for(const auto& bone:skeleton.bones){const auto p=bone.world_position;points.push_back({{p.x-marker,p.y,p.z},{0,1,0},{0,0}});points.push_back({{p.x+marker,p.y,p.z},{0,1,0},{0,0}});points.push_back({{p.x,p.y-marker,p.z},{0,1,0},{0,0}});points.push_back({{p.x,p.y+marker,p.z},{0,1,0},{0,0}});points.push_back({{p.x,p.y,p.z-marker},{0,1,0},{0,0}});points.push_back({{p.x,p.y,p.z+marker},{0,1,0},{0,0}});}
+    bone_marker_size_=std::max(.001f,std::sqrt(dx*dx+dy*dy+dz*dz)*.004f);std::vector<GpuVertex> points;points.reserve(skeleton.bones.size()*6);
+    for(const auto& bone:skeleton.bones){const auto p=bone.world_position;points.push_back({{p.x-bone_marker_size_,p.y,p.z},{0,1,0},{0,0}});points.push_back({{p.x+bone_marker_size_,p.y,p.z},{0,1,0},{0,0}});points.push_back({{p.x,p.y-bone_marker_size_,p.z},{0,1,0},{0,0}});points.push_back({{p.x,p.y+bone_marker_size_,p.z},{0,1,0},{0,0}});points.push_back({{p.x,p.y,p.z-bone_marker_size_},{0,1,0},{0,0}});points.push_back({{p.x,p.y,p.z+bone_marker_size_},{0,1,0},{0,0}});}
     bone_point_vertex_count_=static_cast<unsigned>(points.size());if(!points.empty())create_buffer(device_,points,D3D11_BIND_VERTEX_BUFFER,bone_points_);
-    return true;
+    return apply_animation(nullptr,0.0f);
 }
 
 bool PreviewRenderer::load_texture_preview(const fs::path& dds) {
@@ -129,7 +158,59 @@ void PreviewRenderer::clear() {
     index_count_=0; line_vertex_count_=0; bone_point_vertex_count_=0; collision_vertex_count_=0;
     vertices_.Reset(); indices_.Reset(); lines_.Reset(); bone_points_.Reset(); collision_lines_.Reset();
     draw_ranges_.clear(); materials_.clear();
+    source_mesh_={};skeleton_={};animated_bone_positions_.clear();
     texture_preview_srv_.Reset();texture_width_=0;texture_height_=0;
+}
+
+bool PreviewRenderer::apply_animation(const AnimationClip* clip,float frame) {
+    if(source_mesh_.vertices.empty()||skeleton_.bones.empty()||!vertices_)return false;
+    const auto bone_count=skeleton_.bones.size();
+    std::vector<Vec3> positions(bone_count),scales(bone_count);
+    std::vector<XMFLOAT3> rotations(bone_count);
+    std::unordered_map<int,std::size_t> bone_indices;bone_indices.reserve(bone_count);
+    std::size_t object_root{};
+    for(std::size_t i=0;i<bone_count;++i){const auto& bone=skeleton_.bones[i];positions[i]=bone.position;scales[i]=bone.scale;rotations[i]=quaternion_to_euler(bone.rotation);const int id=bone_name_id(bone.name);if(id>=0)bone_indices.emplace(id,i);if(bone.parent==0xffff&&bone.name=="_900")object_root=i;}
+    if(clip)for(const auto& track:clip->tracks){
+        std::size_t index{};
+        if(track.bone_id==-1)index=object_root;
+        else {const auto found=bone_indices.find(track.bone_id);if(found==bone_indices.end())continue;index=found->second;}
+        const float value=track.sample(frame);
+        switch(track.property){
+        case 0:positions[index].x=value;break;case 1:positions[index].y=value;break;case 2:positions[index].z=value;break;
+        case 3:rotations[index].x=value;break;case 4:rotations[index].y=value;break;case 5:rotations[index].z=value;break;
+        case 7:scales[index].x=value;break;case 8:scales[index].y=value;break;case 9:scales[index].z=value;break;
+        default:break;
+        }
+    }
+
+    std::vector<XMMATRIX> rest_world(bone_count),posed_world(bone_count),skin(bone_count);
+    animated_bone_positions_.resize(bone_count);
+    for(std::size_t i=0;i<bone_count;++i){
+        const auto& bone=skeleton_.bones[i];
+        const auto rest_local=local_matrix(bone.position,bone.scale,XMVectorSet(bone.rotation.x,bone.rotation.y,bone.rotation.z,bone.rotation.w));
+        const auto posed_local=local_matrix(positions[i],scales[i],euler_to_quaternion(rotations[i]));
+        if(bone.parent==0xffff){rest_world[i]=rest_local;posed_world[i]=posed_local;}
+        else {if(bone.parent>=i)return false;rest_world[i]=rest_local*rest_world[bone.parent];posed_world[i]=posed_local*posed_world[bone.parent];}
+        skin[i]=XMMatrixInverse(nullptr,rest_world[i])*posed_world[i];
+        XMFLOAT3 world{};XMStoreFloat3(&world,posed_world[i].r[3]);animated_bone_positions_[i]={world.x,world.y,world.z};
+    }
+
+    std::vector<GpuVertex> vertices;vertices.reserve(source_mesh_.vertices.size());
+    for(const auto& source:source_mesh_.vertices){
+        XMVECTOR position=XMVectorZero(),normal=XMVectorZero();float total{};
+        for(std::size_t influence=0;influence<4;++influence){const float weight=source.weights[influence];const auto joint=source.joints[influence];if(weight<=0.0f||joint>=bone_count)continue;position+=XMVectorScale(XMVector3TransformCoord(XMVectorSet(source.position.x,source.position.y,source.position.z,1),skin[joint]),weight);normal+=XMVectorScale(XMVector3TransformNormal(XMVectorSet(source.normal.x,source.normal.y,source.normal.z,0),skin[joint]),weight);total+=weight;}
+        if(total<=0.0f){position=XMVectorSet(source.position.x,source.position.y,source.position.z,1);normal=XMVectorSet(source.normal.x,source.normal.y,source.normal.z,0);}else normal=XMVector3Normalize(normal);
+        XMFLOAT3 p{},n{};XMStoreFloat3(&p,position);XMStoreFloat3(&n,normal);vertices.push_back({{p.x,p.y,p.z},{n.x,n.y,n.z},{source.uv.x,source.uv.y}});
+    }
+    D3D11_MAPPED_SUBRESOURCE mapped{};if(FAILED(context_->Map(vertices_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped)))return false;std::memcpy(mapped.pData,vertices.data(),vertices.size()*sizeof(GpuVertex));context_->Unmap(vertices_.Get(),0);
+
+    std::vector<GpuVertex> lines;lines.reserve(line_vertex_count_);
+    for(std::size_t i=0;i<bone_count;++i){const auto parent=skeleton_.bones[i].parent;if(parent==0xffff||parent>=bone_count)continue;const auto& p=animated_bone_positions_[parent];const auto& b=animated_bone_positions_[i];lines.push_back({{p.x,p.y,p.z},{0,1,0},{0,0}});lines.push_back({{b.x,b.y,b.z},{0,1,0},{0,0}});}
+    if(lines_&&!lines.empty())context_->UpdateSubresource(lines_.Get(),0,nullptr,lines.data(),0,0);
+    std::vector<GpuVertex> points;points.reserve(bone_point_vertex_count_);const float marker=bone_marker_size_;
+    for(const auto& p:animated_bone_positions_){points.push_back({{p.x-marker,p.y,p.z},{0,1,0},{0,0}});points.push_back({{p.x+marker,p.y,p.z},{0,1,0},{0,0}});points.push_back({{p.x,p.y-marker,p.z},{0,1,0},{0,0}});points.push_back({{p.x,p.y+marker,p.z},{0,1,0},{0,0}});points.push_back({{p.x,p.y,p.z-marker},{0,1,0},{0,0}});points.push_back({{p.x,p.y,p.z+marker},{0,1,0},{0,0}});}
+    if(bone_points_&&!points.empty())context_->UpdateSubresource(bone_points_.Get(),0,nullptr,points.data(),0,0);
+    return true;
 }
 
 void PreviewRenderer::set_collision_lines(const std::vector<Vec3>& points) {

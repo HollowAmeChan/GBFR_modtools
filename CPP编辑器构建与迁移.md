@@ -46,6 +46,7 @@ out\bin\RelWithDebInfo\GBFRModtools.exe
 - 资源列表按基线 SHA-256 显示缺失和修改状态。
 - `.minfo/.skeleton/.mmesh` 可原生恢复、原样写入 build，并加载 D3D11 预览。
 - 预览支持轨道旋转、平移、缩放、取景、线框、骨架和 BC7/BC5 DX10 DDS。
+- 加载 `pl` 模型后会发现 `source/data/pl/<角色>/*.mot`，支持筛选切片、播放/暂停、循环、速度和时间轴预览，也可恢复静止姿态。
 - 点击视口骨骼或骨骼列表会过滤关联 CLH；支持单 CLH/全部 CLH、当前骨骼/全部骨骼模式。
 - CLH 可编辑半径、权重和两个 offset，保存到 `unpack` 后仍由现有 cloth 构建链编码 BXM。
 
@@ -57,6 +58,7 @@ out\bin\RelWithDebInfo\GBFRModtools.exe
 | 模型文件恢复与 build | C++ 原生 |
 | skeleton/minfo/mmesh LOD0 解析 | C++ 原生 |
 | 网格、DDS、骨架和碰撞预览 | C++ 原生 |
+| `.mot` 压缩类型 0-8 解码、60 FPS 采样与 CPU 蒙皮预览 | C++ 原生 |
 | CLH/CLP 读取、CLH 常用字段编辑 | C++ 原生 |
 | WTB `.texture` 封回与恢复 | 旧版构建器 |
 | mmat JSON 编码、A4 快捷删除 | 旧版构建器 |
@@ -72,7 +74,8 @@ out\bin\RelWithDebInfo\GBFRModtools.exe
 - 临时 Version 1 工作区的哈希、修改检测、模型 build 和恢复。
 - 有本地 `explore_output` 时，从 workspace 各资源数组计算预期候选总数，并断言 C++ 与 PowerShell 工作区一致。2026-07-16 使用新版 GBFRDataTools 重解包后，当前 pl1400 基线为 319 个候选。
 - pl1400 LOD0 的 minfo、skeleton 和 mmesh 集成解析。
+- pl1400 的 524 个 `.mot`、248401 条轨道与压缩类型 0-8 全量解析；验证已知曲线采样、静止姿态无损还原、动画姿态变化、CPU 蒙皮和 D3D11 渲染。
 - pl1400 `0_0` CLH 8 条碰撞、CLP 60 个节点解析，以及临时 CLH 副本写回。
 - 损坏 FlatBuffer 的越界拒绝。
 
-测试不修改 `explore_output`；写回测试只操作系统临时目录。
+测试不修改 `explore_output`；写回测试只操作 CTest 构建目录下的临时副本，结束时自动删除。

@@ -54,6 +54,7 @@ explore_output/
 - 根据 mmat 的 `A4` 哈希，从 `data/granite/{2k,4k}/gts` 提取 `albd/msk1/msk2/nrml` 以及眼球的 `conj/iris/eyeh` 分层贴图，并转换为 DDS。
 - 将 `data/model/**/vars/*.mmat` 解码为 `*.mmat.json`。
 - 将角色 cloth 基础组、碰撞体、动作覆盖和重置表解码为 `*.bxm.xml`。
+- 将角色目录中的 `.mot` 动画原件复制到 `source/data/pl/<角色>/`，供 C++ 预览器按需解码；动画不会复制到可编辑的 `unpack`，也不会进入 Mod 构建列表。
 - 将 pl/fp/wp 的 `.minfo`、`.skeleton` 与 LOD0 `.mmesh` 原样复制到 `unpack`，登记为可恢复、可构建的模型文件。
 - 记录中间态 SHA-256，用于识别真实修改。
 
@@ -105,6 +106,14 @@ unpack/data/pl/pl1400/pl1400_0002_0_seq_edit_cloth.bxm.xml
 `source/` 是不可编辑的原始模板。删除 `unpack/` 中间文件后，该项会标为“缺少输入”：不能构建，但可用“恢复”从原始模板重新生成。
 
 Blender 插件导出完成后，可把整个 `_Exported_MInfo` 文件夹或其中的 `.minfo/.skeleton/.mmesh` 直接拖入编辑封包工具。工具按文件名匹配当前角色的 pl/fp/wp 目标，确认后覆盖对应 `unpack` 文件；插件生成的 `.json` 不进入 Mod 工作区。`.mmesh` 固定写入 `data/model_streaming/lod0/`，LOD1-3 仍只保留在 `source`，供后续分析或可视化使用。
+
+### 动画预览
+
+C++ 编辑器加载 `pl` 模型后，会扫描 `source/data/pl/<角色>/*.mot`。视口顶部可以按文件名筛选动画切片、选择切片、播放/暂停、回到开头、循环、调整速度或拖动时间轴；选择“静止姿态”会恢复骨架和网格的原始绑定姿态。动画只用于预览，不会修改 `unpack`、`source` 或 `build`。
+
+`.mot` 使用 60 FPS 帧时间。动画记录中的骨骼 ID 不是 `.skeleton` 数组下标，而是十六进制骨骼名编码，例如 `0xC45 -> _c45`；对象级 `-1` 轨道映射到根骨 `_900`。当前解码器支持样本中出现的压缩类型 `0-8`，并将位置、欧拉旋转和缩放轨道应用到本地骨骼姿态，再进行 CPU 蒙皮。解码器独立位于 `include/gbfr/formats/animation.hpp` 与 `src/gbfr_formats/src/animation.cpp`，可以脱离编辑器 UI 复用。
+
+当前预览一次只播放一个骨骼动画切片，不处理游戏状态机、切片混合、面部专用通道、IK 或动画驱动的 cloth 参数。未知辅助属性会被保留在解码结果中，但不会错误地套到骨骼 TRS 上。
 
 ### `vars/*.mmat` 编号与配色
 

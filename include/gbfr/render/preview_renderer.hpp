@@ -1,4 +1,5 @@
 #pragma once
+#include <gbfr/formats/animation.hpp>
 #include <gbfr/formats/model.hpp>
 #include <d3d11.h>
 #include <wrl/client.h>
@@ -23,6 +24,7 @@ public:
               const std::vector<PreviewMaterialTextures>& materials = {});
     bool load_texture_preview(const std::filesystem::path& dds);
     void clear();
+    bool apply_animation(const AnimationClip* clip, float frame);
     void set_collision_lines(const std::vector<Vec3>& points);
     void resize(unsigned width, unsigned height);
     void render(const OrbitCamera& camera, bool show_mesh, PreviewShadingMode shading,
@@ -36,6 +38,7 @@ public:
     unsigned width() const noexcept { return width_; }
     unsigned height() const noexcept { return height_; }
     bool has_model() const noexcept { return index_count_ != 0; }
+    const std::vector<Vec3>& bone_positions() const noexcept { return animated_bone_positions_; }
 private:
     bool create_targets();
     struct DrawRange {
@@ -72,5 +75,9 @@ private:
     Microsoft::WRL::ComPtr<ID3D11DepthStencilState> overlay_depth_;
     std::vector<DrawRange> draw_ranges_;
     std::vector<GpuMaterialTextures> materials_;
+    MeshAsset source_mesh_;
+    SkeletonAsset skeleton_;
+    std::vector<Vec3> animated_bone_positions_;
+    float bone_marker_size_{.001f};
 };
 }
