@@ -25,7 +25,8 @@ public:
     void clear();
     void set_collision_lines(const std::vector<Vec3>& points);
     void resize(unsigned width, unsigned height);
-    void render(const OrbitCamera& camera, bool show_mesh, PreviewShadingMode shading, bool show_skeleton);
+    void render(const OrbitCamera& camera, bool show_mesh, PreviewShadingMode shading,
+                bool show_skeleton, bool show_collisions);
     void frame(OrbitCamera& camera) const;
     bool project(Vec3 world, const OrbitCamera& camera, Vec2& screen) const;
     ID3D11ShaderResourceView* image() const noexcept { return color_srv_.Get(); }

@@ -55,6 +55,7 @@ gbfr::SkeletonAsset g_skeleton;
 bool g_show_mesh = true;
 gbfr::PreviewShadingMode g_preview_shading = gbfr::PreviewShadingMode::lit;
 bool g_show_skeleton = true;
+bool g_show_collisions = true;
 struct ClhFile { std::filesystem::path path; gbfr::ClhAsset data; };
 struct ClpFile { std::filesystem::path path; gbfr::ClpAsset data; };
 std::vector<ClhFile> g_clh_files;
@@ -519,6 +520,7 @@ void draw_editor_shell() {
         const char* modes[]={"无光照","柔和光照","线框"};int mode=static_cast<int>(g_preview_shading);ImGui::SetNextItemWidth(120);
         if(ImGui::Combo("显示模式",&mode,modes,3))g_preview_shading=static_cast<gbfr::PreviewShadingMode>(mode);ImGui::SameLine();
         ImGui::Checkbox("骨架", &g_show_skeleton); ImGui::SameLine();
+        ImGui::Checkbox("碰撞体", &g_show_collisions); ImGui::SameLine();
         if (g_preview && g_preview->has_model() && ImGui::Button("取景")) g_preview->frame(g_camera);
     }else if(g_preview_mode==PreviewMode::texture&&g_preview&&g_preview->texture_image()){
         ImGui::Text("%s  |  %u x %u",utf8(g_loaded_texture.filename().wstring()).c_str(),g_preview->texture_width(),g_preview->texture_height());
@@ -526,7 +528,7 @@ void draw_editor_shell() {
     ImVec2 available = ImGui::GetContentRegionAvail();
     if (g_preview&&g_preview_mode==PreviewMode::model&&available.x > 1 && available.y > 1) {
         g_preview->resize(static_cast<unsigned>(available.x), static_cast<unsigned>(available.y));
-        g_preview->render(g_camera, g_show_mesh, g_preview_shading, g_show_skeleton);
+        g_preview->render(g_camera, g_show_mesh, g_preview_shading, g_show_skeleton, g_show_collisions);
         const ImVec2 image_origin=ImGui::GetCursorScreenPos();
         ImGui::Image(reinterpret_cast<ImTextureID>(g_preview->image()), available);
         if (ImGui::IsItemHovered()) {

@@ -76,7 +76,9 @@ int main() {
         gbfr::OrbitCamera camera;
         if(!preview.load(mesh,skeleton,preview_materials))return 17;
         preview.resize(320,320);preview.frame(camera);
-        for(const auto mode:{gbfr::PreviewShadingMode::unlit,gbfr::PreviewShadingMode::lit,gbfr::PreviewShadingMode::wireframe})preview.render(camera,true,mode,true);
+        preview.set_collision_lines({{0.0f,0.0f,0.0f},{0.0f,1.0f,0.0f}});
+        for(const auto mode:{gbfr::PreviewShadingMode::unlit,gbfr::PreviewShadingMode::lit,gbfr::PreviewShadingMode::wireframe})preview.render(camera,true,mode,true,true);
+        preview.render(camera,true,gbfr::PreviewShadingMode::lit,true,false);
         context->Flush();
         if(FAILED(device->GetDeviceRemovedReason()))return 18;
         const auto fp_root=integration.parent_path()/L"unpack/data/model/fp/fp1400";
@@ -100,7 +102,7 @@ int main() {
             material.eye_highlight=granite_4k/fs::path(entry.eye_highlight_name+".dds");
         }
         if(!preview.load(fp_mesh,fp_skeleton,fp_preview_materials))return 20;
-        preview.frame(camera);preview.render(camera,true,gbfr::PreviewShadingMode::lit,true);context->Flush();
+        preview.frame(camera);preview.render(camera,true,gbfr::PreviewShadingMode::lit,true,true);context->Flush();
         if(FAILED(device->GetDeviceRemovedReason()))return 21;
         const auto cloth_root=integration.parent_path()/L"unpack/data/pl/pl1400/cloth";
         const auto clh_path=cloth_root/L"pl1400_0_0_clh.bxm.xml",clp_path=cloth_root/L"pl1400_0_0_clp.bxm.xml";
