@@ -472,9 +472,17 @@ $btnRefresh.Size = New-Object Drawing.Size(100, 32)
 $btnRefresh.Anchor = "Bottom,Left"
 $form.Controls.Add($btnRefresh)
 
+$btnRestore = New-Object Windows.Forms.Button
+$btnRestore.Text = $B.restore_selected
+$btnRestore.Location = New-Object Drawing.Point(356, 484)
+$btnRestore.Size = New-Object Drawing.Size(130, 32)
+$btnRestore.Anchor = "Bottom,Left"
+$btnRestore.Enabled = $false
+$form.Controls.Add($btnRestore)
+
 $btnOpenBuild = New-Object Windows.Forms.Button
 $btnOpenBuild.Text = $B.open_build
-$btnOpenBuild.Location = New-Object Drawing.Point(356, 484)
+$btnOpenBuild.Location = New-Object Drawing.Point(495, 484)
 $btnOpenBuild.Size = New-Object Drawing.Size(105, 32)
 $btnOpenBuild.Anchor = "Bottom,Left"
 $form.Controls.Add($btnOpenBuild)
@@ -505,9 +513,14 @@ function Add-Log([string]$Message) {
 }
 
 function Update-SelectionSummary {
-    if ($null -eq $script:context) { $btnBuild.Enabled = $false; return }
+    if ($null -eq $script:context) {
+        $btnBuild.Enabled = $false
+        $btnRestore.Enabled = $false
+        return
+    }
     $checked = @(Get-CheckedGridOperations).Count
     $btnBuild.Enabled = $checked -gt 0
+    $btnRestore.Enabled = $checked -gt 0
     $changed = @($script:context.Operations | Where-Object { $_.Changed }).Count
     $lblSummary.Text = "$($script:context.Workspace.CharacterId) | $($B.candidate) $($script:context.Operations.Count) | $($B.modified_count) $changed | $($B.selected_count) $checked | $($B.missing_count) $($script:context.MissingCount)"
 }
@@ -639,6 +652,24 @@ $btnClear.Add_Click({
 $btnRefresh.Add_Click({
     if ($txtManifest.Text) { Load-Manifest $txtManifest.Text -PreserveSelection }
 })
+$btnRestore.Add_Click({
+    if ($null -eq $script:context) { return }
+    $selected = @(Get-CheckedGridOperations)
+    if ($selected.Count -eq 0) { return }
+    $targets = ($selected | ForEach-Object { "- $($_.InputLabel)" }) -join "`r`n"
+    $answer = [Windows.Forms.MessageBox]::Show(
+        "$($B.confirm_restore_prefix) $($selected.Count) $($B.confirm_restore_suffix):`r`n`r`n$targets",
+        $B.confirm_title, "OKCancel", "Warning"
+    )
+    if ($answer -ne "OK") { return }
+    $btnRestore.Enabled = $false
+    $result = Restore-WorkspaceOperations $script:context $selected { param($message) Add-Log $message }
+    Add-Log "$($B.restore_finished): $($B.success) $($result.Success), $($B.failed) $($result.Failed)"
+    Load-Manifest $txtManifest.Text
+    if ($result.Failed -gt 0) {
+        [Windows.Forms.MessageBox]::Show($B.partial_failure, $B.restore_finished, "OK", "Warning") | Out-Null
+    }
+})
 $grid.Add_CellContentClick({
     if ($_.RowIndex -lt 0) { return }
     $row = $grid.Rows[$_.RowIndex]
@@ -716,7 +747,7 @@ if ($UiSmokeTest) {
     $mmatRows = @($grid.Rows | Where-Object { $null -ne $_.Tag -and [string]$_.Tag.Kind -eq "mmat" })
     $restoreButtons = @($grid.Rows | Where-Object { $_.Cells["Restore"].Value -eq $B.restore_row })
     $a4Buttons = @($mmatRows | Where-Object { [string]$_.Cells["A4Action"].Value -like "$($B.clear_a4)*" })
-    Write-Host "UI smoke: rows=$($grid.Rows.Count), restore=$($restoreButtons.Count), mmat=$($mmatRows.Count), clearA4=$($a4Buttons.Count)"
+    Write-Host "UI smoke: rows=$($grid.Rows.Count), restore=$($restoreButtons.Count), bulkRestore=$($btnRestore.Text -eq $B.restore_selected), mmat=$($mmatRows.Count), clearA4=$($a4Buttons.Count)"
     exit 0
 }
 [void]$form.ShowDialog()
