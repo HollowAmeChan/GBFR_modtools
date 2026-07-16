@@ -650,6 +650,64 @@ $colClothValue.SortMode = "NotSortable"
 [void]$clothGrid.Columns.Add($colClothValue)
 $pageCloth.Controls.Add($clothGrid)
 
+foreach ($control in @(
+    $lblSummary, $grid, $btnModified, $btnClear, $btnRefresh, $btnRestore,
+    $btnOpenBuild, $btnBuild, $log, $lblMmatObject, $txtMmatObject,
+    $btnClearMmatA4, $lblMmatSummary, $mmatGrid, $lblClothObject,
+    $txtClothObject, $btnChooseCloth, $lblClothSummary, $clothGrid
+)) {
+    $control.Anchor = "Top,Left"
+}
+
+function Update-WorkspaceEditorLayout {
+    $buildWidth = $pageBuild.ClientSize.Width
+    $buildHeight = $pageBuild.ClientSize.Height
+    if ($buildWidth -gt 300 -and $buildHeight -gt 250) {
+        $logHeight = 102
+        $logY = $buildHeight - 8 - $logHeight
+        $toolbarY = $logY - 44
+        $gridHeight = [Math]::Max(100, $toolbarY - 12 - 36)
+        $lblSummary.SetBounds(8, 8, $buildWidth - 16, 24)
+        $grid.SetBounds(8, 36, $buildWidth - 16, $gridHeight)
+        $btnModified.SetBounds(8, $toolbarY, 115, 32)
+        $btnClear.SetBounds(132, $toolbarY, 100, 32)
+        $btnRefresh.SetBounds(241, $toolbarY, 100, 32)
+        $btnRestore.SetBounds(350, $toolbarY, 130, 32)
+        $btnOpenBuild.SetBounds(489, $toolbarY, 105, 32)
+        $btnBuild.SetBounds($buildWidth - 158, $toolbarY - 2, 150, 36)
+        $log.SetBounds(8, $logY, $buildWidth - 16, $logHeight)
+    }
+
+    $mmatWidth = $pageMmat.ClientSize.Width
+    $mmatHeight = $pageMmat.ClientSize.Height
+    if ($mmatWidth -gt 300 -and $mmatHeight -gt 180) {
+        $mmatButtonX = $mmatWidth - 192
+        $lblMmatObject.SetBounds(12, 16, 70, 24)
+        $txtMmatObject.SetBounds(90, 12, [Math]::Max(120, $mmatButtonX - 104), 27)
+        $btnClearMmatA4.SetBounds($mmatButtonX, 10, 180, 32)
+        $lblMmatSummary.SetBounds(12, 50, $mmatWidth - 24, 24)
+        $mmatGrid.SetBounds(12, 78, $mmatWidth - 24, [Math]::Max(80, $mmatHeight - 90))
+    }
+
+    $clothWidth = $pageCloth.ClientSize.Width
+    $clothHeight = $pageCloth.ClientSize.Height
+    if ($clothWidth -gt 300 -and $clothHeight -gt 180) {
+        $clothButtonX = $clothWidth - 112
+        $lblClothObject.SetBounds(12, 16, 70, 24)
+        $txtClothObject.SetBounds(90, 12, [Math]::Max(120, $clothButtonX - 104), 27)
+        $btnChooseCloth.SetBounds($clothButtonX, 10, 100, 32)
+        $lblClothSummary.SetBounds(12, 50, $clothWidth - 24, 24)
+        $clothGrid.SetBounds(12, 78, $clothWidth - 24, [Math]::Max(80, $clothHeight - 90))
+    }
+}
+
+$pageBuild.Add_SizeChanged({ Update-WorkspaceEditorLayout })
+$pageMmat.Add_SizeChanged({ Update-WorkspaceEditorLayout })
+$pageCloth.Add_SizeChanged({ Update-WorkspaceEditorLayout })
+$tabs.Add_SelectedIndexChanged({ Update-WorkspaceEditorLayout })
+$form.Add_Shown({ Update-WorkspaceEditorLayout })
+Update-WorkspaceEditorLayout
+
 $script:context = $null
 $script:mmatOperation = $null
 $script:mmatOperationKey = ""
@@ -985,6 +1043,23 @@ $btnBuild.Add_Click({
 
 if ($ManifestPath -and (Test-Path -LiteralPath $ManifestPath)) { Load-Manifest $ManifestPath }
 if ($UiSmokeTest) {
+    $form.Opacity = 0
+    $form.Show()
+    [Windows.Forms.Application]::DoEvents()
+    $form.ClientSize = New-Object Drawing.Size(1600, 900)
+    $form.PerformLayout()
+    $tabs.PerformLayout()
+    [Windows.Forms.Application]::DoEvents()
+    Update-WorkspaceEditorLayout
+    $layoutOk = $grid.Bottom -lt $btnModified.Top -and
+        $btnModified.Bottom -lt $log.Top -and
+        $grid.Right -le $pageBuild.ClientSize.Width -and
+        $log.Bottom -le $pageBuild.ClientSize.Height
+    $actionColumnsVisible = $grid.Columns["Restore"].Displayed -and $grid.Columns["Edit"].Displayed
+    if (-not $layoutOk) {
+        throw "Build page layout overlap: page=$($pageBuild.ClientSize), grid=$($grid.Bounds), toolbar=$($btnModified.Bounds), log=$($log.Bounds)"
+    }
+    if (-not $actionColumnsVisible) { throw "Restore/Edit columns are not displayed in the resized build grid" }
     $mmatRows = @($grid.Rows | Where-Object { $null -ne $_.Tag -and [string]$_.Tag.Kind -eq "mmat" })
     $restoreButtons = @($grid.Rows | Where-Object { $_.Cells["Restore"].Value -eq $B.restore_row })
     $editButtons = @($mmatRows | Where-Object { $_.Cells["Edit"].Value -eq $B.edit })
@@ -993,7 +1068,8 @@ if ($UiSmokeTest) {
     $clothDir = Join-Path $script:context.Root "source\data\pl\$($script:context.Workspace.CharacterId)\cloth"
     $clothSample = Get-ChildItem -LiteralPath $clothDir -Filter "*.bxm" -File -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($null -ne $clothSample) { Show-ClothQuickInfo $clothSample.FullName }
-    Write-Host "UI smoke: rows=$($grid.Rows.Count), restore=$($restoreButtons.Count), bulkRestore=$($btnRestore.Text -eq $B.restore_selected), edit=$($editButtons.Count), mmatEntries=$($mmatGrid.Rows.Count), mmatTab=$mmatTabSelected, clothTab=$($tabs.TabPages.Contains($pageCloth)), clothQuick=$($clothGrid.Rows.Count)"
+    Write-Host "UI smoke: layout=$layoutOk, actionColumns=$actionColumnsVisible, page=$($pageBuild.ClientSize.Width)x$($pageBuild.ClientSize.Height), grid=$($grid.Width)x$($grid.Height), rows=$($grid.Rows.Count), restore=$($restoreButtons.Count), bulkRestore=$($btnRestore.Text -eq $B.restore_selected), edit=$($editButtons.Count), mmatEntries=$($mmatGrid.Rows.Count), mmatTab=$mmatTabSelected, clothTab=$($tabs.TabPages.Contains($pageCloth)), clothQuick=$($clothGrid.Rows.Count)"
+    $form.Close()
     exit 0
 }
 [void]$form.ShowDialog()
