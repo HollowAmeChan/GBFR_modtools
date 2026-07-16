@@ -110,6 +110,12 @@ int main() {
         }
         for(std::size_t i=2;i<=4;++i)fp_preview_materials[i].albedo=granite_4k/L"fp1400_face_lod0_albd.dds";
         if(!preview.load(fp_mesh,fp_skeleton,fp_preview_materials))return 20;
+        if(!preview.visible_bone_count()||preview.visible_bone_count()>=fp_skeleton.bones.size())return 40;
+        const auto fp_rest_bones=preview.bone_positions();
+        gbfr::AnimationClip empty_face_pose;empty_face_pose.frame_count=1;
+        if(!preview.apply_animation(&empty_face_pose,0.0f)||preview.bone_positions().size()!=fp_rest_bones.size())return 37;
+        for(std::size_t i=0;i<fp_rest_bones.size();++i){const auto& a=fp_rest_bones[i];const auto& b=preview.bone_positions()[i];if(std::abs(a.x-b.x)+std::abs(a.y-b.y)+std::abs(a.z-b.z)>1e-4f)return 38;}
+        if(!preview.apply_animation(nullptr,0.0f))return 39;
         const auto face_motion_root=integration.parent_path()/L"source/data/fp/fp1400";
         std::size_t face_motion_count{};
         for(const auto& entry:fs::directory_iterator(face_motion_root))if(entry.path().extension()==L".mot"){

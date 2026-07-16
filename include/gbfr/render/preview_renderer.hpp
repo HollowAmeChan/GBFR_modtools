@@ -40,6 +40,7 @@ public:
     unsigned height() const noexcept { return height_; }
     bool has_model() const noexcept { return index_count_ != 0; }
     const std::vector<Vec3>& bone_positions() const noexcept { return animated_bone_positions_; }
+    std::size_t visible_bone_count() const noexcept { return visible_bone_count_; }
     std::uint64_t vertex_pose_hash() const noexcept { return vertex_pose_hash_; }
 private:
     bool create_targets();
@@ -82,6 +83,8 @@ private:
     MeshAsset source_mesh_;
     SkeletonAsset skeleton_;
     std::vector<Vec3> animated_bone_positions_;
+    std::vector<bool> visible_bones_;
+    std::size_t visible_bone_count_{};
     std::uint64_t vertex_pose_hash_{};
     float bone_marker_size_{.001f};
 };

@@ -328,7 +328,9 @@ bool load_model_preview(std::size_t index,bool force) {
         discover_motions(key);
         g_preview->frame(g_camera);
         g_clh_files.clear(); g_clp_files.clear(); g_selected_collision=-1; g_selected_bone=-1; g_selected_clh=0;
-        for(const auto& asset:g_workspace->assets()) if(asset.kind==gbfr::AssetKind::cloth&&asset.available) {
+        const auto model_id=key.minfo.stem().wstring();
+        const auto cloth_prefix=model_id+L"_";
+        for(const auto& asset:g_workspace->assets()) if(asset.kind==gbfr::AssetKind::cloth&&asset.available&&asset.input.filename().wstring().starts_with(cloth_prefix)) {
             try { if(asset.subtype=="clh") g_clh_files.push_back({asset.input,gbfr::load_clh(asset.input)}); else if(asset.subtype=="clp") g_clp_files.push_back({asset.input,gbfr::load_clp(asset.input)}); } catch(const std::exception& error) { gbfr::Log::write(gbfr::LogLevel::warning,std::string("cloth 跳过：")+error.what()); }
         }
         update_collision_debug();
@@ -376,10 +378,10 @@ bool asset_matches_search(const gbfr::WorkspaceAsset& asset) {
            contains_ascii_case_insensitive(asset.subtype,query);
 }
 
-gbfr::Vec3 collision_point(int id,const gbfr::Vec4& offset) {
+std::optional<gbfr::Vec3> collision_point(int id,const gbfr::Vec4& offset) {
     const auto* pose=g_preview?&g_preview->bone_positions():nullptr;
-    for(std::size_t i=0;i<g_skeleton.bones.size();++i) if(cloth_bone_id(g_skeleton.bones[i].name)==id) {const auto& p=pose&&i<pose->size()?(*pose)[i]:g_skeleton.bones[i].world_position;return {p.x+offset.x,p.y+offset.y,p.z+offset.z};}
-    return {offset.x,offset.y,offset.z};
+    for(std::size_t i=0;i<g_skeleton.bones.size();++i) if(cloth_bone_id(g_skeleton.bones[i].name)==id) {const auto& p=pose&&i<pose->size()?(*pose)[i]:g_skeleton.bones[i].world_position;return gbfr::Vec3{p.x+offset.x,p.y+offset.y,p.z+offset.z};}
+    return std::nullopt;
 }
 
 void append_circle(std::vector<gbfr::Vec3>& lines,gbfr::Vec3 center,float radius,int plane) {
@@ -389,7 +391,7 @@ void append_circle(std::vector<gbfr::Vec3>& lines,gbfr::Vec3 center,float radius
 
 void update_collision_debug() {
     if(!g_preview)return;std::vector<gbfr::Vec3> lines;
-    for(std::size_t file_index=0;file_index<g_clh_files.size();++file_index){if(!g_all_clh_files&&static_cast<int>(file_index)!=g_selected_clh)continue;for(const auto& c:g_clh_files[file_index].data.collisions){if(!g_all_bones&&g_selected_bone>=0&&c.p1!=g_selected_bone&&c.p2!=g_selected_bone)continue;const auto p=collision_point(c.p1,c.offset1),q=collision_point(c.p2,c.offset2);lines.push_back(p);lines.push_back(q);append_circle(lines,p,c.radius,0);append_circle(lines,p,c.radius,1);append_circle(lines,p,c.radius,2);if(c.p1!=c.p2||c.offset1.x!=c.offset2.x||c.offset1.y!=c.offset2.y||c.offset1.z!=c.offset2.z){append_circle(lines,q,c.radius,0);append_circle(lines,q,c.radius,1);append_circle(lines,q,c.radius,2);}}}g_preview->set_collision_lines(lines);
+    for(std::size_t file_index=0;file_index<g_clh_files.size();++file_index){if(!g_all_clh_files&&static_cast<int>(file_index)!=g_selected_clh)continue;for(const auto& c:g_clh_files[file_index].data.collisions){if(!g_all_bones&&g_selected_bone>=0&&c.p1!=g_selected_bone&&c.p2!=g_selected_bone)continue;const auto p=collision_point(c.p1,c.offset1),q=collision_point(c.p2,c.offset2);if(!p||!q)continue;lines.push_back(*p);lines.push_back(*q);append_circle(lines,*p,c.radius,0);append_circle(lines,*p,c.radius,1);append_circle(lines,*p,c.radius,2);if(c.p1!=c.p2||c.offset1.x!=c.offset2.x||c.offset1.y!=c.offset2.y||c.offset1.z!=c.offset2.z){append_circle(lines,*q,c.radius,0);append_circle(lines,*q,c.radius,1);append_circle(lines,*q,c.radius,2);}}}g_preview->set_collision_lines(lines);
 }
 
 void save_selected_collision() {
