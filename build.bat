@@ -102,11 +102,7 @@ if /i "%ACTION%"=="test" (
 if /i "%ACTION%"=="run" (
   popd
   subst %BUILD_DRIVE% /d
-  if exist "%ROOT%explore_output\manifest.md" (
-    start "" "%ROOT%out\bin\%CONFIG%\GBFRModtools.exe" "%ROOT%explore_output\manifest.md"
-  ) else (
-    start "" "%ROOT%out\bin\%CONFIG%\GBFRModtools.exe"
-  )
+  start "" "%ROOT%out\bin\%CONFIG%\GBFRModtools.exe"
   echo [OK] Editor launched.
   exit /b 0
 )

@@ -6,6 +6,7 @@
 #include <gbfr/render/preview_renderer.hpp>
 
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <imgui_impl_dx11.h>
 #include <imgui_impl_win32.h>
 
@@ -48,6 +49,7 @@ int g_selected_bone = -1;
 int g_selected_collision = -1;
 bool g_all_clh_files = false;
 bool g_all_bones = false;
+bool g_reset_layout = true;
 
 std::filesystem::path tool_root() {
     wchar_t module[32768]{}; GetModuleFileNameW(nullptr,module,32768);
@@ -76,19 +78,68 @@ std::string utf8(const std::wstring& value) {
     return output;
 }
 
-void load_workspace(const std::filesystem::path& path) {
+bool load_workspace(const std::filesystem::path& path) {
     try {
         g_workspace = std::make_unique<gbfr::Workspace>(gbfr::Workspace::load(path));
         g_selected_asset.reset();
         const auto settings_directory=g_workspace->root()/L".gbfr";
         std::filesystem::create_directories(settings_directory);
-        g_imgui_ini=utf8((settings_directory/L"imgui.ini").wstring());
+        const auto settings_file=settings_directory/L"imgui_v3.ini";
+        g_imgui_ini=utf8(settings_file.wstring());
         ImGui::GetIO().IniFilename=g_imgui_ini.c_str();
-        if(std::filesystem::is_regular_file(settings_directory/L"imgui.ini"))ImGui::LoadIniSettingsFromDisk(g_imgui_ini.c_str());
+        if(std::filesystem::is_regular_file(settings_file)) {
+            ImGui::LoadIniSettingsFromDisk(g_imgui_ini.c_str());
+            g_reset_layout=false;
+        } else g_reset_layout=true;
         gbfr::Log::write(gbfr::LogLevel::info, "工作区已加载：" + utf8(g_workspace->root().wstring()));
+        return true;
     } catch (const std::exception& error) {
         gbfr::Log::write(gbfr::LogLevel::error, std::string("工作区加载失败：") + error.what());
+        return false;
     }
+}
+
+void load_selected_preview();
+
+std::filesystem::path find_workspace_root(std::filesystem::path path) {
+    path=std::filesystem::absolute(path).parent_path();
+    while(!path.empty()) {
+        if(std::filesystem::is_regular_file(path/L"workspace.json")) return path;
+        const auto parent=path.parent_path();
+        if(parent==path) break;
+        path=parent;
+    }
+    return {};
+}
+
+void open_minfo(const std::filesystem::path& minfo) {
+    if(minfo.extension()!=L".minfo") { gbfr::Log::write(gbfr::LogLevel::error,"请选择 .minfo 文件"); return; }
+    const auto root=find_workspace_root(minfo);
+    if(root.empty()) { gbfr::Log::write(gbfr::LogLevel::error,"无法从 minfo 向上找到 workspace.json"); return; }
+    if(!load_workspace(root)) return;
+    const auto canonical=std::filesystem::weakly_canonical(minfo);
+    for(std::size_t index=0;index<g_workspace->assets().size();++index) {
+        const auto& asset=g_workspace->assets()[index];
+        if(asset.kind==gbfr::AssetKind::model&&asset.subtype=="minfo"&&std::filesystem::weakly_canonical(asset.input)==canonical) { g_selected_asset=index; break; }
+    }
+    if(!g_selected_asset) {
+        for(std::size_t index=0;index<g_workspace->assets().size();++index) {
+            const auto& asset=g_workspace->assets()[index];
+            if(asset.kind==gbfr::AssetKind::model&&asset.subtype=="minfo"&&asset.input.stem()==minfo.stem()) { g_selected_asset=index; break; }
+        }
+    }
+    if(!g_selected_asset) { gbfr::Log::write(gbfr::LogLevel::error,"该 minfo 不在工作区 ModelFiles 中"); return; }
+    load_selected_preview();
+}
+
+void choose_minfo() {
+    wchar_t path[32768]{};
+    OPENFILENAMEW dialog{sizeof(dialog)};
+    dialog.lpstrFilter=L"GBFR Model Info (*.minfo)\0*.minfo\0All files\0*.*\0";
+    dialog.lpstrFile=path;
+    dialog.nMaxFile=32768;
+    dialog.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST;
+    if(GetOpenFileNameW(&dialog)) open_minfo(path);
 }
 
 void choose_workspace() {
@@ -194,11 +245,40 @@ LRESULT WINAPI window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lpar
     return DefWindowProcW(window, message, wparam, lparam);
 }
 
+void build_default_dock_layout(ImGuiID dockspace) {
+    const ImGuiViewport* viewport=ImGui::GetMainViewport();
+    ImGui::DockBuilderRemoveNode(dockspace);
+    ImGui::DockBuilderAddNode(dockspace,ImGuiDockNodeFlags_DockSpace);
+    ImGui::DockBuilderSetNodePos(dockspace,viewport->WorkPos);
+    ImGui::DockBuilderSetNodeSize(dockspace,viewport->WorkSize);
+
+    ImGuiID center=dockspace,left{},right{},bottom{},right_top{},right_bottom{};
+    ImGui::DockBuilderSplitNode(center,ImGuiDir_Left,.24f,&left,&center);
+    ImGui::DockBuilderSplitNode(center,ImGuiDir_Right,.38f,&right,&center);
+    ImGui::DockBuilderSplitNode(center,ImGuiDir_Down,.23f,&bottom,&center);
+    ImGui::DockBuilderSplitNode(right,ImGuiDir_Up,.32f,&right_top,&right_bottom);
+
+    ImGui::DockBuilderDockWindow("Workspace",left);
+    ImGui::DockBuilderDockWindow("Viewport",center);
+    ImGui::DockBuilderDockWindow("Inspector",right_top);
+    ImGui::DockBuilderDockWindow("Skeleton & Cloth",right_bottom);
+    ImGui::DockBuilderDockWindow("Migration Coverage",bottom);
+    ImGui::DockBuilderDockWindow("Log",bottom);
+    ImGui::DockBuilderFinish(dockspace);
+    g_reset_layout=false;
+}
+
 void draw_editor_shell() {
-    ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(), ImGuiDockNodeFlags_PassthruCentralNode);
+    const ImGuiID dockspace=ImGui::GetID("GBFRDockSpace");
+    ImGui::DockSpaceOverViewport(dockspace, ImGui::GetMainViewport(), ImGuiDockNodeFlags_PassthruCentralNode);
+    if(g_reset_layout) build_default_dock_layout(dockspace);
 
     ImGui::Begin("Workspace");
+    if (ImGui::Button("选择 minfo...")) choose_minfo();
+    ImGui::SameLine();
     if (ImGui::Button("打开工作区...")) choose_workspace();
+    ImGui::SameLine();
+    if (ImGui::Button("重置布局")) g_reset_layout=true;
     ImGui::SameLine();
     if (g_workspace && ImGui::Button("刷新")) g_workspace->refresh();
     ImGui::SameLine();
@@ -206,14 +286,12 @@ void draw_editor_shell() {
     ImGui::SameLine();
     ImGui::Checkbox("只看修改", &g_changed_only);
     if (!g_workspace) {
-        ImGui::TextUnformatted("请选择 manifest.md 或 workspace.json");
-        ImGui::End();
-        return;
-    }
-
-    ImGui::Text("%s | 候选 %zu | 已修改 %zu | 缺失 %zu", g_workspace->character_id().c_str(),
+        ImGui::Separator();
+        ImGui::TextUnformatted("请先选择 unpack 中的 .minfo 文件。");
+    } else {
+        ImGui::Text("%s | 候选 %zu | 已修改 %zu | 缺失 %zu", g_workspace->character_id().c_str(),
                 g_workspace->assets().size(), g_workspace->changed_count(), g_workspace->missing_count());
-    if (ImGui::BeginTable("assets", 5, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable)) {
+        if (ImGui::BeginTable("assets", 5, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable)) {
         ImGui::TableSetupScrollFreeze(0, 1);
         ImGui::TableSetupColumn("状态", ImGuiTableColumnFlags_WidthFixed, 80);
         ImGui::TableSetupColumn("类型", ImGuiTableColumnFlags_WidthFixed, 90);
@@ -234,7 +312,8 @@ void draw_editor_shell() {
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", utf8(asset.input.wstring()).c_str());
             ImGui::TableNextColumn(); ImGui::TextUnformatted(utf8(asset.output.lexically_relative(g_workspace->root()).wstring()).c_str());
         }
-        ImGui::EndTable();
+            ImGui::EndTable();
+        }
     }
     ImGui::End();
 
@@ -341,6 +420,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_DockingEnable;
+    io.IniFilename=nullptr;
     ImGui::StyleColorsDark();
     ImGui_ImplWin32_Init(window);
     ImGui_ImplDX11_Init(d3d.device(), d3d.context());
@@ -352,12 +432,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
 
     int argument_count{};
     if (wchar_t** arguments = CommandLineToArgvW(GetCommandLineW(), &argument_count)) {
-        if (argument_count > 1) load_workspace(arguments[1]);
+        if (argument_count > 1) {
+            const std::filesystem::path selected=arguments[1];
+            if(selected.extension()==L".minfo") open_minfo(selected);
+            else load_workspace(selected);
+        }
         LocalFree(arguments);
-    }
-    if (!g_workspace) {
-        const auto candidate = tool_root() / L"explore_output" / L"workspace.json";
-        if (std::filesystem::is_regular_file(candidate)) load_workspace(candidate);
     }
     gbfr::Log::write(gbfr::LogLevel::info, "原生编辑器已初始化");
     ShowWindow(window, SW_SHOWDEFAULT);
