@@ -1,6 +1,19 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
+if "%~1"=="" (
+  call "%~f0" RelWithDebInfo
+  set "RESULT=!errorlevel!"
+  echo.
+  if "!RESULT!"=="0" (
+    echo [OK] Build completed. Press any key to close this window.
+  ) else (
+    echo [ERROR] Build failed with exit code !RESULT!. Press any key to close this window.
+  )
+  pause >nul
+  exit /b !RESULT!
+)
+
 set "ROOT=%~dp0"
 set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
 if not exist "%VSWHERE%" (

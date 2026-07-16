@@ -13,6 +13,8 @@ build.bat run
 build.bat clean
 ```
 
+双击或无参数运行 `build.bat` 时，脚本会构建 `RelWithDebInfo`，显示成功或失败结果并等待按键关闭。带参数运行时不会暂停，适合终端和自动化调用。
+
 输出位于 `out/bin/<配置>/GBFRModtools.exe`。依赖固定版本并缓存到 `.deps/`，不写入 `_lib/`。
 
 `build.bat` 通过 `vswhere.exe` 自动定位 VS、MSVC、CMake 和 Ninja。本机验证路径如下，仅用于排错，脚本没有硬编码这些路径：
