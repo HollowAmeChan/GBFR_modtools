@@ -21,7 +21,7 @@ struct VSIn { float3 position:POSITION; float3 normal:NORMAL; float2 uv:TEXCOORD
 struct VSOut { float4 position:SV_POSITION; float3 normal:NORMAL; float2 uv:TEXCOORD0; };
 VSOut VSMain(VSIn v) { VSOut o; o.position=mul(float4(v.position,1),viewProjection); o.normal=v.normal; o.uv=v.uv; return o; }
 Texture2D albedo:register(t0); SamplerState linearSampler:register(s0);
-float4 PSMain(VSOut i):SV_TARGET { float3 base=textured?albedo.Sample(linearSampler,i.uv).rgb:color.rgb; float n=saturate(dot(normalize(i.normal),normalize(light.xyz)))*0.72+0.28; return float4(base*n,color.a); }
+float4 PSMain(VSOut i):SV_TARGET { float2 uv=float2(i.uv.x,1.0-i.uv.y); float3 base=textured?albedo.Sample(linearSampler,uv).rgb:color.rgb; float n=saturate(dot(normalize(i.normal),normalize(light.xyz)))*0.72+0.28; return float4(base*n,color.a); }
 )";
 
 bool compile(const char* entry,const char* target,ComPtr<ID3DBlob>& output) {
@@ -50,6 +50,8 @@ bool PreviewRenderer::initialize(ID3D11Device* device,ID3D11DeviceContext* conte
     D3D11_SAMPLER_DESC sd{}; sd.Filter=D3D11_FILTER_MIN_MAG_MIP_LINEAR; sd.AddressU=sd.AddressV=sd.AddressW=D3D11_TEXTURE_ADDRESS_WRAP; sd.MaxLOD=D3D11_FLOAT32_MAX;
     device_->CreateSamplerState(&sd,&sampler_);
     D3D11_RASTERIZER_DESC rd{}; rd.CullMode=D3D11_CULL_NONE; rd.FillMode=D3D11_FILL_SOLID; rd.DepthClipEnable=TRUE; device_->CreateRasterizerState(&rd,&solid_); rd.FillMode=D3D11_FILL_WIREFRAME; device_->CreateRasterizerState(&rd,&wire_);
+    D3D11_DEPTH_STENCIL_DESC depth{};depth.DepthEnable=FALSE;depth.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ZERO;depth.DepthFunc=D3D11_COMPARISON_ALWAYS;
+    if(FAILED(device_->CreateDepthStencilState(&depth,&overlay_depth_)))return false;
     return create_targets();
 }
 
@@ -85,6 +87,10 @@ bool PreviewRenderer::load(const MeshAsset& mesh,const SkeletonAsset& skeleton,c
     std::vector<GpuVertex> lines;
     for(std::size_t i=0;i<skeleton.bones.size();++i) { const auto& b=skeleton.bones[i]; if(b.parent==0xffff||b.parent>=skeleton.bones.size()) continue; const auto& p=skeleton.bones[b.parent].world_position; lines.push_back({{p.x,p.y,p.z},{0,1,0},{0,0}});lines.push_back({{b.world_position.x,b.world_position.y,b.world_position.z},{0,1,0},{0,0}}); }
     line_vertex_count_=static_cast<unsigned>(lines.size()); if(!lines.empty()) create_buffer(device_,lines,D3D11_BIND_VERTEX_BUFFER,lines_);
+    const float dx=bounds_max_.x-bounds_min_.x,dy=bounds_max_.y-bounds_min_.y,dz=bounds_max_.z-bounds_min_.z;
+    const float marker=std::max(.001f,std::sqrt(dx*dx+dy*dy+dz*dz)*.004f);std::vector<GpuVertex> points;points.reserve(skeleton.bones.size()*6);
+    for(const auto& bone:skeleton.bones){const auto p=bone.world_position;points.push_back({{p.x-marker,p.y,p.z},{0,1,0},{0,0}});points.push_back({{p.x+marker,p.y,p.z},{0,1,0},{0,0}});points.push_back({{p.x,p.y-marker,p.z},{0,1,0},{0,0}});points.push_back({{p.x,p.y+marker,p.z},{0,1,0},{0,0}});points.push_back({{p.x,p.y,p.z-marker},{0,1,0},{0,0}});points.push_back({{p.x,p.y,p.z+marker},{0,1,0},{0,0}});}
+    bone_point_vertex_count_=static_cast<unsigned>(points.size());if(!points.empty())create_buffer(device_,points,D3D11_BIND_VERTEX_BUFFER,bone_points_);
     return true;
 }
 
@@ -97,8 +103,8 @@ bool PreviewRenderer::load_texture_preview(const fs::path& dds) {
 }
 
 void PreviewRenderer::clear() {
-    index_count_=0; line_vertex_count_=0; collision_vertex_count_=0;
-    vertices_.Reset(); indices_.Reset(); lines_.Reset(); collision_lines_.Reset();
+    index_count_=0; line_vertex_count_=0; bone_point_vertex_count_=0; collision_vertex_count_=0;
+    vertices_.Reset(); indices_.Reset(); lines_.Reset(); bone_points_.Reset(); collision_lines_.Reset();
     draw_ranges_.clear(); material_albedos_.clear();
     texture_preview_srv_.Reset();texture_width_=0;texture_height_=0;
 }
@@ -146,11 +152,15 @@ void PreviewRenderer::render(const OrbitCamera& camera,bool show_mesh,bool wiref
     auto upload_constants=[&](){if(SUCCEEDED(context_->Map(constants_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped))){std::memcpy(mapped.pData,&constants,sizeof(constants));context_->Unmap(constants_.Get(),0);}};
     UINT stride=sizeof(GpuVertex),offset=0;context_->IASetInputLayout(input_layout_.Get());context_->VSSetShader(vertex_shader_.Get(),nullptr,0);context_->PSSetShader(pixel_shader_.Get(),nullptr,0);context_->VSSetConstantBuffers(0,1,constants_.GetAddressOf());context_->PSSetConstantBuffers(0,1,constants_.GetAddressOf());context_->PSSetSamplers(0,1,sampler_.GetAddressOf());
     if(show_mesh&&index_count_){
+        context_->OMSetDepthStencilState(nullptr,0);
         context_->RSSetState(wireframe?wire_.Get():solid_.Get());context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);context_->IASetVertexBuffers(0,1,vertices_.GetAddressOf(),&stride,&offset);context_->IASetIndexBuffer(indices_.Get(),DXGI_FORMAT_R32_UINT,0);
         for(const auto& draw:draw_ranges_){ID3D11ShaderResourceView* albedo=draw.material<material_albedos_.size()?material_albedos_[draw.material].Get():nullptr;constants.textured=albedo?1u:0u;upload_constants();context_->PSSetShaderResources(0,1,&albedo);context_->DrawIndexed(draw.index_count,draw.first_index,0);}
     }
+    context_->OMSetDepthStencilState(overlay_depth_.Get(),0);
     if(show_skeleton&&line_vertex_count_){constants.color={1,.55f,.08f,1};constants.textured=0;upload_constants();context_->RSSetState(solid_.Get());context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST);context_->IASetVertexBuffers(0,1,lines_.GetAddressOf(),&stride,&offset);context_->Draw(line_vertex_count_,0);}
+    if(show_skeleton&&bone_point_vertex_count_){constants.color={1,.88f,.24f,1};constants.textured=0;upload_constants();context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST);context_->IASetVertexBuffers(0,1,bone_points_.GetAddressOf(),&stride,&offset);context_->Draw(bone_point_vertex_count_,0);}
     if(collision_vertex_count_){constants.color={.05f,.9f,.85f,1};constants.textured=0;upload_constants();context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST);context_->IASetVertexBuffers(0,1,collision_lines_.GetAddressOf(),&stride,&offset);context_->Draw(collision_vertex_count_,0);}
+    context_->OMSetDepthStencilState(nullptr,0);
     ID3D11ShaderResourceView* none=nullptr;context_->PSSetShaderResources(0,1,&none);
 }
 }

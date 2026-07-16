@@ -538,7 +538,7 @@ void draw_editor_shell() {
         const float width=static_cast<float>(g_preview->texture_width()),height=static_cast<float>(g_preview->texture_height());
         const float scale=std::min(available.x/width,available.y/height);const ImVec2 image_size{width*scale,height*scale};
         const ImVec2 cursor=ImGui::GetCursorPos();ImGui::SetCursorPos({cursor.x+(available.x-image_size.x)*.5f,cursor.y+(available.y-image_size.y)*.5f});
-        ImGui::Image(reinterpret_cast<ImTextureID>(g_preview->texture_image()),image_size);
+        ImGui::Image(reinterpret_cast<ImTextureID>(g_preview->texture_image()),image_size,ImVec2(0,1),ImVec2(1,0));
     }else{
         ImGui::TextUnformatted("当前对象没有可用预览");
     }

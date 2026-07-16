@@ -72,6 +72,11 @@ int main() {
         gbfr::PreviewRenderer preview;
         const auto dds=integration.parent_path()/L"unpack/data/granite/2k/pl1400_body01_lod0_albd.dds";
         if(!preview.initialize(device.Get(),context.Get())||!preview.load_texture_preview(dds)||!preview.texture_image()||!preview.texture_width()||!preview.texture_height())return 16;
+        std::vector<fs::path> preview_materials(materials.entries.size(),dds);
+        gbfr::OrbitCamera camera;
+        if(!preview.load(mesh,skeleton,preview_materials))return 17;
+        preview.resize(320,320);preview.frame(camera);preview.render(camera,true,false,true);context->Flush();
+        if(FAILED(device->GetDeviceRemovedReason()))return 18;
         const auto cloth_root=integration.parent_path()/L"unpack/data/pl/pl1400/cloth";
         const auto clh_path=cloth_root/L"pl1400_0_0_clh.bxm.xml",clp_path=cloth_root/L"pl1400_0_0_clp.bxm.xml";
         const auto clh=gbfr::load_clh(clh_path);const auto clp=gbfr::load_clp(clp_path);
