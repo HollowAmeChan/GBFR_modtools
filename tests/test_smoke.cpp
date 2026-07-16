@@ -78,7 +78,8 @@ int main() {
         if(FAILED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_WARP,nullptr,0,nullptr,0,D3D11_SDK_VERSION,&device,nullptr,&context)))return 15;
         gbfr::PreviewRenderer preview;
         const auto dds=integration.parent_path()/L"unpack/data/granite/2k/pl1400_body01_lod0_albd.dds";
-        if(!preview.initialize(device.Get(),context.Get())||!preview.load_texture_preview(dds)||!preview.texture_image()||!preview.texture_width()||!preview.texture_height())return 16;
+        const auto shader_file=fs::path(GBFR_SOURCE_DIR)/L"assets/shaders/preview.hlsl";
+        if(!preview.initialize(device.Get(),context.Get(),shader_file)||!preview.load_texture_preview(dds)||!preview.texture_image()||!preview.texture_width()||!preview.texture_height())return 16;
         std::vector<gbfr::PreviewMaterialTextures> preview_materials(materials.entries.size());for(auto& material:preview_materials)material.albedo=dds;
         gbfr::OrbitCamera camera;
         if(!preview.load(mesh,skeleton,preview_materials))return 17;
@@ -118,9 +119,10 @@ int main() {
         if(!preview.visible_bone_count()||preview.visible_bone_count()>=fp_skeleton.bones.size())return 40;
         const auto fp_rest_bones=preview.bone_positions();
         gbfr::AnimationClip empty_face_pose;empty_face_pose.frame_count=1;
-        if(!preview.apply_animation(&empty_face_pose,0.0f)||preview.bone_positions().size()!=fp_rest_bones.size()||preview.max_vertex_displacement()>1e-4f)return 37;
+        if(!preview.apply_animation(&empty_face_pose,0.0f)||preview.bone_positions().size()!=fp_rest_bones.size())return 37;
         for(std::size_t i=0;i<fp_rest_bones.size();++i){const auto& a=fp_rest_bones[i];const auto& b=preview.bone_positions()[i];if(std::abs(a.x-b.x)+std::abs(a.y-b.y)+std::abs(a.z-b.z)>1e-4f)return 38;}
         if(!preview.apply_animation(nullptr,0.0f))return 39;
+        preview.frame(camera);preview.render(camera,true,gbfr::PreviewShadingMode::lit,false,false);const auto face_rest_render_hash=preview.render_target_hash();if(!face_rest_render_hash)return 46;
         const auto face_motion_root=integration.parent_path()/L"source/data/fp/fp1400";
         std::size_t face_motion_count{};
         for(const auto& entry:fs::directory_iterator(face_motion_root))if(entry.path().extension()==L".mot"){
@@ -129,12 +131,16 @@ int main() {
         }
         if(face_motion_count!=80)return 34;
         const auto expression=gbfr::load_mot(face_motion_root/L"fp1400_a000.mot");
-        const auto face_rest_hash=preview.vertex_pose_hash();
+        const auto face_rest_hash=preview.pose_hash();
         if(!preview.apply_animation(&expression,0.0f))return 35;
         const auto expression_002b=gbfr::load_mot(face_motion_root/L"fp1400_002b.mot");
-        if(!preview.apply_animation(&expression_002b,0.0f)||preview.max_vertex_displacement()<1e-4f||preview.max_vertex_displacement()>.01f)return 41;
+        if(!preview.apply_animation(&expression_002b,0.0f)||preview.pose_hash()==face_rest_hash)return 41;
+        {const auto& rest=fp_rest_bones[70];const auto& posed=preview.bone_positions()[70];if(posed.y<1.0f||std::abs(rest.x-posed.x)+std::abs(rest.y-posed.y)+std::abs(rest.z-posed.z)<1e-4f)return 47;}
+        preview.render(camera,true,gbfr::PreviewShadingMode::lit,false,false);const auto face_animated_render_hash=preview.render_target_hash();if(!face_animated_render_hash||face_animated_render_hash==face_rest_render_hash)return 48;
+        {int view_index{};for(const float yaw:{-.65f,0.0f,.65f}){camera.yaw=yaw;preview.render(camera,true,gbfr::PreviewShadingMode::lit,false,false,false);const auto without_overlay=preview.render_target_hash();preview.render(camera,true,gbfr::PreviewShadingMode::lit,false,false,true);const auto with_overlay=preview.render_target_hash();if(!without_overlay||!with_overlay||without_overlay==with_overlay)return 49+view_index;++view_index;}}
+        camera.yaw=0.0f;
         if(!preview.apply_animation(&expression,0.0f))return 42;
-        if(preview.vertex_pose_hash()==face_rest_hash||!preview.apply_animation(nullptr,0.0f)||preview.vertex_pose_hash()!=face_rest_hash)return 36;
+        if(preview.pose_hash()==face_rest_hash||!preview.apply_animation(nullptr,0.0f)||preview.pose_hash()!=face_rest_hash)return 36;
         preview.frame(camera);preview.render(camera,true,gbfr::PreviewShadingMode::lit,true,true);context->Flush();
         if(FAILED(device->GetDeviceRemovedReason()))return 21;
         const auto cloth_root=integration.parent_path()/L"unpack/data/pl/pl1400/cloth";

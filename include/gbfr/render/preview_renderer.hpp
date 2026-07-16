@@ -21,7 +21,10 @@ struct PreviewMaterialTextures {
 
 class PreviewRenderer {
 public:
-    bool initialize(ID3D11Device* device, ID3D11DeviceContext* context);
+    static constexpr std::size_t max_skin_bones = 512;
+
+    bool initialize(ID3D11Device* device, ID3D11DeviceContext* context,
+                    const std::filesystem::path& shader_file);
     bool load(const MeshAsset& mesh, const SkeletonAsset& skeleton,
               const std::vector<PreviewMaterialTextures>& materials = {});
     bool load_texture_preview(const std::filesystem::path& dds);
@@ -30,7 +33,7 @@ public:
     void set_collision_lines(const std::vector<Vec3>& points);
     void resize(unsigned width, unsigned height);
     void render(const OrbitCamera& camera, bool show_mesh, PreviewShadingMode shading,
-                bool show_skeleton, bool show_collisions);
+                bool show_skeleton, bool show_collisions, bool show_alpha_overlays = true);
     void frame(OrbitCamera& camera) const;
     bool project(Vec3 world, const OrbitCamera& camera, Vec2& screen) const;
     ID3D11ShaderResourceView* image() const noexcept { return color_srv_.Get(); }
@@ -42,8 +45,8 @@ public:
     bool has_model() const noexcept { return index_count_ != 0; }
     const std::vector<Vec3>& bone_positions() const noexcept { return animated_bone_positions_; }
     std::size_t visible_bone_count() const noexcept { return visible_bone_count_; }
-    std::uint64_t vertex_pose_hash() const noexcept { return vertex_pose_hash_; }
-    float max_vertex_displacement() const noexcept { return max_vertex_displacement_; }
+    std::uint64_t pose_hash() const noexcept { return pose_hash_; }
+    std::uint64_t render_target_hash() const;
 private:
     bool create_targets();
     struct DrawRange {
@@ -73,24 +76,22 @@ private:
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> color_srv_;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> texture_preview_srv_;
     Microsoft::WRL::ComPtr<ID3D11DepthStencilView> depth_dsv_;
-    Microsoft::WRL::ComPtr<ID3D11Buffer> vertices_, indices_, lines_, bone_points_, constants_;
+    Microsoft::WRL::ComPtr<ID3D11Buffer> vertices_, indices_, lines_, bone_points_, constants_, bones_;
     Microsoft::WRL::ComPtr<ID3D11Buffer> collision_lines_;
     Microsoft::WRL::ComPtr<ID3D11VertexShader> vertex_shader_;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> pixel_shader_;
     Microsoft::WRL::ComPtr<ID3D11InputLayout> input_layout_;
     Microsoft::WRL::ComPtr<ID3D11SamplerState> sampler_;
-    Microsoft::WRL::ComPtr<ID3D11RasterizerState> solid_, wire_;
+    Microsoft::WRL::ComPtr<ID3D11RasterizerState> solid_, wire_, alpha_overlay_raster_;
     Microsoft::WRL::ComPtr<ID3D11DepthStencilState> overlay_depth_, alpha_depth_;
     Microsoft::WRL::ComPtr<ID3D11BlendState> alpha_blend_;
     std::vector<DrawRange> draw_ranges_;
     std::vector<GpuMaterialTextures> materials_;
-    MeshAsset source_mesh_;
     SkeletonAsset skeleton_;
     std::vector<Vec3> animated_bone_positions_;
     std::vector<bool> visible_bones_;
     std::size_t visible_bone_count_{};
-    std::uint64_t vertex_pose_hash_{};
-    float max_vertex_displacement_{};
+    std::uint64_t pose_hash_{};
     float bone_marker_size_{.001f};
 };
 }

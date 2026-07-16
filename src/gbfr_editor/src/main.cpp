@@ -92,6 +92,13 @@ std::filesystem::path tool_root() {
     return path;
 }
 
+std::filesystem::path preview_shader_file() {
+    wchar_t module[32768]{};GetModuleFileNameW(nullptr,module,32768);
+    const auto installed=std::filesystem::path(module).parent_path()/L"shaders/preview.hlsl";
+    if(std::filesystem::is_regular_file(installed))return installed;
+    return tool_root()/L"assets/shaders/preview.hlsl";
+}
+
 int cloth_bone_id(const std::string& name) {
     if(name.size()<2||name[0]!='_') return -1; int value{}; const auto result=std::from_chars(name.data()+1,name.data()+name.size(),value,16); return result.ec==std::errc{}&&result.ptr==name.data()+name.size()?value:-1;
 }
@@ -616,7 +623,7 @@ void draw_editor_shell() {
     ImVec2 available = ImGui::GetContentRegionAvail();
     if (g_preview&&g_preview_mode==PreviewMode::model&&available.x > 1 && available.y > 1) {
         g_preview->resize(static_cast<unsigned>(available.x), static_cast<unsigned>(available.y));
-        g_preview->render(g_camera, g_show_mesh, g_preview_shading, g_show_skeleton, g_show_collisions);
+        g_preview->render(g_camera, g_show_mesh, g_preview_shading, g_show_skeleton, g_show_collisions, true);
         const ImVec2 image_origin=ImGui::GetCursorScreenPos();
         ImGui::Image(reinterpret_cast<ImTextureID>(g_preview->image()), available);
         if (ImGui::IsItemHovered()) {
@@ -723,7 +730,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     g_d3d = &d3d;
     if (!d3d.initialize(window)) return 1;
     gbfr::PreviewRenderer preview;
-    if (!preview.initialize(d3d.device(), d3d.context())) return 2;
+    if (!preview.initialize(d3d.device(), d3d.context(), preview_shader_file())) return 2;
     g_preview = &preview;
     load_bone_names();
 
