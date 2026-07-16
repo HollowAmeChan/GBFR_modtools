@@ -20,6 +20,13 @@ $nierCliExe = Get-ChildItem -LiteralPath $libRoot -Directory -Filter "nier_cli_m
     Select-Object -First 1
 $schemaFbs = Join-Path $libRoot "MMat_ModelMaterial.fbs"
 $B = ConvertFrom-Json ([IO.File]::ReadAllText((Join-Path $libRoot "builder_strings_zh.json"), [Text.Encoding]::UTF8))
+$humanoidBoneNames = @{}
+$humanoidBoneNamesJson = ConvertFrom-Json ([IO.File]::ReadAllText(
+    (Join-Path $libRoot "humanoid_bone_names.json"), [Text.Encoding]::UTF8
+))
+foreach ($property in $humanoidBoneNamesJson.PSObject.Properties) {
+    $humanoidBoneNames[[string]$property.Name] = [string]$property.Value
+}
 . (Join-Path $libRoot "workspace_lib.ps1")
 
 function Get-WorkspaceOperations([string]$Manifest) {
@@ -806,8 +813,8 @@ $boneSplit = New-Object Windows.Forms.SplitContainer
 $boneSplit.Location = New-Object Drawing.Point(12, 118)
 $boneSplit.Size = New-Object Drawing.Size(922, 422)
 $boneSplit.Orientation = "Vertical"
-$boneSplit.SplitterDistance = 275
-$boneSplit.Panel1MinSize = 210
+$boneSplit.SplitterDistance = 400
+$boneSplit.Panel1MinSize = 260
 $boneSplit.Panel2MinSize = 380
 $pageBoneCollision.Controls.Add($boneSplit)
 
@@ -826,8 +833,8 @@ $boneGrid.RowTemplate.Height = 28
 $boneGrid.ColumnHeadersHeight = 32
 foreach ($definition in @(
     @{ Name="BoneId"; Header=$B.col_bone_id; Width=58 },
-    @{ Name="BoneName"; Header=$B.col_bone; Width=72 },
-    @{ Name="Parent"; Header=$B.col_parent_bone; Width=72 },
+    @{ Name="BoneName"; Header=$B.col_bone; Width=145 },
+    @{ Name="Parent"; Header=$B.col_parent_bone; Width=145 },
     @{ Name="CollisionCount"; Header=$B.col_collision_count; Width=58 },
     @{ Name="FileCount"; Header=$B.col_file_count; Width=48 }
 )) {
@@ -880,7 +887,7 @@ foreach ($name in @("P1Bone", "P2Bone")) {
     $column = New-Object Windows.Forms.DataGridViewComboBoxColumn
     $column.Name = $name
     $column.HeaderText = if ($name -eq "P1Bone") { $B.col_p1_bone } else { $B.col_p2_bone }
-    $column.Width = 78
+    $column.Width = 135
     $column.DisplayStyle = "DropDownButton"
     $column.FlatStyle = "Flat"
     $column.SortMode = "NotSortable"
@@ -972,6 +979,9 @@ function Update-WorkspaceEditorLayout {
         $chkBoneReferenced.SetBounds(12, 86, 150, 26)
         $lblBoneSummary.SetBounds(174, 89, $boneWidth - 186, 24)
         $boneSplit.SetBounds(12, 118, $boneWidth - 24, [Math]::Max(100, $boneHeight - 130))
+        $desiredSplit = [Math]::Max(300, [Math]::Min(480, [int](($boneWidth - 24) * 0.34)))
+        $maximumSplit = $boneSplit.Width - $boneSplit.Panel2MinSize - $boneSplit.SplitterWidth
+        if ($desiredSplit -le $maximumSplit) { $boneSplit.SplitterDistance = $desiredSplit }
     }
 }
 
@@ -1082,6 +1092,13 @@ function Add-ClothHeaderRow([string]$Name, [object]$Value) {
     [void]$clothHeaderGrid.Rows.Add($Name, [string]$Value)
 }
 
+function Get-SkeletonBoneDisplayName([string]$RawName) {
+    if ($humanoidBoneNames.ContainsKey($RawName)) {
+        return "$($humanoidBoneNames[$RawName]) ($RawName)"
+    }
+    return $RawName
+}
+
 function Update-ClothBoneMap {
     $script:clothBoneMap = @{}
     $script:clothSkeletonPath = ""
@@ -1098,6 +1115,7 @@ function Update-ClothBoneMap {
         if ($null -ne $bone.ClothId) {
             $script:clothBoneMap[[int]$bone.ClothId] = $bone
             $script:skeletonBoneNameMap[[string]$bone.Name] = [int]$bone.ClothId
+            $script:skeletonBoneNameMap[(Get-SkeletonBoneDisplayName $bone.Name)] = [int]$bone.ClothId
         }
     }
     $script:clothSkeletonPath = $skeletonPath
@@ -1107,7 +1125,7 @@ function Get-ClothBoneName([object]$Value) {
     $id = [int]$Value
     if ($id -eq 4095) { return "-" }
     if ($script:clothBoneMap.ContainsKey($id)) {
-        return [string]$script:clothBoneMap[$id].Name
+        return Get-SkeletonBoneDisplayName ([string]$script:clothBoneMap[$id].Name)
     }
     return $B.cloth_bone_missing
 }
@@ -1189,7 +1207,7 @@ function Refresh-SkeletonCollisionDetails {
             $row.Cells["SourceFile"].ToolTipText = $record.XmlPath
         }
         if ($script:clothBoneMap.ContainsKey($boneId)) {
-            $boneName = [string]$script:clothBoneMap[$boneId].Name
+            $boneName = Get-SkeletonBoneDisplayName ([string]$script:clothBoneMap[$boneId].Name)
             $fileCount = @($rows | Select-Object -ExpandProperty XmlPath -Unique).Count
             $scopeLabel = if ($radioBoneAll.Checked) { $B.bone_scope_all } else { $B.bone_scope_file }
             $errorText = if ($script:skeletonCollisionErrors.Count -gt 0) {
@@ -1233,15 +1251,16 @@ function Refresh-SkeletonBoneList {
             if ($chkBoneReferenced.Checked -and $count -eq 0) { continue }
             $parentName = "-"
             if ($bone.ParentIndex -ne 65535 -and $bone.ParentIndex -ge 0 -and $bone.ParentIndex -lt $script:skeletonBones.Count) {
-                $parentName = [string]$script:skeletonBones[$bone.ParentIndex].Name
+                $parentName = Get-SkeletonBoneDisplayName ([string]$script:skeletonBones[$bone.ParentIndex].Name)
             }
+            $displayName = Get-SkeletonBoneDisplayName ([string]$bone.Name)
             if ($needle -and
-                $bone.Name.IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -lt 0 -and
+                $displayName.IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -lt 0 -and
                 ([string]$id).IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -lt 0 -and
                 $parentName.IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
 
             $files = if ($fileSets.ContainsKey($id)) { $fileSets[$id].Count } else { 0 }
-            $rowIndex = $boneGrid.Rows.Add($id, $bone.Name, $parentName, $count, $files)
+            $rowIndex = $boneGrid.Rows.Add($id, $displayName, $parentName, $count, $files)
             $boneGrid.Rows[$rowIndex].Tag = $bone
             if ($null -ne $selectedId -and $id -eq [int]$selectedId) {
                 $boneGrid.Rows[$rowIndex].Selected = $true
@@ -1286,7 +1305,7 @@ function Initialize-SkeletonEditor {
         $cmbBoneFile.Enabled = $radioBoneFile.Checked -and $cmbBoneFile.Items.Count -gt 0
 
         $boneNames = @($script:skeletonBones | Where-Object { $null -ne $_.ClothId } |
-            Sort-Object ClothId | ForEach-Object { [string]$_.Name })
+            Sort-Object ClothId | ForEach-Object { Get-SkeletonBoneDisplayName ([string]$_.Name) })
         foreach ($columnName in @("P1Bone", "P2Bone")) {
             $column = [Windows.Forms.DataGridViewComboBoxColumn]$boneCollisionGrid.Columns[$columnName]
             $column.Items.Clear()
@@ -1495,12 +1514,12 @@ function Refresh-ClothEditor {
                 $sideLinks = @($nodes | Where-Object { [int]$_.noSide -ne 4095 }).Count
                 $lblClothSummary.Text = "$($B.cloth_nodes) $($nodes.Count) | $($B.cloth_roots) $roots | $($B.cloth_side_links) $sideLinks"
                 Set-ClothGridColumns @(
-                    @{ Name="No"; Header="no"; Width=60 }, @{ Name="Bone"; Header=$B.col_bone; Width=70 },
-                    @{ Name="Up"; Header="noUp / bone"; Width=110 },
-                    @{ Name="Down"; Header="noDown / bone"; Width=115 },
-                    @{ Name="Side"; Header="noSide / bone"; Width=115 },
-                    @{ Name="Poly"; Header="noPoly / bone"; Width=115 },
-                    @{ Name="Fix"; Header="noFix / bone"; Width=110 },
+                    @{ Name="No"; Header="no"; Width=60 }, @{ Name="Bone"; Header=$B.col_bone; Width=130 },
+                    @{ Name="Up"; Header="noUp / bone"; Width=155 },
+                    @{ Name="Down"; Header="noDown / bone"; Width=155 },
+                    @{ Name="Side"; Header="noSide / bone"; Width=155 },
+                    @{ Name="Poly"; Header="noPoly / bone"; Width=155 },
+                    @{ Name="Fix"; Header="noFix / bone"; Width=155 },
                     @{ Name="Rot"; Header="rotLimit"; Width=85 }, @{ Name="Friction"; Header="friction"; Width=80 },
                     @{ Name="Weight"; Header="weight"; Width=75 }, @{ Name="Thick"; Header="thick"; Width=75 },
                     @{ Name="Wind"; Header="windForceArea"; Width=105 }, @{ Name="Offset"; Header="offset"; Width=180; Fill=$true }
@@ -1524,9 +1543,9 @@ function Refresh-ClothEditor {
                 $lblClothSummary.Text = "$($B.cloth_collisions) $($collisions.Count) | $($B.cloth_bone_endpoints) $resolvedEndpoints/$endpointCount"
                 Set-ClothGridColumns @(
                     @{ Name="Id"; Header="id"; Width=55 }, @{ Name="P1"; Header="p1"; Width=60 },
-                    @{ Name="P1Bone"; Header=$B.col_p1_bone; Width=80 },
+                    @{ Name="P1Bone"; Header=$B.col_p1_bone; Width=135 },
                     @{ Name="P2"; Header="p2"; Width=60 },
-                    @{ Name="P2Bone"; Header=$B.col_p2_bone; Width=80 },
+                    @{ Name="P2Bone"; Header=$B.col_p2_bone; Width=135 },
                     @{ Name="Capsule"; Header="capsule"; Width=70 },
                     @{ Name="Radius"; Header="radius"; Width=75 }, @{ Name="Weight"; Header="weight"; Width=75 },
                     @{ Name="Offset1"; Header="offset1"; Width=180 }, @{ Name="Offset2"; Header="offset2"; Width=180; Fill=$true },
@@ -1956,7 +1975,7 @@ if ($UiSmokeTest) {
         if ($category -eq "clp") {
             if (-not $clothGrid.Columns.Contains("Bone")) { throw "CLP view has no bone name column" }
             $resolved = @($clothGrid.Rows | Where-Object {
-                [string]$_.Cells["Bone"].Value -match '^_[0-9a-fA-F]+$'
+                [string]$_.Cells["Bone"].Value -match '(^_[0-9a-fA-F]+$|^.+ \(_[0-9a-fA-F]+\)$)'
             }).Count
             if ($resolved -ne $clothGrid.Rows.Count) {
                 throw "CLP bone names resolved $resolved/$($clothGrid.Rows.Count)"
@@ -1967,8 +1986,8 @@ if ($UiSmokeTest) {
                 throw "CLH view has no endpoint bone name columns"
             }
             $resolved = @($clothGrid.Rows | Where-Object {
-                [string]$_.Cells["P1Bone"].Value -match '^_[0-9a-fA-F]+$' -and
-                [string]$_.Cells["P2Bone"].Value -match '^_[0-9a-fA-F]+$'
+                [string]$_.Cells["P1Bone"].Value -match '(^_[0-9a-fA-F]+$|^.+ \(_[0-9a-fA-F]+\)$)' -and
+                [string]$_.Cells["P2Bone"].Value -match '(^_[0-9a-fA-F]+$|^.+ \(_[0-9a-fA-F]+\)$)'
             }).Count
             if ($resolved -ne $clothGrid.Rows.Count) {
                 throw "CLH endpoint bone names resolved $resolved/$($clothGrid.Rows.Count)"
@@ -1981,6 +2000,9 @@ if ($UiSmokeTest) {
     $clhEditorRow = $clothRows | Where-Object { [string]$_.Tag.ClothCategory -eq "clh" } | Select-Object -First 1
     if ($null -ne $clhEditorRow) {
         Open-SkeletonEditor $clhEditorRow.Tag
+        if ((Get-ClothBoneName 0) -ne "Hips (_000)" -or (Get-ClothBoneName 3141) -ne "_c45") {
+            throw "Humanoid bone display mapping is incorrect"
+        }
         if (-not $txtSkeletonObject.Text.EndsWith(".skeleton", [StringComparison]::OrdinalIgnoreCase)) {
             throw "Skeleton editor has no .skeleton edit object"
         }
