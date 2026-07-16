@@ -110,6 +110,13 @@ Workspace Workspace::load(const fs::path& selected) {
         append(AssetKind::model, record.value("FileType", "model"), required_string(record, "Input"), required_string(record, "Source"), required_string(record, "Output"), required_string(record, "BaselineSha256"), required_string(record, "SourceSha256"));
     for (const auto& record : document.value("NewTextures", json::array()))
         append(AssetKind::new_texture, "texture", required_string(record, "Input"), "", required_string(record, "Output"), required_string(record, "BaselineSha256"), "");
+    std::stable_sort(result.assets_.begin(), result.assets_.end(), [](const auto& left, const auto& right) {
+        const auto left_name = left.input.filename().native();
+        const auto right_name = right.input.filename().native();
+        const int by_name = _wcsicmp(left_name.c_str(), right_name.c_str());
+        if (by_name != 0) return by_name < 0;
+        return _wcsicmp(left.input.native().c_str(), right.input.native().c_str()) < 0;
+    });
     result.refresh();
     return result;
 }

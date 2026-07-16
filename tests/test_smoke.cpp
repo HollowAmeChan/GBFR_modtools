@@ -62,6 +62,7 @@ int main() {
             document.value("ModelFiles",nlohmann::json::array()).size()+
             document.value("NewTextures",nlohmann::json::array()).size();
         if (pl1400.assets().size() != expected_assets) return 6;
+        for(std::size_t i=1;i<pl1400.assets().size();++i)if(_wcsicmp(pl1400.assets()[i-1].input.filename().c_str(),pl1400.assets()[i].input.filename().c_str())>0)return 32;
         const auto model_root = integration.parent_path() / L"unpack/data/model/pl/pl1400";
         const auto minfo = gbfr::load_minfo(model_root / L"pl1400.minfo");
         const auto skeleton = gbfr::load_skeleton(model_root / L"pl1400.skeleton");
@@ -96,16 +97,30 @@ int main() {
            fp_materials.entries[0].eye_highlight_name!="fp1400_l_eye_lod0_eyeh"||
            fp_materials.entries[1].eye_conjunctiva_name!="fp1400_r_eye_lod0_conj"||
            fp_materials.entries[1].eye_iris_name!="fp1400_r_eye_lod0_iris"||
-           fp_materials.entries[1].eye_highlight_name!="fp1400_r_eye_lod0_eyeh")return 19;
+           fp_materials.entries[1].eye_highlight_name!="fp1400_r_eye_lod0_eyeh"||
+           fp_materials.entries[2].alpha_blended||!fp_materials.entries[3].alpha_blended||!fp_materials.entries[4].alpha_blended)return 19;
         std::vector<gbfr::PreviewMaterialTextures> fp_preview_materials(fp_materials.entries.size());
         const auto granite_4k=integration.parent_path()/L"unpack/data/granite/4k";
+        for(std::size_t i=0;i<fp_preview_materials.size();++i)fp_preview_materials[i].alpha_blended=fp_materials.entries[i].alpha_blended;
         for(std::size_t i=0;i<2;++i) {
             const auto& entry=fp_materials.entries[i];auto& material=fp_preview_materials[i];
             material.eye_conjunctiva=granite_4k/fs::path(entry.eye_conjunctiva_name+".dds");
             material.eye_iris=granite_4k/fs::path(entry.eye_iris_name+".dds");
             material.eye_highlight=granite_4k/fs::path(entry.eye_highlight_name+".dds");
         }
+        for(std::size_t i=2;i<=4;++i)fp_preview_materials[i].albedo=granite_4k/L"fp1400_face_lod0_albd.dds";
         if(!preview.load(fp_mesh,fp_skeleton,fp_preview_materials))return 20;
+        const auto face_motion_root=integration.parent_path()/L"source/data/fp/fp1400";
+        std::size_t face_motion_count{};
+        for(const auto& entry:fs::directory_iterator(face_motion_root))if(entry.path().extension()==L".mot"){
+            const auto clip=gbfr::load_mot(entry.path());++face_motion_count;
+            for(const auto& track:clip.tracks)if(!std::isfinite(track.sample(static_cast<float>(clip.frame_count-1)*.5f)))return 33;
+        }
+        if(face_motion_count!=80)return 34;
+        const auto expression=gbfr::load_mot(face_motion_root/L"fp1400_a000.mot");
+        const auto face_rest_hash=preview.vertex_pose_hash();
+        if(!preview.apply_animation(&expression,0.0f))return 35;
+        if(preview.vertex_pose_hash()==face_rest_hash||!preview.apply_animation(nullptr,0.0f)||preview.vertex_pose_hash()!=face_rest_hash)return 36;
         preview.frame(camera);preview.render(camera,true,gbfr::PreviewShadingMode::lit,true,true);context->Flush();
         if(FAILED(device->GetDeviceRemovedReason()))return 21;
         const auto cloth_root=integration.parent_path()/L"unpack/data/pl/pl1400/cloth";

@@ -744,6 +744,14 @@ L ""
         Add-SourceFiles $lstFiles
         Add-SourceFiles $otherFiles
 
+        # Facial expressions are regular bone MOT clips stored beside the fp
+        # model rather than in the pl behavior directory.
+        $faceId = "fp$numId"
+        $faceMotionDir = Join-Path $gameRoot "data\fp\$faceId"
+        if (Test-Path -LiteralPath $faceMotionDir) {
+            Add-SourceFiles @(Get-ChildItem $faceMotionDir -Filter "*.mot" -File)
+        }
+
         L "| $($S.col_type) | $($S.col_count) | $($S.col_total) | $($S.col_desc) |"
         L "|------|-------|----------|-------------|"
         if ($motFiles.Count -gt 0) {

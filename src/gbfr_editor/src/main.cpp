@@ -253,11 +253,13 @@ void discover_motions(const ModelPreviewKey& key) {
     clear_motion_state();
     if(!g_workspace)return;
     const auto model_id=key.minfo.stem().wstring();
-    if(model_id.size()<2||model_id.substr(0,2)!=L"pl")return;
-    const auto directory=g_workspace->root()/L"source/data/pl"/model_id;
+    if(model_id.size()<2)return;
+    const auto prefix=model_id.substr(0,2);
+    if(prefix!=L"pl"&&prefix!=L"fp")return;
+    const auto directory=g_workspace->root()/L"source/data"/prefix/model_id;
     if(!std::filesystem::is_directory(directory))return;
     for(const auto& entry:std::filesystem::directory_iterator(directory))if(entry.is_regular_file()&&entry.path().extension()==L".mot")g_motion_files.push_back(entry.path());
-    std::sort(g_motion_files.begin(),g_motion_files.end(),[](const auto& a,const auto& b){return a.filename()<b.filename();});
+    std::sort(g_motion_files.begin(),g_motion_files.end(),[](const auto& a,const auto& b){return _wcsicmp(a.filename().c_str(),b.filename().c_str())<0;});
 }
 
 bool select_motion(int index) {
@@ -317,6 +319,7 @@ bool load_model_preview(std::size_t index,bool force) {
             preview.eye_iris=resolve_base_albedo(g_workspace->root(),entry.eye_iris_name);
             preview.eye_highlight=resolve_base_albedo(g_workspace->root(),entry.eye_highlight_name);
             preview.eye_mask=resolve_base_albedo(g_workspace->root(),entry.eye_mask_name);
+            preview.alpha_blended=entry.alpha_blended;
             if(!preview.albedo.empty()||(!preview.eye_conjunctiva.empty()&&!preview.eye_iris.empty()&&!preview.eye_highlight.empty()))++resolved_materials;
         }
         for(const auto& chunk:mesh.chunks) if(chunk.material>=materials.entries.size()) throw std::runtime_error("minfo MaterialID 超出 0.mmat 条目范围");

@@ -18,6 +18,7 @@ struct MaterialEntry {
     std::string eye_mask_name;
     std::string eye_iris_name;
     std::string eye_conjunctiva_name;
+    bool alpha_blended{};
 };
 
 struct MaterialAsset {

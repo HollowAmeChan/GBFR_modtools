@@ -45,6 +45,9 @@ MaterialAsset load_mmat_json(const std::filesystem::path& path) {
                 }
             }
         }
+        // Face overlay materials (eyebrows/eyelashes) use render group 5 and
+        // store coverage in the shared albedo alpha channel.
+        entry.alpha_blended = !entry.albedo_name.empty() && source_entry.value("A7", 0u) == 5u;
         result.entries.push_back(std::move(entry));
     }
     return result;

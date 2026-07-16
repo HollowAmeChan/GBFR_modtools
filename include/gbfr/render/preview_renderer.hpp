@@ -15,6 +15,7 @@ struct PreviewMaterialTextures {
     std::filesystem::path eye_iris;
     std::filesystem::path eye_highlight;
     std::filesystem::path eye_mask;
+    bool alpha_blended{};
 };
 
 class PreviewRenderer {
@@ -39,6 +40,7 @@ public:
     unsigned height() const noexcept { return height_; }
     bool has_model() const noexcept { return index_count_ != 0; }
     const std::vector<Vec3>& bone_positions() const noexcept { return animated_bone_positions_; }
+    std::uint64_t vertex_pose_hash() const noexcept { return vertex_pose_hash_; }
 private:
     bool create_targets();
     struct DrawRange {
@@ -51,6 +53,7 @@ private:
         Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> iris;
         Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> highlight;
         bool eye{};
+        bool alpha_blended{};
     };
     bool load_dds(const std::filesystem::path& path,
                   Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>& output,
@@ -72,12 +75,14 @@ private:
     Microsoft::WRL::ComPtr<ID3D11InputLayout> input_layout_;
     Microsoft::WRL::ComPtr<ID3D11SamplerState> sampler_;
     Microsoft::WRL::ComPtr<ID3D11RasterizerState> solid_, wire_;
-    Microsoft::WRL::ComPtr<ID3D11DepthStencilState> overlay_depth_;
+    Microsoft::WRL::ComPtr<ID3D11DepthStencilState> overlay_depth_, alpha_depth_;
+    Microsoft::WRL::ComPtr<ID3D11BlendState> alpha_blend_;
     std::vector<DrawRange> draw_ranges_;
     std::vector<GpuMaterialTextures> materials_;
     MeshAsset source_mesh_;
     SkeletonAsset skeleton_;
     std::vector<Vec3> animated_bone_positions_;
+    std::uint64_t vertex_pose_hash_{};
     float bone_marker_size_{.001f};
 };
 }

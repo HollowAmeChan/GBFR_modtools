@@ -7,6 +7,7 @@
 #include <fstream>
 #include <limits>
 #include <charconv>
+#include <span>
 #include <unordered_map>
 #include <vector>
 
@@ -15,10 +16,10 @@ using namespace DirectX;
 namespace fs = std::filesystem;
 namespace {
 struct GpuVertex { float position[3], normal[3], uv[2]; };
-struct Constants { XMFLOAT4X4 view_projection; XMFLOAT4 color; XMFLOAT4 light; unsigned textured; unsigned eye_material; unsigned lighting; float padding; };
+struct Constants { XMFLOAT4X4 view_projection; XMFLOAT4 color; XMFLOAT4 light; unsigned textured; unsigned eye_material; unsigned lighting; unsigned alpha_blended; };
 
 const char* shader_source = R"(
-cbuffer Scene : register(b0) { float4x4 viewProjection; float4 color; float4 light; uint textured; uint eyeMaterial; uint lighting; };
+cbuffer Scene : register(b0) { float4x4 viewProjection; float4 color; float4 light; uint textured; uint eyeMaterial; uint lighting; uint alphaBlended; };
 struct VSIn { float3 position:POSITION; float3 normal:NORMAL; float2 uv:TEXCOORD0; };
 struct VSOut { float4 position:SV_POSITION; float3 normal:NORMAL; float2 uv:TEXCOORD0; };
 VSOut VSMain(VSIn v) { VSOut o; o.position=mul(float4(v.position,1),viewProjection); o.normal=v.normal; o.uv=v.uv; return o; }
@@ -34,10 +35,11 @@ float4 PSMain(VSOut i):SV_TARGET {
         base=lerp(base,iris.rgb,iris.a);
         base=lerp(base,highlight.rgb,highlight.a);
     }
-    if(!lighting) return float4(base,color.a);
+    float outputAlpha=alphaBlended?primary.a:color.a;
+    if(!lighting) return float4(base,outputAlpha);
     float halfLambert=dot(normalize(i.normal),normalize(light.xyz))*.5+.5;
     float shade=halfLambert>.72?1.04:(halfLambert>.43?.86:.68);
-    return float4(saturate(base*shade+float3(.025,.03,.035)),color.a);
+    return float4(saturate(base*shade+float3(.025,.03,.035)),outputAlpha);
 }
 )";
 
@@ -95,6 +97,10 @@ bool PreviewRenderer::initialize(ID3D11Device* device,ID3D11DeviceContext* conte
     D3D11_RASTERIZER_DESC rd{}; rd.CullMode=D3D11_CULL_NONE; rd.FillMode=D3D11_FILL_SOLID; rd.DepthClipEnable=TRUE; device_->CreateRasterizerState(&rd,&solid_); rd.FillMode=D3D11_FILL_WIREFRAME; device_->CreateRasterizerState(&rd,&wire_);
     D3D11_DEPTH_STENCIL_DESC depth{};depth.DepthEnable=FALSE;depth.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ZERO;depth.DepthFunc=D3D11_COMPARISON_ALWAYS;
     if(FAILED(device_->CreateDepthStencilState(&depth,&overlay_depth_)))return false;
+    depth.DepthEnable=TRUE;depth.DepthFunc=D3D11_COMPARISON_LESS_EQUAL;
+    if(FAILED(device_->CreateDepthStencilState(&depth,&alpha_depth_)))return false;
+    D3D11_BLEND_DESC blend{};auto& target=blend.RenderTarget[0];target.BlendEnable=TRUE;target.SrcBlend=D3D11_BLEND_SRC_ALPHA;target.DestBlend=D3D11_BLEND_INV_SRC_ALPHA;target.BlendOp=D3D11_BLEND_OP_ADD;target.SrcBlendAlpha=D3D11_BLEND_ONE;target.DestBlendAlpha=D3D11_BLEND_INV_SRC_ALPHA;target.BlendOpAlpha=D3D11_BLEND_OP_ADD;target.RenderTargetWriteMask=D3D11_COLOR_WRITE_ENABLE_ALL;
+    if(FAILED(device_->CreateBlendState(&blend,&alpha_blend_)))return false;
     return create_targets();
 }
 
@@ -129,6 +135,7 @@ bool PreviewRenderer::load(const MeshAsset& mesh,const SkeletonAsset& skeleton,c
     materials_.resize(materials.size());
     for(std::size_t i=0;i<materials.size();++i) {
         auto& gpu=materials_[i];const auto& source=materials[i];
+        gpu.alpha_blended=source.alpha_blended;
         if(!source.albedo.empty()&&!load_dds(source.albedo,gpu.primary)) return false;
         if(!source.eye_conjunctiva.empty()&&!source.eye_iris.empty()&&!source.eye_highlight.empty()) {
             gpu.eye=load_dds(source.eye_conjunctiva,gpu.primary)&&load_dds(source.eye_iris,gpu.iris)&&load_dds(source.eye_highlight,gpu.highlight);
@@ -158,19 +165,42 @@ void PreviewRenderer::clear() {
     index_count_=0; line_vertex_count_=0; bone_point_vertex_count_=0; collision_vertex_count_=0;
     vertices_.Reset(); indices_.Reset(); lines_.Reset(); bone_points_.Reset(); collision_lines_.Reset();
     draw_ranges_.clear(); materials_.clear();
-    source_mesh_={};skeleton_={};animated_bone_positions_.clear();
+    source_mesh_={};skeleton_={};animated_bone_positions_.clear();vertex_pose_hash_=0;
     texture_preview_srv_.Reset();texture_width_=0;texture_height_=0;
 }
 
 bool PreviewRenderer::apply_animation(const AnimationClip* clip,float frame) {
     if(source_mesh_.vertices.empty()||skeleton_.bones.empty()||!vertices_)return false;
     const auto bone_count=skeleton_.bones.size();
+    auto upload_pose=[&](const std::vector<GpuVertex>& vertices){
+        vertex_pose_hash_=1469598103934665603ull;
+        for(const auto& vertex:vertices)for(const auto byte:std::as_bytes(std::span(vertex.position))){vertex_pose_hash_^=static_cast<std::uint8_t>(byte);vertex_pose_hash_*=1099511628211ull;}
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        if(FAILED(context_->Map(vertices_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped)))return false;
+        std::memcpy(mapped.pData,vertices.data(),vertices.size()*sizeof(GpuVertex));context_->Unmap(vertices_.Get(),0);
+        std::vector<GpuVertex> lines;lines.reserve(line_vertex_count_);
+        for(std::size_t i=0;i<bone_count;++i){const auto parent=skeleton_.bones[i].parent;if(parent==0xffff||parent>=bone_count)continue;const auto& p=animated_bone_positions_[parent];const auto& b=animated_bone_positions_[i];lines.push_back({{p.x,p.y,p.z},{0,1,0},{0,0}});lines.push_back({{b.x,b.y,b.z},{0,1,0},{0,0}});}
+        if(lines_&&!lines.empty())context_->UpdateSubresource(lines_.Get(),0,nullptr,lines.data(),0,0);
+        std::vector<GpuVertex> points;points.reserve(bone_point_vertex_count_);const float marker=bone_marker_size_;
+        for(const auto& p:animated_bone_positions_){points.push_back({{p.x-marker,p.y,p.z},{0,1,0},{0,0}});points.push_back({{p.x+marker,p.y,p.z},{0,1,0},{0,0}});points.push_back({{p.x,p.y-marker,p.z},{0,1,0},{0,0}});points.push_back({{p.x,p.y+marker,p.z},{0,1,0},{0,0}});points.push_back({{p.x,p.y,p.z-marker},{0,1,0},{0,0}});points.push_back({{p.x,p.y,p.z+marker},{0,1,0},{0,0}});}
+        if(bone_points_&&!points.empty())context_->UpdateSubresource(bone_points_.Get(),0,nullptr,points.data(),0,0);
+        return true;
+    };
+
+    std::vector<GpuVertex> vertices;vertices.reserve(source_mesh_.vertices.size());
+    if(!clip){
+        animated_bone_positions_.clear();animated_bone_positions_.reserve(bone_count);
+        for(const auto& bone:skeleton_.bones)animated_bone_positions_.push_back(bone.world_position);
+        for(const auto& source:source_mesh_.vertices)vertices.push_back({{source.position.x,source.position.y,source.position.z},{source.normal.x,source.normal.y,source.normal.z},{source.uv.x,source.uv.y}});
+        return upload_pose(vertices);
+    }
+
     std::vector<Vec3> positions(bone_count),scales(bone_count);
     std::vector<XMFLOAT3> rotations(bone_count);
     std::unordered_map<int,std::size_t> bone_indices;bone_indices.reserve(bone_count);
     std::size_t object_root{};
     for(std::size_t i=0;i<bone_count;++i){const auto& bone=skeleton_.bones[i];positions[i]=bone.position;scales[i]=bone.scale;rotations[i]=quaternion_to_euler(bone.rotation);const int id=bone_name_id(bone.name);if(id>=0)bone_indices.emplace(id,i);if(bone.parent==0xffff&&bone.name=="_900")object_root=i;}
-    if(clip)for(const auto& track:clip->tracks){
+    for(const auto& track:clip->tracks){
         std::size_t index{};
         if(track.bone_id==-1)index=object_root;
         else {const auto found=bone_indices.find(track.bone_id);if(found==bone_indices.end())continue;index=found->second;}
@@ -191,26 +221,18 @@ bool PreviewRenderer::apply_animation(const AnimationClip* clip,float frame) {
         const auto posed_local=local_matrix(positions[i],scales[i],euler_to_quaternion(rotations[i]));
         if(bone.parent==0xffff){rest_world[i]=rest_local;posed_world[i]=posed_local;}
         else {if(bone.parent>=i)return false;rest_world[i]=rest_local*rest_world[bone.parent];posed_world[i]=posed_local*posed_world[bone.parent];}
-        skin[i]=XMMatrixInverse(nullptr,rest_world[i])*posed_world[i];
+        XMVECTOR determinant{};const auto inverse=XMMatrixInverse(&determinant,rest_world[i]);
+        skin[i]=std::abs(XMVectorGetX(determinant))<1e-8f?XMMatrixIdentity():inverse*posed_world[i];
         XMFLOAT3 world{};XMStoreFloat3(&world,posed_world[i].r[3]);animated_bone_positions_[i]={world.x,world.y,world.z};
     }
 
-    std::vector<GpuVertex> vertices;vertices.reserve(source_mesh_.vertices.size());
     for(const auto& source:source_mesh_.vertices){
         XMVECTOR position=XMVectorZero(),normal=XMVectorZero();float total{};
         for(std::size_t influence=0;influence<4;++influence){const float weight=source.weights[influence];const auto joint=source.joints[influence];if(weight<=0.0f||joint>=bone_count)continue;position+=XMVectorScale(XMVector3TransformCoord(XMVectorSet(source.position.x,source.position.y,source.position.z,1),skin[joint]),weight);normal+=XMVectorScale(XMVector3TransformNormal(XMVectorSet(source.normal.x,source.normal.y,source.normal.z,0),skin[joint]),weight);total+=weight;}
-        if(total<=0.0f){position=XMVectorSet(source.position.x,source.position.y,source.position.z,1);normal=XMVectorSet(source.normal.x,source.normal.y,source.normal.z,0);}else normal=XMVector3Normalize(normal);
+        if(total<=0.0f){position=XMVectorSet(source.position.x,source.position.y,source.position.z,1);normal=XMVectorSet(source.normal.x,source.normal.y,source.normal.z,0);}else{position=XMVectorScale(position,1.0f/total);normal=XMVector3Normalize(normal);}
         XMFLOAT3 p{},n{};XMStoreFloat3(&p,position);XMStoreFloat3(&n,normal);vertices.push_back({{p.x,p.y,p.z},{n.x,n.y,n.z},{source.uv.x,source.uv.y}});
     }
-    D3D11_MAPPED_SUBRESOURCE mapped{};if(FAILED(context_->Map(vertices_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped)))return false;std::memcpy(mapped.pData,vertices.data(),vertices.size()*sizeof(GpuVertex));context_->Unmap(vertices_.Get(),0);
-
-    std::vector<GpuVertex> lines;lines.reserve(line_vertex_count_);
-    for(std::size_t i=0;i<bone_count;++i){const auto parent=skeleton_.bones[i].parent;if(parent==0xffff||parent>=bone_count)continue;const auto& p=animated_bone_positions_[parent];const auto& b=animated_bone_positions_[i];lines.push_back({{p.x,p.y,p.z},{0,1,0},{0,0}});lines.push_back({{b.x,b.y,b.z},{0,1,0},{0,0}});}
-    if(lines_&&!lines.empty())context_->UpdateSubresource(lines_.Get(),0,nullptr,lines.data(),0,0);
-    std::vector<GpuVertex> points;points.reserve(bone_point_vertex_count_);const float marker=bone_marker_size_;
-    for(const auto& p:animated_bone_positions_){points.push_back({{p.x-marker,p.y,p.z},{0,1,0},{0,0}});points.push_back({{p.x+marker,p.y,p.z},{0,1,0},{0,0}});points.push_back({{p.x,p.y-marker,p.z},{0,1,0},{0,0}});points.push_back({{p.x,p.y+marker,p.z},{0,1,0},{0,0}});points.push_back({{p.x,p.y,p.z-marker},{0,1,0},{0,0}});points.push_back({{p.x,p.y,p.z+marker},{0,1,0},{0,0}});}
-    if(bone_points_&&!points.empty())context_->UpdateSubresource(bone_points_.Get(),0,nullptr,points.data(),0,0);
-    return true;
+    return upload_pose(vertices);
 }
 
 void PreviewRenderer::set_collision_lines(const std::vector<Vec3>& points) {
@@ -262,16 +284,27 @@ void PreviewRenderer::render(const OrbitCamera& camera,bool show_mesh,PreviewSha
     auto upload_constants=[&](){if(SUCCEEDED(context_->Map(constants_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped))){std::memcpy(mapped.pData,&constants,sizeof(constants));context_->Unmap(constants_.Get(),0);}};
     UINT stride=sizeof(GpuVertex),offset=0;context_->IASetInputLayout(input_layout_.Get());context_->VSSetShader(vertex_shader_.Get(),nullptr,0);context_->PSSetShader(pixel_shader_.Get(),nullptr,0);context_->VSSetConstantBuffers(0,1,constants_.GetAddressOf());context_->PSSetConstantBuffers(0,1,constants_.GetAddressOf());context_->PSSetSamplers(0,1,sampler_.GetAddressOf());
     if(show_mesh&&index_count_){
-        context_->OMSetDepthStencilState(nullptr,0);
         const bool wireframe=shading==PreviewShadingMode::wireframe;context_->RSSetState(wireframe?wire_.Get():solid_.Get());context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);context_->IASetVertexBuffers(0,1,vertices_.GetAddressOf(),&stride,&offset);context_->IASetIndexBuffer(indices_.Get(),DXGI_FORMAT_R32_UINT,0);
-        for(const auto& draw:draw_ranges_){
-            GpuMaterialTextures* material=!wireframe&&draw.material<materials_.size()?&materials_[draw.material]:nullptr;
-            ID3D11ShaderResourceView* textures[3]={material?material->primary.Get():nullptr,material?material->iris.Get():nullptr,material?material->highlight.Get():nullptr};
-            constants.textured=textures[0]?1u:0u;constants.eye_material=material&&material->eye?1u:0u;upload_constants();context_->PSSetShaderResources(0,3,textures);context_->DrawIndexed(draw.index_count,draw.first_index,0);
+        auto draw_pass=[&](int pass){
+            for(const auto& draw:draw_ranges_){
+                GpuMaterialTextures* material=!wireframe&&draw.material<materials_.size()?&materials_[draw.material]:nullptr;
+                const bool alpha=material&&material->alpha_blended;
+                if(pass<2&&alpha!=(pass==1))continue;
+                ID3D11ShaderResourceView* textures[3]={material?material->primary.Get():nullptr,material?material->iris.Get():nullptr,material?material->highlight.Get():nullptr};
+                constants.textured=textures[0]?1u:0u;constants.eye_material=material&&material->eye?1u:0u;constants.alpha_blended=alpha?1u:0u;upload_constants();context_->PSSetShaderResources(0,3,textures);context_->DrawIndexed(draw.index_count,draw.first_index,0);
+            }
+        };
+        const float blend_factor[4]{};
+        context_->OMSetBlendState(nullptr,blend_factor,0xffffffffu);context_->OMSetDepthStencilState(nullptr,0);
+        if(wireframe)draw_pass(2);
+        else{
+            draw_pass(0);
+            context_->OMSetBlendState(alpha_blend_.Get(),blend_factor,0xffffffffu);context_->OMSetDepthStencilState(alpha_depth_.Get(),0);draw_pass(1);
+            context_->OMSetBlendState(nullptr,blend_factor,0xffffffffu);
         }
     }
     context_->OMSetDepthStencilState(overlay_depth_.Get(),0);
-    constants.lighting=0;constants.eye_material=0;
+    constants.lighting=0;constants.eye_material=0;constants.alpha_blended=0;
     if(show_skeleton&&line_vertex_count_){constants.color={1,.55f,.08f,1};constants.textured=0;upload_constants();context_->RSSetState(solid_.Get());context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST);context_->IASetVertexBuffers(0,1,lines_.GetAddressOf(),&stride,&offset);context_->Draw(line_vertex_count_,0);}
     if(show_skeleton&&bone_point_vertex_count_){constants.color={1,.88f,.24f,1};constants.textured=0;upload_constants();context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST);context_->IASetVertexBuffers(0,1,bone_points_.GetAddressOf(),&stride,&offset);context_->Draw(bone_point_vertex_count_,0);}
     if(show_collisions&&collision_vertex_count_){constants.color={.05f,.9f,.85f,1};constants.textured=0;upload_constants();context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST);context_->IASetVertexBuffers(0,1,collision_lines_.GetAddressOf(),&stride,&offset);context_->Draw(collision_vertex_count_,0);}
