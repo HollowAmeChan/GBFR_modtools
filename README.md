@@ -104,7 +104,7 @@ Granite DDS 是可编辑中间态，构建器不会修改 GTS/GTP。对于 `sour
 
 ## 3. 构建 Mod
 
-双击 `GBFR编辑封包工具.bat`，选择 `explore_output/manifest.md`。
+双击 `GBFR编辑封包工具.bat`，选择 `explore_output/manifest.md`。BAT 会通过无窗口启动器打开编辑器，不会保留额外的命令行控制台。
 
 构建器会：
 
@@ -146,6 +146,7 @@ GBFR_modtools/
   README.md
 
   _lib/
+    launch_workspace_builder.vbs 编辑器无控制台启动器
     flatc.exe                 mmat FlatBuffers 编解码
     GraniteTextureReader.exe Granite GTS/GTP 图层提取
     texconv.exe               TGA 到指定 BC 格式 DDS 转换
