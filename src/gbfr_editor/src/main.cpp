@@ -531,14 +531,21 @@ void draw_editor_shell() {
         ImGui::Image(reinterpret_cast<ImTextureID>(g_preview->image()), available);
         if (ImGui::IsItemHovered()) {
             ImGuiIO& io = ImGui::GetIO();
-            if (ImGui::IsMouseDragging(ImGuiMouseButton_Left)) { g_camera.yaw += io.MouseDelta.x * .008f; g_camera.pitch = std::clamp(g_camera.pitch + io.MouseDelta.y * .008f, -1.5f, 1.5f); }
             if (io.MouseWheel != 0) g_camera.distance = std::max(.02f, g_camera.distance * std::pow(.88f, io.MouseWheel));
             if (ImGui::IsMouseDragging(ImGuiMouseButton_Middle)) {
-                const float scale=g_camera.distance*.0015f,sy=std::sin(g_camera.yaw),cy=std::cos(g_camera.yaw),sp=std::sin(g_camera.pitch),cp=std::cos(g_camera.pitch);
-                const gbfr::Vec3 right{-cy,0,sy},up{-sp*sy,cp,-sp*cy};
-                g_camera.target.x+=(right.x*io.MouseDelta.x-up.x*io.MouseDelta.y)*scale;
-                g_camera.target.y+=(right.y*io.MouseDelta.x-up.y*io.MouseDelta.y)*scale;
-                g_camera.target.z+=(right.z*io.MouseDelta.x-up.z*io.MouseDelta.y)*scale;
+                if (io.KeyShift) {
+                    const float scale=g_camera.distance*.82842712f/std::max(1.0f,available.y);
+                    const float sy=std::sin(g_camera.yaw),cy=std::cos(g_camera.yaw),sp=std::sin(g_camera.pitch),cp=std::cos(g_camera.pitch);
+                    const gbfr::Vec3 right{-cy,0,sy},up{-sp*sy,cp,-sp*cy};
+                    g_camera.target.x+=(right.x*io.MouseDelta.x-up.x*io.MouseDelta.y)*scale;
+                    g_camera.target.y+=(right.y*io.MouseDelta.x-up.y*io.MouseDelta.y)*scale;
+                    g_camera.target.z+=(right.z*io.MouseDelta.x-up.z*io.MouseDelta.y)*scale;
+                } else if (io.KeyCtrl) {
+                    g_camera.distance=std::max(.02f,g_camera.distance*std::pow(1.01f,io.MouseDelta.y));
+                } else {
+                    g_camera.yaw+=io.MouseDelta.x*.008f;
+                    g_camera.pitch=std::clamp(g_camera.pitch+io.MouseDelta.y*.008f,-1.5f,1.5f);
+                }
             }
             if (g_show_skeleton && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
                 const float mx=io.MousePos.x-image_origin.x,my=io.MousePos.y-image_origin.y;float best=144.0f;int picked=-1;
