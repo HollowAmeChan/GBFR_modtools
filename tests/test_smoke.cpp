@@ -1,9 +1,11 @@
 #include <gbfr/core/log.hpp>
 #include <gbfr/core/workspace.hpp>
 #include <gbfr/formats/model.hpp>
+#include <gbfr/formats/cloth.hpp>
 
 #include <filesystem>
 #include <fstream>
+#include <cmath>
 
 namespace fs = std::filesystem;
 
@@ -48,6 +50,11 @@ int main() {
         const auto skeleton = gbfr::load_skeleton(model_root / L"pl1400.skeleton");
         const auto mesh = gbfr::load_mmesh(integration.parent_path() / L"unpack/data/model_streaming/lod0/pl1400.mmesh", minfo);
         if (mesh.vertices.size() != minfo.vertex_count || mesh.indices.size() != minfo.index_count || skeleton.bones.empty()) return 7;
+        const auto cloth_root=integration.parent_path()/L"unpack/data/pl/pl1400/cloth";
+        const auto clh_path=cloth_root/L"pl1400_0_0_clh.bxm.xml",clp_path=cloth_root/L"pl1400_0_0_clp.bxm.xml";
+        const auto clh=gbfr::load_clh(clh_path);const auto clp=gbfr::load_clp(clp_path);
+        if(clh.collisions.size()!=8||clp.nodes.size()!=60)return 9;
+        const auto editable=fs::temp_directory_path()/L"gbfr_clh_test.xml";fs::copy_file(clh_path,editable,fs::copy_options::overwrite_existing);auto collision=clh.collisions.front();collision.radius=.123f;gbfr::save_clh_collision(editable,collision);if(std::abs(gbfr::load_clh(editable).collisions.front().radius-.123f)>.0001f)return 10;fs::remove(editable);
     }
     const auto corrupt = fs::temp_directory_path() / L"gbfr_corrupt.skeleton";
     std::ofstream(corrupt, std::ios::binary | std::ios::trunc) << "bad";

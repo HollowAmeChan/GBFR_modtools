@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace gbfr {
@@ -17,6 +18,7 @@ struct WorkspaceAsset {
     std::string source_sha256;
     bool available{};
     bool changed{};
+    std::vector<std::pair<std::filesystem::path, std::string>> monitored_inputs;
 };
 
 class Workspace {

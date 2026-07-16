@@ -1,5 +1,7 @@
 # GBFR Modtools
 
+新的 C++/Dear ImGui 编辑器已经推进到 M5。构建命令、使用方式、原生覆盖范围与 PowerShell 兼容边界见 [CPP编辑器构建与迁移.md](CPP编辑器构建与迁移.md)，总体架构和格式约束见 [CPP编辑器目标与架构.md](CPP编辑器目标与架构.md)。
+
 用于建立《碧蓝幻想：Relink》角色资源工作区，并把编辑后的 DDS 与 mmat JSON 构建为可直接安装的 Mod 文件。
 
 模型与骨架的 Blender 编辑、导出和安装流程见 [`模型与骨架Mod制作流程.md`](模型与骨架Mod制作流程.md)。

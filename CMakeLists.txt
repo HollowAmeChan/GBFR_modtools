@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.28)
 project(GBFRModtools VERSION 0.1.0 LANGUAGES CXX)
 
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:/utf-8>")
 
 option(GBFR_BUILD_TESTS "Build GBFR tests" ON)
@@ -19,10 +20,7 @@ FetchContent_Declare(
   GIT_TAG v1.92.8-docking
   GIT_SHALLOW TRUE
 )
-FetchContent_GetProperties(imgui)
-if(NOT imgui_POPULATED)
-  FetchContent_Populate(imgui)
-endif()
+FetchContent_MakeAvailable(imgui)
 
 add_library(imgui STATIC
   "${imgui_SOURCE_DIR}/imgui.cpp"

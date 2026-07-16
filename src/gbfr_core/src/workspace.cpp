@@ -91,13 +91,17 @@ Workspace Workspace::load(const fs::path& selected) {
     result.character_id_ = document.value("CharacterId", std::string{});
     auto append = [&](AssetKind kind, std::string subtype, const std::string& input, const std::string& source,
                       const std::string& output, const std::string& baseline, const std::string& source_hash) {
-        result.assets_.push_back({kind, std::move(subtype), result.resolve(input), source.empty() ? fs::path{} : result.resolve(source),
-                                  result.resolve(output), baseline, source_hash});
+        WorkspaceAsset asset{kind, std::move(subtype), result.resolve(input), source.empty() ? fs::path{} : result.resolve(source),
+                             result.resolve(output), baseline, source_hash};
+        asset.monitored_inputs.emplace_back(asset.input, baseline);
+        result.assets_.push_back(std::move(asset));
     };
-    for (const auto& record : document.value("Textures", json::array()))
-        for (const auto& slot : record.value("Slots", json::array()))
-            append(AssetKind::texture, "slot " + std::to_string(slot.value("Index", 0)), required_string(slot, "Path"),
-                   required_string(record, "Source"), required_string(record, "Output"), required_string(slot, "BaselineSha256"), record.value("SourceSha256", ""));
+    for (const auto& record : document.value("Textures", json::array())) {
+        const auto slots=record.value("Slots",json::array()); if(slots.empty()) continue;
+        const auto& first=slots.front(); append(AssetKind::texture,"WTB / "+std::to_string(slots.size())+" 槽",required_string(first,"Path"),required_string(record,"Source"),required_string(record,"Output"),required_string(first,"BaselineSha256"),record.value("SourceSha256",""));
+        auto& asset=result.assets_.back();
+        for(std::size_t i=1;i<slots.size();++i) asset.monitored_inputs.emplace_back(result.resolve(required_string(slots[i],"Path")),required_string(slots[i],"BaselineSha256"));
+    }
     for (const auto& record : document.value("Materials", json::array()))
         append(AssetKind::material, "mmat", required_string(record, "Json"), required_string(record, "Source"), required_string(record, "Output"), required_string(record, "BaselineSha256"), record.value("SourceSha256", ""));
     for (const auto& record : document.value("ClothFiles", json::array()))
@@ -122,8 +126,8 @@ fs::path Workspace::resolve(const std::string& relative) const {
 
 void Workspace::refresh() {
     for (auto& asset : assets_) {
-        asset.available = fs::is_regular_file(asset.input);
-        asset.changed = asset.available && sha256_file(asset.input) != asset.baseline_sha256;
+        asset.available = false; asset.changed = false;
+        for(const auto& [path,baseline]:asset.monitored_inputs) if(fs::is_regular_file(path)){asset.available=true;if(sha256_file(path)!=baseline)asset.changed=true;}
     }
 }
 
