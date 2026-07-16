@@ -86,6 +86,7 @@ SkeletonAsset load_skeleton(const fs::path& path) {
     result.bones.reserve(count);
     for (std::uint32_t i=0;i<count;++i) {
         const auto table=view.table_in_vector(body,i); Bone bone;
+        bone.parent=0; // ParentId defaults to bone 0 when the FlatBuffer field is omitted.
         if (const auto value=view.field(table,1)) bone.parent=view.read<std::uint16_t>(value,"bone parent");
         bone.name=view.string_field(view.field(table,2,true));
         if (const auto p=view.field(table,3)) bone.position={view.read<float>(p,"position x"),view.read<float>(p+4,"position y"),view.read<float>(p+8,"position z")};

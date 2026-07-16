@@ -62,12 +62,14 @@ int main() {
             document.value("ModelFiles",nlohmann::json::array()).size()+
             document.value("NewTextures",nlohmann::json::array()).size();
         if (pl1400.assets().size() != expected_assets) return 6;
-        for(std::size_t i=1;i<pl1400.assets().size();++i)if(_wcsicmp(pl1400.assets()[i-1].input.filename().c_str(),pl1400.assets()[i].input.filename().c_str())>0)return 32;
+        for(std::size_t i=1;i<pl1400.assets().size();++i)if(gbfr::natural_less_case_insensitive(pl1400.assets()[i].input.filename().native(),pl1400.assets()[i-1].input.filename().native()))return 32;
+        if(!gbfr::natural_less_case_insensitive(L"2.mmat.json",L"10.mmat.json")||gbfr::natural_less_case_insensitive(L"10.mmat.json",L"2.mmat.json"))return 45;
         const auto model_root = integration.parent_path() / L"unpack/data/model/pl/pl1400";
         const auto minfo = gbfr::load_minfo(model_root / L"pl1400.minfo");
         const auto skeleton = gbfr::load_skeleton(model_root / L"pl1400.skeleton");
         const auto mesh = gbfr::load_mmesh(integration.parent_path() / L"unpack/data/model_streaming/lod0/pl1400.mmesh", minfo);
         if (mesh.vertices.size() != minfo.vertex_count || mesh.indices.size() != minfo.index_count || skeleton.bones.empty()) return 7;
+        if(skeleton.bones[0].parent!=0xffff||skeleton.bones[1].parent!=0||std::abs(skeleton.bones[1].world_position.y-.82156992f)>1e-6f)return 43;
         const auto materials=gbfr::load_mmat_json(model_root/L"vars/0.mmat.json");
         if(materials.entries.size()!=11||materials.entries[0].albedo_name!="pl1400_body01_lod0_albd")return 11;
         for(const auto& entry:materials.entries)if(gbfr::is_color_variant_texture(entry.albedo_name))return 12;
@@ -91,6 +93,7 @@ int main() {
         const auto fp_skeleton=gbfr::load_skeleton(fp_root/L"fp1400.skeleton");
         const auto fp_mesh=gbfr::load_mmesh(integration.parent_path()/L"unpack/data/model_streaming/lod0/fp1400.mmesh",fp_minfo);
         const auto fp_materials=gbfr::load_mmat_json(fp_root/L"vars/0.mmat.json");
+        if(fp_skeleton.bones[0].parent!=0xffff||fp_skeleton.bones[1].parent!=0||std::abs(fp_skeleton.bones[1].world_position.y-1.13228768f)>1e-6f||std::abs(fp_skeleton.bones[78].world_position.y-1.20115548f)>1e-4f)return 44;
         if(fp_materials.entries.size()!=7||
            fp_materials.entries[0].eye_conjunctiva_name!="fp1400_l_eye_lod0_conj"||
            fp_materials.entries[0].eye_iris_name!="fp1400_l_eye_lod0_iris"||
@@ -98,10 +101,12 @@ int main() {
            fp_materials.entries[1].eye_conjunctiva_name!="fp1400_r_eye_lod0_conj"||
            fp_materials.entries[1].eye_iris_name!="fp1400_r_eye_lod0_iris"||
            fp_materials.entries[1].eye_highlight_name!="fp1400_r_eye_lod0_eyeh"||
+           fp_materials.entries[3].alpha_mask_name!="fp1400_face_lod0_msk2"||
+           fp_materials.entries[4].alpha_mask_name!="fp1400_face_lod0_msk2"||
            fp_materials.entries[2].alpha_blended||!fp_materials.entries[3].alpha_blended||!fp_materials.entries[4].alpha_blended)return 19;
         std::vector<gbfr::PreviewMaterialTextures> fp_preview_materials(fp_materials.entries.size());
         const auto granite_4k=integration.parent_path()/L"unpack/data/granite/4k";
-        for(std::size_t i=0;i<fp_preview_materials.size();++i)fp_preview_materials[i].alpha_blended=fp_materials.entries[i].alpha_blended;
+        for(std::size_t i=0;i<fp_preview_materials.size();++i){fp_preview_materials[i].alpha_blended=fp_materials.entries[i].alpha_blended;if(fp_materials.entries[i].alpha_blended&&!fp_materials.entries[i].alpha_mask_name.empty())fp_preview_materials[i].alpha_mask=granite_4k/fs::path(fp_materials.entries[i].alpha_mask_name+".dds");}
         for(std::size_t i=0;i<2;++i) {
             const auto& entry=fp_materials.entries[i];auto& material=fp_preview_materials[i];
             material.eye_conjunctiva=granite_4k/fs::path(entry.eye_conjunctiva_name+".dds");
@@ -113,7 +118,7 @@ int main() {
         if(!preview.visible_bone_count()||preview.visible_bone_count()>=fp_skeleton.bones.size())return 40;
         const auto fp_rest_bones=preview.bone_positions();
         gbfr::AnimationClip empty_face_pose;empty_face_pose.frame_count=1;
-        if(!preview.apply_animation(&empty_face_pose,0.0f)||preview.bone_positions().size()!=fp_rest_bones.size())return 37;
+        if(!preview.apply_animation(&empty_face_pose,0.0f)||preview.bone_positions().size()!=fp_rest_bones.size()||preview.max_vertex_displacement()>1e-4f)return 37;
         for(std::size_t i=0;i<fp_rest_bones.size();++i){const auto& a=fp_rest_bones[i];const auto& b=preview.bone_positions()[i];if(std::abs(a.x-b.x)+std::abs(a.y-b.y)+std::abs(a.z-b.z)>1e-4f)return 38;}
         if(!preview.apply_animation(nullptr,0.0f))return 39;
         const auto face_motion_root=integration.parent_path()/L"source/data/fp/fp1400";
@@ -126,6 +131,9 @@ int main() {
         const auto expression=gbfr::load_mot(face_motion_root/L"fp1400_a000.mot");
         const auto face_rest_hash=preview.vertex_pose_hash();
         if(!preview.apply_animation(&expression,0.0f))return 35;
+        const auto expression_002b=gbfr::load_mot(face_motion_root/L"fp1400_002b.mot");
+        if(!preview.apply_animation(&expression_002b,0.0f)||preview.max_vertex_displacement()<1e-4f||preview.max_vertex_displacement()>.01f)return 41;
+        if(!preview.apply_animation(&expression,0.0f))return 42;
         if(preview.vertex_pose_hash()==face_rest_hash||!preview.apply_animation(nullptr,0.0f)||preview.vertex_pose_hash()!=face_rest_hash)return 36;
         preview.frame(camera);preview.render(camera,true,gbfr::PreviewShadingMode::lit,true,true);context->Flush();
         if(FAILED(device->GetDeviceRemovedReason()))return 21;

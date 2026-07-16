@@ -259,7 +259,7 @@ void discover_motions(const ModelPreviewKey& key) {
     const auto directory=g_workspace->root()/L"source/data"/prefix/model_id;
     if(!std::filesystem::is_directory(directory))return;
     for(const auto& entry:std::filesystem::directory_iterator(directory))if(entry.is_regular_file()&&entry.path().extension()==L".mot")g_motion_files.push_back(entry.path());
-    std::sort(g_motion_files.begin(),g_motion_files.end(),[](const auto& a,const auto& b){return _wcsicmp(a.filename().c_str(),b.filename().c_str())<0;});
+    std::sort(g_motion_files.begin(),g_motion_files.end(),[](const auto& a,const auto& b){return gbfr::natural_less_case_insensitive(a.filename().native(),b.filename().native());});
 }
 
 bool select_motion(int index) {
@@ -319,6 +319,7 @@ bool load_model_preview(std::size_t index,bool force) {
             preview.eye_iris=resolve_base_albedo(g_workspace->root(),entry.eye_iris_name);
             preview.eye_highlight=resolve_base_albedo(g_workspace->root(),entry.eye_highlight_name);
             preview.eye_mask=resolve_base_albedo(g_workspace->root(),entry.eye_mask_name);
+            if(entry.alpha_blended)preview.alpha_mask=resolve_base_albedo(g_workspace->root(),entry.alpha_mask_name);
             preview.alpha_blended=entry.alpha_blended;
             if(!preview.albedo.empty()||(!preview.eye_conjunctiva.empty()&&!preview.eye_iris.empty()&&!preview.eye_highlight.empty()))++resolved_materials;
         }

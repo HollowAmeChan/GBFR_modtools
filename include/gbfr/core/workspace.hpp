@@ -2,10 +2,13 @@
 
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 namespace gbfr {
+bool natural_less_case_insensitive(std::wstring_view left, std::wstring_view right);
+
 enum class AssetKind { texture, material, cloth, model, new_texture };
 
 struct WorkspaceAsset {

@@ -15,6 +15,7 @@ struct PreviewMaterialTextures {
     std::filesystem::path eye_iris;
     std::filesystem::path eye_highlight;
     std::filesystem::path eye_mask;
+    std::filesystem::path alpha_mask;
     bool alpha_blended{};
 };
 
@@ -42,6 +43,7 @@ public:
     const std::vector<Vec3>& bone_positions() const noexcept { return animated_bone_positions_; }
     std::size_t visible_bone_count() const noexcept { return visible_bone_count_; }
     std::uint64_t vertex_pose_hash() const noexcept { return vertex_pose_hash_; }
+    float max_vertex_displacement() const noexcept { return max_vertex_displacement_; }
 private:
     bool create_targets();
     struct DrawRange {
@@ -53,7 +55,9 @@ private:
         Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> primary;
         Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> iris;
         Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> highlight;
+        Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> alpha_mask;
         bool eye{};
+        bool alpha_masked{};
         bool alpha_blended{};
     };
     bool load_dds(const std::filesystem::path& path,
@@ -86,6 +90,7 @@ private:
     std::vector<bool> visible_bones_;
     std::size_t visible_bone_count_{};
     std::uint64_t vertex_pose_hash_{};
+    float max_vertex_displacement_{};
     float bone_marker_size_{.001f};
 };
 }

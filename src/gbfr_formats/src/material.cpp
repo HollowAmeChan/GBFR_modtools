@@ -41,6 +41,7 @@ MaterialAsset load_mmat_json(const std::filesystem::path& path) {
                 case eye_mask_texture_slot_id: entry.eye_mask_name=name;break;
                 case eye_iris_texture_slot_id: entry.eye_iris_name=name;break;
                 case eye_conjunctiva_texture_slot_id: entry.eye_conjunctiva_name=name;break;
+                case face_mask2_texture_slot_id: entry.alpha_mask_name=name;break;
                 default:break;
                 }
             }

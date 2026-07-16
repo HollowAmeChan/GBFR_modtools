@@ -16,14 +16,14 @@ using namespace DirectX;
 namespace fs = std::filesystem;
 namespace {
 struct GpuVertex { float position[3], normal[3], uv[2]; };
-struct Constants { XMFLOAT4X4 view_projection; XMFLOAT4 color; XMFLOAT4 light; unsigned textured; unsigned eye_material; unsigned lighting; unsigned alpha_blended; };
+struct Constants { XMFLOAT4X4 view_projection; XMFLOAT4 color; XMFLOAT4 light; unsigned textured; unsigned eye_material; unsigned lighting; unsigned alpha_blended; unsigned alpha_masked; unsigned padding[3]; };
 
 const char* shader_source = R"(
-cbuffer Scene : register(b0) { float4x4 viewProjection; float4 color; float4 light; uint textured; uint eyeMaterial; uint lighting; uint alphaBlended; };
+cbuffer Scene : register(b0) { float4x4 viewProjection; float4 color; float4 light; uint textured; uint eyeMaterial; uint lighting; uint alphaBlended; uint alphaMasked; };
 struct VSIn { float3 position:POSITION; float3 normal:NORMAL; float2 uv:TEXCOORD0; };
 struct VSOut { float4 position:SV_POSITION; float3 normal:NORMAL; float2 uv:TEXCOORD0; };
 VSOut VSMain(VSIn v) { VSOut o; o.position=mul(float4(v.position,1),viewProjection); o.normal=v.normal; o.uv=v.uv; return o; }
-Texture2D primaryTexture:register(t0); Texture2D irisTexture:register(t1); Texture2D highlightTexture:register(t2); SamplerState linearSampler:register(s0);
+Texture2D primaryTexture:register(t0); Texture2D irisTexture:register(t1); Texture2D highlightTexture:register(t2); Texture2D alphaMaskTexture:register(t3); SamplerState linearSampler:register(s0);
 float4 PSMain(VSOut i):SV_TARGET {
     float2 uv=float2(i.uv.x,1.0-i.uv.y);
     float4 primary=textured?primaryTexture.Sample(linearSampler,uv):color;
@@ -35,7 +35,9 @@ float4 PSMain(VSOut i):SV_TARGET {
         base=lerp(base,iris.rgb,iris.a);
         base=lerp(base,highlight.rgb,highlight.a);
     }
-    float outputAlpha=alphaBlended?primary.a:color.a;
+    float coverage=primary.a;
+    if(alphaMasked) coverage*=alphaMaskTexture.Sample(linearSampler,uv).b;
+    float outputAlpha=alphaBlended?coverage:color.a;
     if(!lighting) return float4(base,outputAlpha);
     float halfLambert=dot(normalize(i.normal),normalize(light.xyz))*.5+.5;
     float shade=halfLambert>.72?1.04:(halfLambert>.43?.86:.68);
@@ -149,6 +151,7 @@ bool PreviewRenderer::load(const MeshAsset& mesh,const SkeletonAsset& skeleton,c
         auto& gpu=materials_[i];const auto& source=materials[i];
         gpu.alpha_blended=source.alpha_blended;
         if(!source.albedo.empty()&&!load_dds(source.albedo,gpu.primary)) return false;
+        if(!source.alpha_mask.empty()){gpu.alpha_masked=load_dds(source.alpha_mask,gpu.alpha_mask);if(!gpu.alpha_masked)return false;}
         if(!source.eye_conjunctiva.empty()&&!source.eye_iris.empty()&&!source.eye_highlight.empty()) {
             gpu.eye=load_dds(source.eye_conjunctiva,gpu.primary)&&load_dds(source.eye_iris,gpu.iris)&&load_dds(source.eye_highlight,gpu.highlight);
             if(!gpu.eye) return false;
@@ -177,7 +180,7 @@ void PreviewRenderer::clear() {
     index_count_=0; line_vertex_count_=0; bone_point_vertex_count_=0; collision_vertex_count_=0;
     vertices_.Reset(); indices_.Reset(); lines_.Reset(); bone_points_.Reset(); collision_lines_.Reset();
     draw_ranges_.clear(); materials_.clear();
-    source_mesh_={};skeleton_={};animated_bone_positions_.clear();visible_bones_.clear();visible_bone_count_=0;vertex_pose_hash_=0;
+    source_mesh_={};skeleton_={};animated_bone_positions_.clear();visible_bones_.clear();visible_bone_count_=0;vertex_pose_hash_=0;max_vertex_displacement_=0;
     texture_preview_srv_.Reset();texture_width_=0;texture_height_=0;
 }
 
@@ -201,6 +204,7 @@ bool PreviewRenderer::apply_animation(const AnimationClip* clip,float frame) {
 
     std::vector<GpuVertex> vertices;vertices.reserve(source_mesh_.vertices.size());
     if(!clip){
+        max_vertex_displacement_=0;
         animated_bone_positions_.clear();animated_bone_positions_.reserve(bone_count);
         for(const auto& bone:skeleton_.bones)animated_bone_positions_.push_back(bone.world_position);
         for(const auto& source:source_mesh_.vertices)vertices.push_back({{source.position.x,source.position.y,source.position.z},{source.normal.x,source.normal.y,source.normal.z},{source.uv.x,source.uv.y}});
@@ -238,11 +242,15 @@ bool PreviewRenderer::apply_animation(const AnimationClip* clip,float frame) {
         XMFLOAT3 world{};XMStoreFloat3(&world,posed_world[i].r[3]);animated_bone_positions_[i]={world.x,world.y,world.z};
     }
 
+    max_vertex_displacement_=0;
     for(const auto& source:source_mesh_.vertices){
         XMVECTOR position=XMVectorZero(),normal=XMVectorZero();float total{};
         for(std::size_t influence=0;influence<4;++influence){const float weight=source.weights[influence];const auto joint=source.joints[influence];if(weight<=0.0f||joint>=bone_count)continue;position+=XMVectorScale(XMVector3TransformCoord(XMVectorSet(source.position.x,source.position.y,source.position.z,1),skin[joint]),weight);normal+=XMVectorScale(XMVector3TransformNormal(XMVectorSet(source.normal.x,source.normal.y,source.normal.z,0),skin[joint]),weight);total+=weight;}
         if(total<=0.0f){position=XMVectorSet(source.position.x,source.position.y,source.position.z,1);normal=XMVectorSet(source.normal.x,source.normal.y,source.normal.z,0);}else{position=XMVectorScale(position,1.0f/total);normal=XMVector3Normalize(normal);}
         XMFLOAT3 p{},n{};XMStoreFloat3(&p,position);XMStoreFloat3(&n,normal);vertices.push_back({{p.x,p.y,p.z},{n.x,n.y,n.z},{source.uv.x,source.uv.y}});
+        const float dx=p.x-source.position.x,dy=p.y-source.position.y,dz=p.z-source.position.z;
+        const float displacement=std::sqrt(dx*dx+dy*dy+dz*dz);
+        max_vertex_displacement_=std::max(max_vertex_displacement_,displacement);
     }
     return upload_pose(vertices);
 }
@@ -302,8 +310,8 @@ void PreviewRenderer::render(const OrbitCamera& camera,bool show_mesh,PreviewSha
                 GpuMaterialTextures* material=!wireframe&&draw.material<materials_.size()?&materials_[draw.material]:nullptr;
                 const bool alpha=material&&material->alpha_blended;
                 if(pass<2&&alpha!=(pass==1))continue;
-                ID3D11ShaderResourceView* textures[3]={material?material->primary.Get():nullptr,material?material->iris.Get():nullptr,material?material->highlight.Get():nullptr};
-                constants.textured=textures[0]?1u:0u;constants.eye_material=material&&material->eye?1u:0u;constants.alpha_blended=alpha?1u:0u;upload_constants();context_->PSSetShaderResources(0,3,textures);context_->DrawIndexed(draw.index_count,draw.first_index,0);
+                ID3D11ShaderResourceView* textures[4]={material?material->primary.Get():nullptr,material?material->iris.Get():nullptr,material?material->highlight.Get():nullptr,material?material->alpha_mask.Get():nullptr};
+                constants.textured=textures[0]?1u:0u;constants.eye_material=material&&material->eye?1u:0u;constants.alpha_blended=alpha?1u:0u;constants.alpha_masked=material&&material->alpha_masked?1u:0u;upload_constants();context_->PSSetShaderResources(0,4,textures);context_->DrawIndexed(draw.index_count,draw.first_index,0);
             }
         };
         const float blend_factor[4]{};
@@ -316,11 +324,11 @@ void PreviewRenderer::render(const OrbitCamera& camera,bool show_mesh,PreviewSha
         }
     }
     context_->OMSetDepthStencilState(overlay_depth_.Get(),0);
-    constants.lighting=0;constants.eye_material=0;constants.alpha_blended=0;
+    constants.lighting=0;constants.eye_material=0;constants.alpha_blended=0;constants.alpha_masked=0;
     if(show_skeleton&&line_vertex_count_){constants.color={1,.55f,.08f,1};constants.textured=0;upload_constants();context_->RSSetState(solid_.Get());context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST);context_->IASetVertexBuffers(0,1,lines_.GetAddressOf(),&stride,&offset);context_->Draw(line_vertex_count_,0);}
     if(show_skeleton&&bone_point_vertex_count_){constants.color={1,.88f,.24f,1};constants.textured=0;upload_constants();context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST);context_->IASetVertexBuffers(0,1,bone_points_.GetAddressOf(),&stride,&offset);context_->Draw(bone_point_vertex_count_,0);}
     if(show_collisions&&collision_vertex_count_){constants.color={.05f,.9f,.85f,1};constants.textured=0;upload_constants();context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST);context_->IASetVertexBuffers(0,1,collision_lines_.GetAddressOf(),&stride,&offset);context_->Draw(collision_vertex_count_,0);}
     context_->OMSetDepthStencilState(nullptr,0);
-    ID3D11ShaderResourceView* none[3]={};context_->PSSetShaderResources(0,3,none);
+    ID3D11ShaderResourceView* none[4]={};context_->PSSetShaderResources(0,4,none);
 }
 }

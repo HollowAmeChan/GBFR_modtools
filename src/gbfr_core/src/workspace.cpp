@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cwctype>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
@@ -39,6 +40,30 @@ void copy_atomic(const fs::path& source, const fs::path& destination) {
 }
 
 namespace gbfr {
+bool natural_less_case_insensitive(std::wstring_view left,std::wstring_view right) {
+    std::size_t i{},j{};
+    while(i<left.size()&&j<right.size()){
+        if(std::iswdigit(left[i])&&std::iswdigit(right[j])){
+            const auto left_begin=i,right_begin=j;
+            while(i<left.size()&&std::iswdigit(left[i]))++i;
+            while(j<right.size()&&std::iswdigit(right[j]))++j;
+            auto left_number=left_begin,right_number=right_begin;
+            while(left_number<i&&left[left_number]==L'0')++left_number;
+            while(right_number<j&&right[right_number]==L'0')++right_number;
+            const auto left_digits=i-left_number,right_digits=j-right_number;
+            if(left_digits!=right_digits)return left_digits<right_digits;
+            for(std::size_t digit=0;digit<left_digits;++digit)if(left[left_number+digit]!=right[right_number+digit])return left[left_number+digit]<right[right_number+digit];
+            const auto left_width=i-left_begin,right_width=j-right_begin;
+            if(left_width!=right_width)return left_width<right_width;
+            continue;
+        }
+        const auto a=std::towlower(left[i]),b=std::towlower(right[j]);
+        if(a!=b)return a<b;
+        ++i;++j;
+    }
+    return i==left.size()&&j!=right.size();
+}
+
 std::string sha256_file(const fs::path& path) {
     std::ifstream stream(path, std::ios::binary);
     if (!stream) throw std::runtime_error("Cannot open file for SHA-256");
@@ -113,9 +138,9 @@ Workspace Workspace::load(const fs::path& selected) {
     std::stable_sort(result.assets_.begin(), result.assets_.end(), [](const auto& left, const auto& right) {
         const auto left_name = left.input.filename().native();
         const auto right_name = right.input.filename().native();
-        const int by_name = _wcsicmp(left_name.c_str(), right_name.c_str());
-        if (by_name != 0) return by_name < 0;
-        return _wcsicmp(left.input.native().c_str(), right.input.native().c_str()) < 0;
+        if(natural_less_case_insensitive(left_name,right_name))return true;
+        if(natural_less_case_insensitive(right_name,left_name))return false;
+        return natural_less_case_insensitive(left.input.native(),right.input.native());
     });
     result.refresh();
     return result;
