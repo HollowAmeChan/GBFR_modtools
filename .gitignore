@@ -1,5 +1,8 @@
 # Generated workspace
 explore_output/
+/.deps/
+/out/
+/CMakeUserPresets.json
 
 # Third-party runtime binary (see README)
 _lib/flatc.exe
