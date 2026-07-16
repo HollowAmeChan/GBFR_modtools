@@ -111,7 +111,9 @@ Granite DDS 是可编辑中间态，构建器不会修改 GTS/GTP。对于 `sour
 
 构建器会：
 
-- 按“工作区构建 / mmat 编辑 / cloth 编辑”划分功能页；构建列表中的“编辑”会跳到对应的专用编辑页。
+- 按“工作区构建 / mmat 编辑 / cloth 编辑 / skeleton 编辑”划分功能页；构建列表中的“编辑”会跳到对应的专用编辑页。
+- `skeleton 编辑` 以主体 `.skeleton` 的骨骼层级为入口，按当前 CLH 文件或全部 CLH 文件汇总该骨骼上的碰撞参数；修改会写回各自的 `unpack/*.clh.bxm.xml`，再由构建页封回 BXM，`.skeleton` 本身不会被改写。
+- 构建列表中点击 CLH 行的“编辑”会直接进入 `skeleton 编辑` 并选中该 CLH；也可以直接打开分页查看全部文件模式。
 - 分别列出已有贴图封回、新建贴图、mmat 编码与 cloth BXM 编码操作。
 - 默认勾选哈希已变化的中间文件。
 - 允许手动勾选未修改项目以强制构建。
@@ -147,6 +149,8 @@ data/pl/<角色>/<角色>_<动作>_<变体>_seq_edit_cloth.bxm
 CLP 的 `no/noUp/noDown/noSide/noPoly/noFix` 与 CLH 的 `p1/p2` 使用的是**骨骼名编码**，不是 `.skeleton` 的骨骼数组下标，也不是 FlatBuffers 中的 `BoneId`。数值按十六进制转换后就是 Blender 插件导入的原始骨骼名：例如 `3141 = 0xC45` 对应 `_c45`，`545 = 0x221` 对应 `_221`。因此每个碰撞体确实通过 `p1/p2` 引用了主体骨架；但 `p1 == p2` 或 `p1 != p2` 本身不能直接判断碰撞形状，还要结合 `offset1/offset2` 与 `capsule` 字段。编辑器只使用 `source/data/model/pl/<角色>/<角色>.skeleton` 验证并显示名称，不混用会出现重名的 fp/wp 骨架；未命中的引用会明确显示“未在主体骨架中找到”。
 
 当前 `pl1400` 样本中，CLP 的 175 个不同骨骼引用与 CLH 的 38 个不同端点引用都能在 `pl1400.skeleton` 中找到。骨骼名 `_xxx` 是游戏原始标识；Blender 插件中的“Translate Bones”只会把一部分通用人体骨骼另行翻译为 `Hips/Chest/Head` 等便于阅读的别名，cloth 专用骨骼通常仍保留 `_c45` 这类名字。
+
+在 `skeleton 编辑` 页中，左侧骨骼列表显示骨骼 ID、原始名称、父骨骼、碰撞数和来源文件数；右侧按来源 CLH 与碰撞 `id_` 显示该骨骼作为 `p1`、`p2` 或两者时的全部记录。`p1/p2` 使用主体骨架名称下拉选择，`weight/radius/offset1/offset2/capsule/notUseInBattle/notUseInIdle` 可直接编辑。碰撞 `id_` 和来源文件只读，因为动作覆盖和 capsule 链可能引用这些 ID；需要整体恢复时仍使用构建页的逐项“恢复”。
 
 动作覆盖文件的 `Seq/ClothTrack` 记录以 `FileId` 指向同编号基础组，以 `CollisionId0..N` 指向该组 `_clh` 中的碰撞体，并在 `StartTime` 应用 `ScaleRate`、`FadeInFrame`、`FloorAdditiveOffset` 等覆盖。`StartTime` 基本位于 60 FPS 帧网格上。实际数据中 `ScaleRate` 可出现 `0`、`2.6`、`97`、`100`，编辑器不能把它限制在 `0..1`。
 

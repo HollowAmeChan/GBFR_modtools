@@ -454,9 +454,12 @@ $pageMmat = New-Object Windows.Forms.TabPage
 $pageMmat.Text = $B.tab_mmat
 $pageCloth = New-Object Windows.Forms.TabPage
 $pageCloth.Text = $B.tab_cloth
+$pageBoneCollision = New-Object Windows.Forms.TabPage
+$pageBoneCollision.Text = $B.tab_skeleton
 [void]$tabs.TabPages.Add($pageBuild)
 [void]$tabs.TabPages.Add($pageMmat)
 [void]$tabs.TabPages.Add($pageCloth)
+[void]$tabs.TabPages.Add($pageBoneCollision)
 $form.Controls.Add($tabs)
 
 $lblSummary = New-Object Windows.Forms.Label
@@ -730,11 +733,182 @@ $clothGrid.RowTemplate.Height = 28
 $clothGrid.ColumnHeadersHeight = 32
 $pageCloth.Controls.Add($clothGrid)
 
+$lblSkeletonObject = New-Object Windows.Forms.Label
+$lblSkeletonObject.Text = $B.edit_object
+$lblSkeletonObject.Location = New-Object Drawing.Point(12, 16)
+$lblSkeletonObject.AutoSize = $true
+$pageBoneCollision.Controls.Add($lblSkeletonObject)
+
+$txtSkeletonObject = New-Object Windows.Forms.TextBox
+$txtSkeletonObject.Location = New-Object Drawing.Point(90, 12)
+$txtSkeletonObject.Size = New-Object Drawing.Size(844, 27)
+$txtSkeletonObject.ReadOnly = $true
+$txtSkeletonObject.Text = $B.no_edit_object
+$pageBoneCollision.Controls.Add($txtSkeletonObject)
+
+$lblBoneScope = New-Object Windows.Forms.Label
+$lblBoneScope.Text = $B.bone_scope
+$lblBoneScope.Location = New-Object Drawing.Point(12, 54)
+$lblBoneScope.AutoSize = $true
+$pageBoneCollision.Controls.Add($lblBoneScope)
+
+$radioBoneFile = New-Object Windows.Forms.RadioButton
+$radioBoneFile.Text = $B.bone_scope_file
+$radioBoneFile.Location = New-Object Drawing.Point(80, 51)
+$radioBoneFile.Size = New-Object Drawing.Size(90, 26)
+$radioBoneFile.Checked = $true
+$pageBoneCollision.Controls.Add($radioBoneFile)
+
+$radioBoneAll = New-Object Windows.Forms.RadioButton
+$radioBoneAll.Text = $B.bone_scope_all
+$radioBoneAll.Location = New-Object Drawing.Point(174, 51)
+$radioBoneAll.Size = New-Object Drawing.Size(90, 26)
+$pageBoneCollision.Controls.Add($radioBoneAll)
+
+$cmbBoneFile = New-Object Windows.Forms.ComboBox
+$cmbBoneFile.Location = New-Object Drawing.Point(270, 49)
+$cmbBoneFile.Size = New-Object Drawing.Size(330, 28)
+$cmbBoneFile.DropDownStyle = "DropDownList"
+$pageBoneCollision.Controls.Add($cmbBoneFile)
+
+$lblBoneSearch = New-Object Windows.Forms.Label
+$lblBoneSearch.Text = $B.bone_search
+$lblBoneSearch.Location = New-Object Drawing.Point(612, 54)
+$lblBoneSearch.AutoSize = $true
+$pageBoneCollision.Controls.Add($lblBoneSearch)
+
+$txtBoneSearch = New-Object Windows.Forms.TextBox
+$txtBoneSearch.Location = New-Object Drawing.Point(660, 50)
+$txtBoneSearch.Size = New-Object Drawing.Size(160, 27)
+$pageBoneCollision.Controls.Add($txtBoneSearch)
+
+$chkBoneReferenced = New-Object Windows.Forms.CheckBox
+$chkBoneReferenced.Text = $B.bone_only_referenced
+$chkBoneReferenced.Location = New-Object Drawing.Point(12, 86)
+$chkBoneReferenced.Size = New-Object Drawing.Size(150, 26)
+$chkBoneReferenced.Checked = $true
+$pageBoneCollision.Controls.Add($chkBoneReferenced)
+
+$lblBoneSummary = New-Object Windows.Forms.Label
+$lblBoneSummary.Text = $B.bone_no_workspace
+$lblBoneSummary.Location = New-Object Drawing.Point(174, 89)
+$lblBoneSummary.Size = New-Object Drawing.Size(646, 24)
+$pageBoneCollision.Controls.Add($lblBoneSummary)
+
+$btnSaveBoneCollisions = New-Object Windows.Forms.Button
+$btnSaveBoneCollisions.Text = $B.bone_save
+$btnSaveBoneCollisions.Location = New-Object Drawing.Point(832, 48)
+$btnSaveBoneCollisions.Size = New-Object Drawing.Size(102, 34)
+$btnSaveBoneCollisions.Enabled = $false
+$pageBoneCollision.Controls.Add($btnSaveBoneCollisions)
+
+$boneSplit = New-Object Windows.Forms.SplitContainer
+$boneSplit.Location = New-Object Drawing.Point(12, 118)
+$boneSplit.Size = New-Object Drawing.Size(922, 422)
+$boneSplit.Orientation = "Vertical"
+$boneSplit.SplitterDistance = 275
+$boneSplit.Panel1MinSize = 210
+$boneSplit.Panel2MinSize = 380
+$pageBoneCollision.Controls.Add($boneSplit)
+
+$boneGrid = New-Object Windows.Forms.DataGridView
+$boneGrid.Dock = "Fill"
+$boneGrid.AllowUserToAddRows = $false
+$boneGrid.AllowUserToDeleteRows = $false
+$boneGrid.AllowUserToResizeRows = $false
+$boneGrid.AutoGenerateColumns = $false
+$boneGrid.MultiSelect = $false
+$boneGrid.RowHeadersVisible = $false
+$boneGrid.SelectionMode = "FullRowSelect"
+$boneGrid.ReadOnly = $true
+$boneGrid.BackgroundColor = [Drawing.SystemColors]::Window
+$boneGrid.RowTemplate.Height = 28
+$boneGrid.ColumnHeadersHeight = 32
+foreach ($definition in @(
+    @{ Name="BoneId"; Header=$B.col_bone_id; Width=58 },
+    @{ Name="BoneName"; Header=$B.col_bone; Width=72 },
+    @{ Name="Parent"; Header=$B.col_parent_bone; Width=72 },
+    @{ Name="CollisionCount"; Header=$B.col_collision_count; Width=58 },
+    @{ Name="FileCount"; Header=$B.col_file_count; Width=48 }
+)) {
+    $column = New-Object Windows.Forms.DataGridViewTextBoxColumn
+    $column.Name = $definition.Name
+    $column.HeaderText = $definition.Header
+    $column.Width = $definition.Width
+    $column.ReadOnly = $true
+    $column.SortMode = "NotSortable"
+    [void]$boneGrid.Columns.Add($column)
+}
+$boneSplit.Panel1.Controls.Add($boneGrid)
+
+$boneCollisionGrid = New-Object Windows.Forms.DataGridView
+$boneCollisionGrid.Dock = "Fill"
+$boneCollisionGrid.AllowUserToAddRows = $false
+$boneCollisionGrid.AllowUserToDeleteRows = $false
+$boneCollisionGrid.AllowUserToResizeRows = $false
+$boneCollisionGrid.AutoGenerateColumns = $false
+$boneCollisionGrid.MultiSelect = $false
+$boneCollisionGrid.RowHeadersVisible = $false
+$boneCollisionGrid.SelectionMode = "FullRowSelect"
+$boneCollisionGrid.EditMode = "EditOnEnter"
+$boneCollisionGrid.BackgroundColor = [Drawing.SystemColors]::Window
+$boneCollisionGrid.RowTemplate.Height = 28
+$boneCollisionGrid.ColumnHeadersHeight = 32
+
+foreach ($definition in @(
+    @{ Name="SourceFile"; Header=$B.col_source_file; Width=150; ReadOnly=$true },
+    @{ Name="GroupId"; Header=$B.col_group; Width=45; ReadOnly=$true },
+    @{ Name="CollisionId"; Header="id"; Width=42; ReadOnly=$true },
+    @{ Name="DataVersion"; Header="version"; Width=55; ReadOnly=$true },
+    @{ Name="Endpoint"; Header=$B.col_endpoint; Width=55; ReadOnly=$true },
+    @{ Name="Weight"; Header="weight"; Width=72 },
+    @{ Name="Radius"; Header="radius"; Width=72 },
+    @{ Name="Offset1"; Header="offset1"; Width=205 },
+    @{ Name="Offset2"; Header="offset2"; Width=205 },
+    @{ Name="Capsule"; Header="capsule"; Width=62 }
+)) {
+    $column = New-Object Windows.Forms.DataGridViewTextBoxColumn
+    $column.Name = $definition.Name
+    $column.HeaderText = $definition.Header
+    $column.Width = $definition.Width
+    $column.ReadOnly = $definition.ContainsKey("ReadOnly") -and $definition.ReadOnly
+    $column.SortMode = "NotSortable"
+    [void]$boneCollisionGrid.Columns.Add($column)
+}
+
+foreach ($name in @("P1Bone", "P2Bone")) {
+    $column = New-Object Windows.Forms.DataGridViewComboBoxColumn
+    $column.Name = $name
+    $column.HeaderText = if ($name -eq "P1Bone") { $B.col_p1_bone } else { $B.col_p2_bone }
+    $column.Width = 78
+    $column.DisplayStyle = "DropDownButton"
+    $column.FlatStyle = "Flat"
+    $column.SortMode = "NotSortable"
+    $columnIndex = if ($name -eq "P1Bone") { 5 } else { 6 }
+    [void]$boneCollisionGrid.Columns.Insert($columnIndex, $column)
+}
+
+foreach ($definition in @(
+    @{ Name="BattleOff"; Header=$B.col_battle_off },
+    @{ Name="IdleOff"; Header=$B.col_idle_off }
+)) {
+    $column = New-Object Windows.Forms.DataGridViewCheckBoxColumn
+    $column.Name = $definition.Name
+    $column.HeaderText = $definition.Header
+    $column.Width = 66
+    $column.ThreeState = $false
+    $column.SortMode = "NotSortable"
+    [void]$boneCollisionGrid.Columns.Add($column)
+}
+$boneSplit.Panel2.Controls.Add($boneCollisionGrid)
+
 foreach ($control in @(
     $lblSummary, $grid, $btnModified, $btnClear, $btnRefresh, $btnRestore,
     $btnOpenBuild, $btnBuild, $log, $lblMmatObject, $txtMmatObject,
     $btnClearMmatA4, $lblMmatSummary, $mmatGrid, $lblClothObject,
-    $txtClothObject, $btnChooseCloth, $lblClothSummary, $clothHeaderGrid, $clothGrid
+    $txtClothObject, $btnChooseCloth, $lblClothSummary, $clothHeaderGrid, $clothGrid,
+    $lblSkeletonObject, $txtSkeletonObject, $lblBoneScope, $radioBoneFile, $radioBoneAll, $cmbBoneFile, $lblBoneSearch,
+    $txtBoneSearch, $chkBoneReferenced, $lblBoneSummary, $btnSaveBoneCollisions, $boneSplit
 )) {
     $control.Anchor = "Top,Left"
 }
@@ -780,11 +954,31 @@ function Update-WorkspaceEditorLayout {
         $clothHeaderGrid.SetBounds(12, 78, $clothWidth - 24, 130)
         $clothGrid.SetBounds(12, 216, $clothWidth - 24, [Math]::Max(80, $clothHeight - 228))
     }
+
+    $boneWidth = $pageBoneCollision.ClientSize.Width
+    $boneHeight = $pageBoneCollision.ClientSize.Height
+    if ($boneWidth -gt 620 -and $boneHeight -gt 220) {
+        $saveX = $boneWidth - 114
+        $searchWidth = [Math]::Max(100, [Math]::Min(190, $saveX - 660 - 12))
+        $lblSkeletonObject.SetBounds(12, 16, 70, 24)
+        $txtSkeletonObject.SetBounds(90, 12, $boneWidth - 102, 27)
+        $lblBoneScope.SetBounds(12, 54, 60, 24)
+        $radioBoneFile.SetBounds(80, 51, 90, 26)
+        $radioBoneAll.SetBounds(174, 51, 90, 26)
+        $cmbBoneFile.SetBounds(270, 49, [Math]::Max(180, $boneWidth - 270 - 370), 28)
+        $lblBoneSearch.SetBounds($saveX - $searchWidth - 46, 54, 44, 24)
+        $txtBoneSearch.SetBounds($saveX - $searchWidth, 50, $searchWidth - 8, 27)
+        $btnSaveBoneCollisions.SetBounds($saveX, 48, 102, 34)
+        $chkBoneReferenced.SetBounds(12, 86, 150, 26)
+        $lblBoneSummary.SetBounds(174, 89, $boneWidth - 186, 24)
+        $boneSplit.SetBounds(12, 118, $boneWidth - 24, [Math]::Max(100, $boneHeight - 130))
+    }
 }
 
 $pageBuild.Add_SizeChanged({ Update-WorkspaceEditorLayout })
 $pageMmat.Add_SizeChanged({ Update-WorkspaceEditorLayout })
 $pageCloth.Add_SizeChanged({ Update-WorkspaceEditorLayout })
+$pageBoneCollision.Add_SizeChanged({ Update-WorkspaceEditorLayout })
 $tabs.Add_SelectedIndexChanged({ Update-WorkspaceEditorLayout })
 $form.Add_Shown({ Update-WorkspaceEditorLayout })
 Update-WorkspaceEditorLayout
@@ -796,6 +990,14 @@ $script:clothOperation = $null
 $script:clothOperationKey = ""
 $script:clothBoneMap = @{}
 $script:clothSkeletonPath = ""
+$script:skeletonBones = @()
+$script:skeletonBoneNameMap = @{}
+$script:skeletonClhOperations = @()
+$script:skeletonCollisionRecords = @()
+$script:skeletonCollisionErrors = @()
+$script:skeletonSelectedBoneId = $null
+$script:skeletonEditorLoading = $false
+$script:skeletonEditorDirty = $false
 function Add-Log([string]$Message) {
     $log.AppendText($Message + "`r`n")
     $log.SelectionStart = $log.TextLength
@@ -883,15 +1085,19 @@ function Add-ClothHeaderRow([string]$Name, [object]$Value) {
 function Update-ClothBoneMap {
     $script:clothBoneMap = @{}
     $script:clothSkeletonPath = ""
+    $script:skeletonBones = @()
+    $script:skeletonBoneNameMap = @{}
     if ($null -eq $script:context) { return }
 
     $characterId = [string]$script:context.Workspace.CharacterId
     $skeletonPath = Join-Path $script:context.Root "source\data\model\pl\$characterId\$characterId.skeleton"
     if (-not (Test-Path -LiteralPath $skeletonPath -PathType Leaf)) { return }
 
-    foreach ($bone in @(Get-GbfrSkeletonBones $skeletonPath)) {
+    $script:skeletonBones = @(Get-GbfrSkeletonBones $skeletonPath)
+    foreach ($bone in $script:skeletonBones) {
         if ($null -ne $bone.ClothId) {
             $script:clothBoneMap[[int]$bone.ClothId] = $bone
+            $script:skeletonBoneNameMap[[string]$bone.Name] = [int]$bone.ClothId
         }
     }
     $script:clothSkeletonPath = $skeletonPath
@@ -910,6 +1116,333 @@ function Get-ClothBoneLink([object]$Value) {
     $id = [int]$Value
     if ($id -eq 4095) { return "-" }
     return "$id  $(Get-ClothBoneName $id)"
+}
+
+function Get-SkeletonScopeOperations {
+    if ($radioBoneAll.Checked) { return @($script:skeletonClhOperations) }
+    if ($cmbBoneFile.SelectedIndex -ge 0 -and $cmbBoneFile.SelectedIndex -lt $script:skeletonClhOperations.Count) {
+        return @($script:skeletonClhOperations[$cmbBoneFile.SelectedIndex])
+    }
+    return @()
+}
+
+function Get-SkeletonCollisionRecords([object[]]$Operations) {
+    $records = [System.Collections.Generic.List[PSCustomObject]]::new()
+    foreach ($operation in @($Operations)) {
+        if (-not $operation.Available -or -not (Test-Path -LiteralPath $operation.XmlPath -PathType Leaf)) { continue }
+        try {
+            [xml]$xml = [IO.File]::ReadAllText($operation.XmlPath, [Text.Encoding]::UTF8)
+            foreach ($collision in @($xml.CLOTH_AT.ClothCollision_LIST.ClothCollision)) {
+                $records.Add([PSCustomObject]@{
+                    Operation = $operation
+                    XmlPath = [string]$operation.XmlPath
+                    SourceFile = [string]$operation.InputLabel
+                    GroupId = [int]$operation.Record.GroupId
+                    CollisionId = [int]$collision.id_
+                    DataVersion = [int]$collision.dataVersion_
+                    P1Id = [int]$collision.p1
+                    P2Id = [int]$collision.p2
+                    Weight = [string]$collision.weight
+                    Radius = [string]$collision.radius
+                    Offset1 = [string]$collision.offset1
+                    Offset2 = [string]$collision.offset2
+                    Capsule = [string]$collision.capsule
+                    BattleOff = [int]$collision.notUseInBattle
+                    IdleOff = [int]$collision.notUseInIdle
+                })
+            }
+        } catch {
+            $script:skeletonCollisionErrors += "$($operation.InputLabel): $($_.Exception.Message)"
+        }
+    }
+    return @($records)
+}
+
+function Set-SkeletonEditorDirty([bool]$Dirty) {
+    $script:skeletonEditorDirty = $Dirty
+    $btnSaveBoneCollisions.Enabled = $Dirty
+}
+
+function Refresh-SkeletonCollisionDetails {
+    $script:skeletonEditorLoading = $true
+    try {
+        $boneCollisionGrid.Rows.Clear()
+        if ($null -eq $script:skeletonSelectedBoneId) { return }
+        $boneId = [int]$script:skeletonSelectedBoneId
+        $rows = @($script:skeletonCollisionRecords | Where-Object {
+            $_.P1Id -eq $boneId -or $_.P2Id -eq $boneId
+        } | Sort-Object GroupId, CollisionId)
+        foreach ($record in $rows) {
+            $endpoint = if ($record.P1Id -eq $boneId -and $record.P2Id -eq $boneId) { "p1+p2" }
+                        elseif ($record.P1Id -eq $boneId) { "p1" }
+                        else { "p2" }
+            $rowIndex = $boneCollisionGrid.Rows.Add(
+                $record.SourceFile, $record.GroupId, $record.CollisionId, $record.DataVersion, $endpoint,
+                (Get-ClothBoneName $record.P1Id), (Get-ClothBoneName $record.P2Id),
+                $record.Weight, $record.Radius, $record.Offset1, $record.Offset2,
+                $record.Capsule, ([bool]$record.BattleOff), ([bool]$record.IdleOff)
+            )
+            $row = $boneCollisionGrid.Rows[$rowIndex]
+            $row.Tag = $record
+            $row.Cells["P1Bone"].ToolTipText = "ID $($record.P1Id)"
+            $row.Cells["P2Bone"].ToolTipText = "ID $($record.P2Id)"
+            $row.Cells["SourceFile"].ToolTipText = $record.XmlPath
+        }
+        if ($script:clothBoneMap.ContainsKey($boneId)) {
+            $boneName = [string]$script:clothBoneMap[$boneId].Name
+            $fileCount = @($rows | Select-Object -ExpandProperty XmlPath -Unique).Count
+            $scopeLabel = if ($radioBoneAll.Checked) { $B.bone_scope_all } else { $B.bone_scope_file }
+            $errorText = if ($script:skeletonCollisionErrors.Count -gt 0) {
+                " | $($B.bone_file_errors) $($script:skeletonCollisionErrors.Count)"
+            } else { "" }
+            $lblBoneSummary.Text = "$scopeLabel | $boneName (ID $boneId) | $($B.cloth_collisions) $($rows.Count) | $($B.bone_files) $fileCount$errorText"
+        }
+    } finally {
+        $script:skeletonEditorLoading = $false
+    }
+}
+
+function Refresh-SkeletonBoneList {
+    if ($null -eq $script:context) { return }
+    $script:skeletonEditorLoading = $true
+    try {
+        $selectedId = $script:skeletonSelectedBoneId
+        $scopeOperations = @(Get-SkeletonScopeOperations)
+        $script:skeletonCollisionErrors = @()
+        $script:skeletonCollisionRecords = @(Get-SkeletonCollisionRecords $scopeOperations)
+        $boneGrid.Rows.Clear()
+
+        $counts = @{}
+        $fileSets = @{}
+        foreach ($record in $script:skeletonCollisionRecords) {
+            foreach ($id in @($record.P1Id, $record.P2Id) | Select-Object -Unique) {
+                if (-not $counts.ContainsKey($id)) {
+                    $counts[$id] = 0
+                    $fileSets[$id] = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+                }
+                $counts[$id]++
+                $fileSets[$id].Add($record.XmlPath) | Out-Null
+            }
+        }
+
+        $needle = $txtBoneSearch.Text.Trim()
+        $visible = 0
+        foreach ($bone in @($script:skeletonBones | Where-Object { $null -ne $_.ClothId } | Sort-Object ClothId)) {
+            $id = [int]$bone.ClothId
+            $count = if ($counts.ContainsKey($id)) { [int]$counts[$id] } else { 0 }
+            if ($chkBoneReferenced.Checked -and $count -eq 0) { continue }
+            $parentName = "-"
+            if ($bone.ParentIndex -ne 65535 -and $bone.ParentIndex -ge 0 -and $bone.ParentIndex -lt $script:skeletonBones.Count) {
+                $parentName = [string]$script:skeletonBones[$bone.ParentIndex].Name
+            }
+            if ($needle -and
+                $bone.Name.IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -lt 0 -and
+                ([string]$id).IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -lt 0 -and
+                $parentName.IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
+
+            $files = if ($fileSets.ContainsKey($id)) { $fileSets[$id].Count } else { 0 }
+            $rowIndex = $boneGrid.Rows.Add($id, $bone.Name, $parentName, $count, $files)
+            $boneGrid.Rows[$rowIndex].Tag = $bone
+            if ($null -ne $selectedId -and $id -eq [int]$selectedId) {
+                $boneGrid.Rows[$rowIndex].Selected = $true
+                $boneGrid.CurrentCell = $boneGrid.Rows[$rowIndex].Cells["BoneName"]
+            }
+            $visible++
+        }
+
+        if ($boneGrid.SelectedRows.Count -eq 0 -and $boneGrid.Rows.Count -gt 0) {
+            $boneGrid.Rows[0].Selected = $true
+            $boneGrid.CurrentCell = $boneGrid.Rows[0].Cells["BoneName"]
+            $script:skeletonSelectedBoneId = [int]$boneGrid.Rows[0].Tag.ClothId
+        } elseif ($boneGrid.SelectedRows.Count -gt 0) {
+            $script:skeletonSelectedBoneId = [int]$boneGrid.SelectedRows[0].Tag.ClothId
+        } else {
+            $script:skeletonSelectedBoneId = $null
+        }
+
+        $scopeLabel = if ($radioBoneAll.Checked) { $B.bone_scope_all } else { $B.bone_scope_file }
+        $errorText = if ($script:skeletonCollisionErrors.Count -gt 0) {
+            " | $($B.bone_file_errors) $($script:skeletonCollisionErrors.Count)"
+        } else { "" }
+        $lblBoneSummary.Text = "$scopeLabel | $($B.bone_visible) $visible | $($B.cloth_collisions) $($script:skeletonCollisionRecords.Count)$errorText"
+    } finally {
+        $script:skeletonEditorLoading = $false
+    }
+    Refresh-SkeletonCollisionDetails
+}
+
+function Initialize-SkeletonEditor {
+    $script:skeletonEditorLoading = $true
+    try {
+        $txtSkeletonObject.Text = if ($script:clothSkeletonPath) { $script:clothSkeletonPath } else { $B.no_edit_object }
+        $script:skeletonClhOperations = @($script:context.Operations | Where-Object {
+            [string]$_.Kind -eq "cloth" -and [string]$_.ClothCategory -eq "clh" -and $_.Available
+        } | Sort-Object { [int]$_.Record.GroupId })
+        $cmbBoneFile.Items.Clear()
+        foreach ($operation in $script:skeletonClhOperations) {
+            [void]$cmbBoneFile.Items.Add([string]$operation.InputLabel)
+        }
+        if ($cmbBoneFile.Items.Count -gt 0) { $cmbBoneFile.SelectedIndex = 0 }
+        $cmbBoneFile.Enabled = $radioBoneFile.Checked -and $cmbBoneFile.Items.Count -gt 0
+
+        $boneNames = @($script:skeletonBones | Where-Object { $null -ne $_.ClothId } |
+            Sort-Object ClothId | ForEach-Object { [string]$_.Name })
+        foreach ($columnName in @("P1Bone", "P2Bone")) {
+            $column = [Windows.Forms.DataGridViewComboBoxColumn]$boneCollisionGrid.Columns[$columnName]
+            $column.Items.Clear()
+            foreach ($name in $boneNames) { [void]$column.Items.Add($name) }
+        }
+        Set-SkeletonEditorDirty $false
+    } finally {
+        $script:skeletonEditorLoading = $false
+    }
+    Refresh-SkeletonBoneList
+}
+
+function ConvertTo-SkeletonFloat([object]$Value, [string]$FieldName, [switch]$NonNegative) {
+    $number = 0.0
+    if (-not [double]::TryParse(
+        ([string]$Value).Trim(), [Globalization.NumberStyles]::Float,
+        [Globalization.CultureInfo]::InvariantCulture, [ref]$number
+    )) { throw "$FieldName $($B.bone_invalid_number): $Value" }
+    if ($NonNegative -and $number -lt 0) { throw "$FieldName $($B.bone_nonnegative)" }
+    return $number.ToString("F6", [Globalization.CultureInfo]::InvariantCulture)
+}
+
+function ConvertTo-SkeletonOffset([object]$Value, [string]$FieldName) {
+    $parts = @(([string]$Value).Trim() -split '\s+')
+    if ($parts.Count -ne 4) { throw "$FieldName $($B.bone_offset_four)" }
+    $result = [System.Collections.Generic.List[string]]::new()
+    foreach ($part in $parts) {
+        $result.Add((ConvertTo-SkeletonFloat $part $FieldName))
+    }
+    return $result -join " "
+}
+
+function Get-SkeletonCollisionEdits {
+    $edits = [System.Collections.Generic.List[PSCustomObject]]::new()
+    $boneCollisionGrid.EndEdit() | Out-Null
+    foreach ($row in @($boneCollisionGrid.Rows)) {
+        if ($null -eq $row.Tag) { continue }
+        $record = $row.Tag
+        $p1Name = [string]$row.Cells["P1Bone"].Value
+        $p2Name = [string]$row.Cells["P2Bone"].Value
+        if (-not $script:skeletonBoneNameMap.ContainsKey($p1Name)) { throw "p1 $($B.bone_unknown): $p1Name" }
+        if (-not $script:skeletonBoneNameMap.ContainsKey($p2Name)) { throw "p2 $($B.bone_unknown): $p2Name" }
+        $p1Id = [int]$script:skeletonBoneNameMap[$p1Name]
+        $p2Id = [int]$script:skeletonBoneNameMap[$p2Name]
+        $weight = ConvertTo-SkeletonFloat $row.Cells["Weight"].Value "weight"
+        $radius = ConvertTo-SkeletonFloat $row.Cells["Radius"].Value "radius" -NonNegative
+        $offset1 = ConvertTo-SkeletonOffset $row.Cells["Offset1"].Value "offset1"
+        $offset2 = ConvertTo-SkeletonOffset $row.Cells["Offset2"].Value "offset2"
+        $capsule = 0
+        if (-not [int]::TryParse(([string]$row.Cells["Capsule"].Value).Trim(), [ref]$capsule)) {
+            throw "capsule $($B.bone_invalid_integer): $($row.Cells['Capsule'].Value)"
+        }
+        $battleOff = if ([bool]$row.Cells["BattleOff"].Value) { 1 } else { 0 }
+        $idleOff = if ([bool]$row.Cells["IdleOff"].Value) { 1 } else { 0 }
+
+        $changed = $p1Id -ne $record.P1Id -or $p2Id -ne $record.P2Id -or
+            $weight -ne $record.Weight -or $radius -ne $record.Radius -or
+            $offset1 -ne $record.Offset1 -or $offset2 -ne $record.Offset2 -or
+            ([string]$capsule) -ne $record.Capsule -or
+            $battleOff -ne $record.BattleOff -or $idleOff -ne $record.IdleOff
+        if ($changed) {
+            $edits.Add([PSCustomObject]@{
+                Record=$record; P1Id=$p1Id; P2Id=$p2Id; Weight=$weight; Radius=$radius
+                Offset1=$offset1; Offset2=$offset2; Capsule=$capsule
+                BattleOff=$battleOff; IdleOff=$idleOff
+            })
+        }
+    }
+    return @($edits)
+}
+
+function Invoke-SaveSkeletonCollisionEdits {
+    try {
+        $edits = @(Get-SkeletonCollisionEdits)
+        if ($edits.Count -eq 0) {
+            Set-SkeletonEditorDirty $false
+            return $true
+        }
+        $byFile = @{}
+        foreach ($edit in $edits) {
+            $path = [string]$edit.Record.XmlPath
+            if (-not $byFile.ContainsKey($path)) {
+                $byFile[$path] = [System.Collections.Generic.List[object]]::new()
+            }
+            $byFile[$path].Add($edit)
+        }
+
+        foreach ($path in $byFile.Keys) {
+            [xml]$xml = [IO.File]::ReadAllText($path, [Text.Encoding]::UTF8)
+            foreach ($edit in $byFile[$path]) {
+                $node = @($xml.CLOTH_AT.ClothCollision_LIST.ClothCollision | Where-Object {
+                    [int]$_.id_ -eq [int]$edit.Record.CollisionId
+                } | Select-Object -First 1)[0]
+                if ($null -eq $node) { throw "$($B.bone_collision_missing): $path #$($edit.Record.CollisionId)" }
+                $node.p1 = [string]$edit.P1Id
+                $node.p2 = [string]$edit.P2Id
+                $node.weight = [string]$edit.Weight
+                $node.radius = [string]$edit.Radius
+                $node.offset1 = [string]$edit.Offset1
+                $node.offset2 = [string]$edit.Offset2
+                $node.capsule = [string]$edit.Capsule
+                $node.notUseInBattle = [string]$edit.BattleOff
+                $node.notUseInIdle = [string]$edit.IdleOff
+            }
+            Save-WorkspaceXml $xml $path
+            Add-Log "[OK] $($B.bone_saved): $([IO.Path]::GetFileName($path)) ($($byFile[$path].Count))"
+        }
+
+        Set-SkeletonEditorDirty $false
+        foreach ($buildRow in @($grid.Rows)) {
+            if ($null -eq $buildRow.Tag -or [string]$buildRow.Tag.Kind -ne "cloth") { continue }
+            if ($byFile.ContainsKey([string]$buildRow.Tag.XmlPath)) {
+                $buildRow.Tag.Changed = $true
+                $buildRow.Cells["State"].Value = $B.state_modified
+                $buildRow.Cells["Selected"].Value = $true
+                $buildRow.DefaultCellStyle.ForeColor = [Drawing.SystemColors]::ControlText
+            }
+        }
+        Update-SelectionSummary
+        Refresh-SkeletonBoneList
+        return $true
+    } catch {
+        Add-Log "[$($B.failed)] $($B.bone_save_failed): $($_.Exception.Message)"
+        [Windows.Forms.MessageBox]::Show($_.Exception.Message, $B.bone_save_failed, "OK", "Error") | Out-Null
+        return $false
+    }
+}
+
+function Resolve-PendingSkeletonEdits {
+    if (-not $script:skeletonEditorDirty) { return $true }
+    $answer = [Windows.Forms.MessageBox]::Show(
+        $B.bone_pending_prompt, $B.confirm_edit_title, "YesNo", "Warning"
+    )
+    if ($answer -eq "Yes") { return Invoke-SaveSkeletonCollisionEdits }
+    Set-SkeletonEditorDirty $false
+    return $true
+}
+
+function Open-SkeletonEditor([object]$Operation) {
+    if ($null -ne $Operation) {
+        $script:skeletonEditorLoading = $true
+        try {
+            $radioBoneFile.Checked = $true
+            $cmbBoneFile.Enabled = $cmbBoneFile.Items.Count -gt 0
+            for ($index = 0; $index -lt $script:skeletonClhOperations.Count; $index++) {
+                if ([string]$script:skeletonClhOperations[$index].XmlPath -eq [string]$Operation.XmlPath) {
+                    $cmbBoneFile.SelectedIndex = $index
+                    break
+                }
+            }
+        } finally {
+            $script:skeletonEditorLoading = $false
+        }
+        Refresh-SkeletonBoneList
+    }
+    $tabs.SelectedTab = $pageBoneCollision
 }
 
 function Refresh-ClothEditor {
@@ -1102,6 +1635,7 @@ function Load-Manifest([string]$Path, [switch]$PreserveSelection) {
 
         $script:context = Get-WorkspaceOperations $Path
         Update-ClothBoneMap
+        Initialize-SkeletonEditor
         $txtManifest.Text = [IO.Path]::GetFullPath($Path)
         $grid.SuspendLayout()
         $grid.Rows.Clear()
@@ -1166,7 +1700,7 @@ $btnBrowse.Add_Click({
     $dialog = New-Object Windows.Forms.OpenFileDialog
     $dialog.Title = $B.select_dialog
     $dialog.Filter = "GBFR workspace manifest (manifest.md)|manifest.md|Markdown (*.md)|*.md"
-    if ($dialog.ShowDialog() -eq "OK") { Load-Manifest $dialog.FileName }
+    if ($dialog.ShowDialog() -eq "OK" -and (Resolve-PendingSkeletonEdits)) { Load-Manifest $dialog.FileName }
 })
 
 $dropHandler = {
@@ -1202,10 +1736,11 @@ $btnClear.Add_Click({
     Update-SelectionSummary
 })
 $btnRefresh.Add_Click({
-    if ($txtManifest.Text) { Load-Manifest $txtManifest.Text -PreserveSelection }
+    if ($txtManifest.Text -and (Resolve-PendingSkeletonEdits)) { Load-Manifest $txtManifest.Text -PreserveSelection }
 })
 $btnRestore.Add_Click({
     if ($null -eq $script:context) { return }
+    if (-not (Resolve-PendingSkeletonEdits)) { return }
     $selected = @(Get-CheckedGridOperations)
     if ($selected.Count -eq 0) { return }
     $targets = ($selected | ForEach-Object { "- $($_.InputLabel)" }) -join "`r`n"
@@ -1230,6 +1765,7 @@ $grid.Add_CellContentClick({
     $columnName = $grid.Columns[$_.ColumnIndex].Name
 
     if ($columnName -eq "Restore") {
+        if (-not (Resolve-PendingSkeletonEdits)) { return }
         $answer = [Windows.Forms.MessageBox]::Show(
             "$($B.confirm_restore_one):`r`n`r`n$($operation.InputLabel)",
             $B.confirm_title, "OKCancel", "Warning"
@@ -1246,13 +1782,17 @@ $grid.Add_CellContentClick({
     }
 
     if ($columnName -eq "Edit" -and $operation.Available) {
+        if (-not (Resolve-PendingSkeletonEdits)) { return }
         if ([string]$operation.Kind -eq "mmat") { Open-MmatEditor $operation }
-        elseif ([string]$operation.Kind -eq "cloth") { Open-ClothEditor $operation }
+        elseif ([string]$operation.Kind -eq "cloth" -and [string]$operation.ClothCategory -eq "clh") {
+            Open-SkeletonEditor $operation
+        } elseif ([string]$operation.Kind -eq "cloth") { Open-ClothEditor $operation }
         return
     }
 })
 $btnClearMmatA4.Add_Click({
     if ($null -eq $script:mmatOperation -or $null -eq $script:context) { return }
+    if (-not (Resolve-PendingSkeletonEdits)) { return }
     try {
         $a4Count = Get-WorkspaceMaterialA4Count $script:context $script:mmatOperation
         if ($a4Count -le 0) { return }
@@ -1276,6 +1816,53 @@ $btnClearMmatA4.Add_Click({
         [Windows.Forms.MessageBox]::Show($_.Exception.Message, $B.a4_remove_failed, "OK", "Error") | Out-Null
     }
 })
+$radioBoneFile.Add_CheckedChanged({
+    if ($script:skeletonEditorLoading -or -not $radioBoneFile.Checked) { return }
+    if (-not (Resolve-PendingSkeletonEdits)) { return }
+    $cmbBoneFile.Enabled = $cmbBoneFile.Items.Count -gt 0
+    Refresh-SkeletonBoneList
+})
+$radioBoneAll.Add_CheckedChanged({
+    if ($script:skeletonEditorLoading -or -not $radioBoneAll.Checked) { return }
+    if (-not (Resolve-PendingSkeletonEdits)) { return }
+    $cmbBoneFile.Enabled = $false
+    Refresh-SkeletonBoneList
+})
+$cmbBoneFile.Add_SelectedIndexChanged({
+    if ($script:skeletonEditorLoading -or -not $radioBoneFile.Checked) { return }
+    if (-not (Resolve-PendingSkeletonEdits)) { return }
+    Refresh-SkeletonBoneList
+})
+$txtBoneSearch.Add_TextChanged({
+    if ($script:skeletonEditorLoading) { return }
+    if (-not (Resolve-PendingSkeletonEdits)) { return }
+    Refresh-SkeletonBoneList
+})
+$chkBoneReferenced.Add_CheckedChanged({
+    if ($script:skeletonEditorLoading) { return }
+    if (-not (Resolve-PendingSkeletonEdits)) { return }
+    Refresh-SkeletonBoneList
+})
+$boneGrid.Add_SelectionChanged({
+    if ($script:skeletonEditorLoading -or $boneGrid.SelectedRows.Count -eq 0) { return }
+    if (-not (Resolve-PendingSkeletonEdits)) { return }
+    $script:skeletonSelectedBoneId = [int]$boneGrid.SelectedRows[0].Tag.ClothId
+    Refresh-SkeletonCollisionDetails
+})
+$boneCollisionGrid.Add_CurrentCellDirtyStateChanged({
+    if ($boneCollisionGrid.IsCurrentCellDirty) {
+        $boneCollisionGrid.CommitEdit([Windows.Forms.DataGridViewDataErrorContexts]::Commit) | Out-Null
+    }
+})
+$boneCollisionGrid.Add_CellValueChanged({
+    if (-not $script:skeletonEditorLoading -and $_.RowIndex -ge 0) {
+        Set-SkeletonEditorDirty $true
+    }
+})
+$boneCollisionGrid.Add_DataError({
+    $_.ThrowException = $false
+})
+$btnSaveBoneCollisions.Add_Click({ [void](Invoke-SaveSkeletonCollisionEdits) })
 $btnChooseCloth.Add_Click({
     $dialog = New-Object Windows.Forms.OpenFileDialog
     $dialog.Title = $B.select_cloth_object
@@ -1303,6 +1890,7 @@ $btnOpenBuild.Add_Click({
     }
 })
 $btnBuild.Add_Click({
+    if (-not (Resolve-PendingSkeletonEdits)) { return }
     $selected = @(Get-CheckedGridOperations)
     if ($selected.Count -eq 0) { return }
     $unavailable = @($selected | Where-Object { -not $_.Available })
@@ -1322,6 +1910,12 @@ $btnBuild.Add_Click({
     Load-Manifest $txtManifest.Text -PreserveSelection
     if ($result.Failed -gt 0) {
         [Windows.Forms.MessageBox]::Show($B.partial_failure, $B.build_finished, "OK", "Warning") | Out-Null
+    }
+})
+
+$form.Add_FormClosing({
+    if ($script:skeletonEditorDirty -and -not (Resolve-PendingSkeletonEdits)) {
+        $_.Cancel = $true
     }
 })
 
@@ -1383,7 +1977,69 @@ if ($UiSmokeTest) {
         }
     }
     $clothTabSelected = if ($clothRows.Count -gt 0) { $tabs.SelectedTab -eq $pageCloth } else { $true }
-    Write-Host "UI smoke: layout=$layoutOk, actionColumns=$actionColumnsVisible, page=$($pageBuild.ClientSize.Width)x$($pageBuild.ClientSize.Height), grid=$($grid.Width)x$($grid.Height), rows=$($grid.Rows.Count), restore=$($restoreButtons.Count), bulkRestore=$($btnRestore.Text -eq $B.restore_selected), mmatEdit=$($mmatEditButtons.Count), clothEdit=$($clothEditButtons.Count), mmatEntries=$($mmatGrid.Rows.Count), mmatTab=$mmatTabSelected, clothTab=$clothTabSelected, clothViews=$($clothViews -join ','), clothBones=$($clothBoneViews -join ',')"
+    $skeletonView = "none"
+    $clhEditorRow = $clothRows | Where-Object { [string]$_.Tag.ClothCategory -eq "clh" } | Select-Object -First 1
+    if ($null -ne $clhEditorRow) {
+        Open-SkeletonEditor $clhEditorRow.Tag
+        if (-not $txtSkeletonObject.Text.EndsWith(".skeleton", [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Skeleton editor has no .skeleton edit object"
+        }
+        if ($boneGrid.Rows.Count -eq 0 -or $boneCollisionGrid.Rows.Count -eq 0) {
+            throw "Skeleton file view contains no bones or collisions"
+        }
+        foreach ($columnName in @("P1Bone", "P2Bone", "Weight", "Radius", "Offset1", "Offset2", "Capsule", "BattleOff", "IdleOff")) {
+            if (-not $boneCollisionGrid.Columns.Contains($columnName) -or $boneCollisionGrid.Columns[$columnName].ReadOnly) {
+                throw "Skeleton collision column is not editable: $columnName"
+            }
+        }
+        $fileRecords = $script:skeletonCollisionRecords.Count
+
+        $testRow = $boneCollisionGrid.Rows[0]
+        $testRecord = $testRow.Tag
+        $tempXml = Join-Path ([IO.Path]::GetTempPath()) ("gbfr_skeleton_edit_" + [Guid]::NewGuid().ToString("N") + ".xml")
+        try {
+            Copy-Item -LiteralPath $testRecord.XmlPath -Destination $tempXml
+            $testRecord.XmlPath = $tempXml
+            $originalRadius = [double]::Parse([string]$testRecord.Radius, [Globalization.CultureInfo]::InvariantCulture)
+            $newRadius = ($originalRadius + 0.001).ToString("F6", [Globalization.CultureInfo]::InvariantCulture)
+            $testRow.Cells["Radius"].Value = $newRadius
+            Set-SkeletonEditorDirty $true
+            if (-not (Invoke-SaveSkeletonCollisionEdits)) { throw "Skeleton temporary save failed" }
+            [xml]$savedXml = [IO.File]::ReadAllText($tempXml, [Text.Encoding]::UTF8)
+            $savedNode = $savedXml.CLOTH_AT.ClothCollision_LIST.ClothCollision | Where-Object {
+                [int]$_.id_ -eq [int]$testRecord.CollisionId
+            } | Select-Object -First 1
+            if ([string]$savedNode.radius -ne $newRadius) {
+                throw "Skeleton temporary save did not persist radius"
+            }
+        } finally {
+            if (Test-Path -LiteralPath $tempXml) { Remove-Item -LiteralPath $tempXml -Force }
+        }
+
+        $script:skeletonEditorLoading = $true
+        $radioBoneAll.Checked = $true
+        $script:skeletonEditorLoading = $false
+        Refresh-SkeletonBoneList
+        $allRecords = $script:skeletonCollisionRecords.Count
+        if ($allRecords -lt $fileRecords) { throw "Skeleton overall view has fewer records than file view" }
+        $skeletonView = "file:$fileRecords,all:$allRecords,bones:$($boneGrid.Rows.Count)"
+    }
+    $form.ClientSize = New-Object Drawing.Size(800, 560)
+    $form.PerformLayout()
+    $tabs.PerformLayout()
+    [Windows.Forms.Application]::DoEvents()
+    Update-WorkspaceEditorLayout
+    $skeletonCompactLayout = $txtSkeletonObject.Right -le ($pageBoneCollision.ClientSize.Width - 12) -and
+        $cmbBoneFile.Right -lt $lblBoneSearch.Left -and
+        $txtBoneSearch.Right -lt $btnSaveBoneCollisions.Left -and
+        $btnSaveBoneCollisions.Bottom -lt $boneSplit.Top -and
+        $boneSplit.Right -le ($pageBoneCollision.ClientSize.Width - 12) -and
+        $boneSplit.Bottom -le ($pageBoneCollision.ClientSize.Height - 12)
+    if (-not $skeletonCompactLayout) {
+        throw "Skeleton editor compact layout overlap: page=$($pageBoneCollision.ClientSize), object=$($txtSkeletonObject.Bounds), file=$($cmbBoneFile.Bounds), search=$($txtBoneSearch.Bounds), save=$($btnSaveBoneCollisions.Bounds), split=$($boneSplit.Bounds)"
+    }
+    $skeletonTabSelected = if ($null -ne $clhEditorRow) { $tabs.SelectedTab -eq $pageBoneCollision } else { $true }
+    Write-Host "UI smoke: layout=$layoutOk, actionColumns=$actionColumnsVisible, rows=$($grid.Rows.Count), restore=$($restoreButtons.Count), bulkRestore=$($btnRestore.Text -eq $B.restore_selected), mmatEdit=$($mmatEditButtons.Count), clothEdit=$($clothEditButtons.Count), mmatEntries=$($mmatGrid.Rows.Count), mmatTab=$mmatTabSelected, clothTab=$clothTabSelected, clothViews=$($clothViews -join ','), clothBones=$($clothBoneViews -join ','), skeletonTab=$skeletonTabSelected, skeletonLayout=$skeletonCompactLayout, skeleton=$skeletonView"
     $form.Close()
     exit 0
 }

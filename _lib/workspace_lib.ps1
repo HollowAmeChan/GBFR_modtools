@@ -105,6 +105,26 @@ function Get-GbfrSkeletonBones([string]$SkeletonPath) {
     return @($bones)
 }
 
+function Save-WorkspaceXml([xml]$Document, [string]$Path) {
+    $settings = New-Object Xml.XmlWriterSettings
+    $settings.Encoding = [Text.UTF8Encoding]::new($false)
+    $settings.Indent = $true
+    $settings.IndentChars = "  "
+    $settings.NewLineChars = "`r`n"
+    $settings.NewLineHandling = [Xml.NewLineHandling]::Replace
+    $settings.OmitXmlDeclaration = $true
+
+    $tempPath = "$Path.tmp"
+    $writer = $null
+    try {
+        $writer = [Xml.XmlWriter]::Create($tempPath, $settings)
+        $Document.Save($writer)
+    } finally {
+        if ($null -ne $writer) { $writer.Dispose() }
+    }
+    Move-Item -LiteralPath $tempPath -Destination $Path -Force
+}
+
 function Assert-Wtb([byte[]]$Bytes, [string]$Path) {
     if ($Bytes.Length -lt 32 -or
         $Bytes[0] -ne 0x57 -or $Bytes[1] -ne 0x54 -or
