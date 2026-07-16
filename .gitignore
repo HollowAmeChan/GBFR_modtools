@@ -5,4 +5,5 @@ explore_output/
 _lib/flatc.exe
 _lib/GraniteTextureReader.exe
 _lib/texconv.exe
+_lib/GBFRDataTools.exe
 _lib/nier_cli_mgrr_*/

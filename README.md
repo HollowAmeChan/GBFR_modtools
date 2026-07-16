@@ -30,14 +30,14 @@ _lib/nier_cli_mgrr_1.3.0/nier_cli_mgrr.exe
 data/model/pl/pl1400/pl1400.minfo
 ```
 
-工具会扫描主体以及相同数字 ID 的 `fn`、`fp`、`np`、`wp` 资源，并重建：
+工具会扫描主体以及相同数字 ID 的 `fp`、`wp` 资源，并重建：
 
 ```text
 explore_output/
   manifest.md                 资源报告，也是构建器入口
   workspace.json              路径映射与初始文件哈希
   source/data/                原始资源副本，只作封包模板
-  unpack/data/                可编辑的普通贴图、Granite DDS 与 *.mmat.json
+  unpack/data/                可编辑的 DDS、*.mmat.json 与 cloth *.bxm.xml
   build/data/                 最终 Mod 输出
 ```
 
@@ -47,6 +47,7 @@ explore_output/
 - 将 `data/texture/{2k,4k}/*.texture` 解码为 DDS。
 - 根据 mmat 的 `A4` 哈希，从 `data/granite/{2k,4k}/gts` 提取 `albd/msk1/msk2/nrml` 并转换为 DDS。
 - 将 `data/model/**/vars/*.mmat` 解码为 `*.mmat.json`。
+- 将角色 cloth 基础组、碰撞体、动作覆盖和重置表解码为 `*.bxm.xml`。
 - 记录中间态 SHA-256，用于识别真实修改。
 
 Granite DDS 输出到 `unpack/data/granite/{2k,4k}/`，格式为：
@@ -73,9 +74,11 @@ unpack/data/texture/4k/foo_0.dds
 unpack/data/granite/2k/foo_albd.dds
 unpack/data/granite/4k/foo_nrml.dds
 unpack/data/model/pl/pl1400/vars/0.mmat.json
+unpack/data/pl/pl1400/cloth/pl1400_0_0_clp.bxm.xml
+unpack/data/pl/pl1400/pl1400_0002_0_seq_edit_cloth.bxm.xml
 ```
 
-`source/` 是不可编辑的原始模板。删除 `unpack/` 中不需要的中间文件，会让它退出构建候选清单。
+`source/` 是不可编辑的原始模板。删除 `unpack/` 中间文件后，该项会标为“缺少输入”：不能构建，但可用“恢复”从原始模板重新生成。
 
 ### `vars/*.mmat` 编号与配色
 
@@ -109,13 +112,13 @@ Granite DDS 是可编辑中间态，构建器不会修改 GTS/GTP。对于 `sour
 构建器会：
 
 - 按“工作区构建 / mmat 编辑 / cloth 编辑”划分功能页；构建列表中的“编辑”会跳到对应的专用编辑页。
-- 分别列出已有贴图封回、新建贴图与 mmat 编码操作。
+- 分别列出已有贴图封回、新建贴图、mmat 编码与 cloth BXM 编码操作。
 - 默认勾选哈希已变化的中间文件。
 - 允许手动勾选未修改项目以强制构建。
-- “刷新列表”会重新读取当前 DDS/JSON 状态，并保留手动勾选。
-- 每一行的“恢复”按钮会恢复单个 `unpack` 文件；勾选多项后可用底部“恢复选中项”批量恢复。普通 DDS/JSON 来自 `source`，Granite DDS 按原 GTS/hash 重新提取；已删除文件会以“缺少输入”保留在列表中，也可以恢复。
+- “刷新列表”会重新读取当前 DDS/JSON/XML 状态，并保留手动勾选。
+- 每一行的“恢复”按钮会恢复单个 `unpack` 文件；勾选多项后可用底部“恢复选中项”批量恢复。普通 DDS/JSON/XML 来自 `source`，Granite DDS 按原 GTS/hash 重新提取；已删除文件会以“缺少输入”保留在列表中，也可以恢复。
 - mmat JSON 行提供“编辑”按钮。mmat 编辑页按 `Entries1` 条目列出 A1/A2/A3/A4 数量、A5 标识和 `A2.Name` 贴图引用；顶部“清除全部 A4”会删除该 JSON 中所有材质条目的 A4、自动标记为已修改并勾选，其他字段保持不变。
-- cloth 编辑页目前可选择 `.bxm` 并显示文件类型、大小、目录等快捷信息；属性解码、编辑与写回尚未接入工作区。
+- 探索器会把 CLP、CLH、动作覆盖和重置表解码为 `*.bxm.xml` 并登记到工作区。cloth 编辑页按文件类型显示 Header、节点图、碰撞体、动作轨道或重置动作列表；当前视图只读，XML 可在外部编辑后由构建器封回 BXM。
 - 在写入前显示完整目标清单。
 - 只覆盖明确勾选的目标，不清空 `build` 中其他文件。
 
@@ -125,6 +128,28 @@ Granite DDS 是可编辑中间态，构建器不会修改 GTS/GTP。对于 `sour
 .\GBFR_WorkspaceBuilder.ps1 -ManifestPath .\explore_output\manifest.md -RestoreChanged
 ```
 
+## cloth 文件组织
+
+角色 cloth 由基础组、动作覆盖和重置列表三层组成：
+
+```text
+data/pl/<角色>/cloth/<角色>_0_<N>_clp.bxm   基础布料组 N：求解参数与节点拓扑
+data/pl/<角色>/cloth/<角色>_0_<N>_clh.bxm   基础布料组 N：碰撞体
+data/pl/<角色>/cloth/<角色>_rmslst.bxm      动画切换时的布料重置列表
+data/pl/<角色>/<角色>_<动作>_<变体>_seq_edit_cloth.bxm
+                                                动画时间轴上的布料覆盖
+```
+
+`_clp` 解码后的根节点是 `CLOTH`。`CLOTH_HEADER` 保存重力、空气/风阻、拉伸、局部重力、地面碰撞、移动响应和碰撞 Flags 等整组参数；`CLOTH_WK_LIST` 保存节点图。节点通过 `noUp/noDown/noSide/noPoly/noFix` 相互引用，`4095` 表示无连接。部分组存在大量横向和多边形连接，不能一律当作线性骨链。
+
+`_clh` 解码后的根节点是 `CLOTH_AT`，其中每个 `ClothCollision` 有独立的 `id_`、`p1/p2`、偏移、半径、权重和 capsule 链接。碰撞 ID 可能不连续，动作文件必须按真实 `id_` 引用，不能用列表行号替代。
+
+动作覆盖文件的 `Seq/ClothTrack` 记录以 `FileId` 指向同编号基础组，以 `CollisionId0..N` 指向该组 `_clh` 中的碰撞体，并在 `StartTime` 应用 `ScaleRate`、`FadeInFrame`、`FloorAdditiveOffset` 等覆盖。`StartTime` 基本位于 60 FPS 帧网格上。实际数据中 `ScaleRate` 可出现 `0`、`2.6`、`97`、`100`，编辑器不能把它限制在 `0..1`。
+
+`SeqFlag=0` 的记录主要携带碰撞与 Scale 覆盖；当前样本中 `SeqFlag=1/3` 没有碰撞引用，主要改变地面附加偏移。两个 Flag 的精确运行时位含义仍需游戏内验证。`RESET_MOT_LIST` 则列出需要重置布料状态的动作切换。
+
+BXM 是大端序二进制 XML：16 字节头后依次为扁平节点表、键值偏移表和去重字符串池。官方 [GBFRDataTools](https://github.com/Nenkai/GBFRDataTools) 可在 BXM/XML 间语义往返；重建后的基础文件可能因去重策略不同而变大，但再次解码的 XML 内容一致。
+
 输出路径保持游戏结构：
 
 ```text
@@ -133,6 +158,8 @@ build/
     texture/2k/*.texture
     texture/4k/*.texture
     model/<类型>/<角色>/vars/*.mmat
+    pl/<角色>/cloth/*.bxm
+    pl/<角色>/*_seq_edit_cloth.bxm
 ```
 
 `build/` 可以直接作为 Mod 根目录使用。
@@ -152,6 +179,7 @@ GBFR_modtools/
     flatc.exe                 mmat FlatBuffers 编解码
     GraniteTextureReader.exe Granite GTS/GTP 图层提取
     texconv.exe               TGA 到指定 BC 格式 DDS 转换
+    GBFRDataTools.exe         BXM/XML 编解码
     nier_cli_mgrr_1.3.0/      从 DDS 新建 WTB texture
     MMat_ModelMaterial.fbs    mmat FlatBuffers schema
     workspace_lib.ps1         WTB 与 mmat 共享读写逻辑
@@ -165,6 +193,7 @@ GBFR_modtools/
 
 - 自动解码和封回 `data/texture` 下的 WTB `.texture`。
 - 自动解码和编码角色 `vars/*.mmat`。
+- 自动解码和封回角色 cloth 基础组、碰撞体、动作覆盖与重置表 BXM。
 - 自动从 Granite GTS/GTP 提取可用的 `albd/msk1/msk2/nrml`，并转换为对应格式的 DDS。
 - 为没有普通贴图原件的 Granite DDS 选择性新建 WTB `.texture`，不修改 GTS/GTP。
 - WTB 构建以 `source` 原件为模板，按槽位替换 DDS，并保留未编辑槽位。

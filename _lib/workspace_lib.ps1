@@ -251,3 +251,76 @@ function Convert-JsonToMmat(
         if (Test-Path -LiteralPath $tempDir) { Remove-Item -LiteralPath $tempDir -Recurse -Force }
     }
 }
+
+function Convert-BxmToXml(
+    [string]$GbfrDataToolsPath,
+    [string]$BxmPath,
+    [string]$XmlPath
+) {
+    if (-not (Test-Path -LiteralPath $GbfrDataToolsPath -PathType Leaf)) {
+        throw "GBFRDataTools.exe not found: $GbfrDataToolsPath"
+    }
+    if (-not (Test-Path -LiteralPath $BxmPath -PathType Leaf)) {
+        throw "BXM source not found: $BxmPath"
+    }
+    $outputDir = [IO.Path]::GetDirectoryName($XmlPath)
+    New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
+
+    $oldErrorAction = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $result = @(& $GbfrDataToolsPath bxm-to-xml -i $BxmPath -o $XmlPath 2>&1)
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $oldErrorAction
+    }
+    if ($exitCode -ne 0 -or -not (Test-Path -LiteralPath $XmlPath -PathType Leaf)) {
+        throw "BXM decode failed for $BxmPath`n$($result -join [Environment]::NewLine)"
+    }
+    try {
+        [xml]([IO.File]::ReadAllText($XmlPath, [Text.Encoding]::UTF8)) | Out-Null
+    } catch {
+        throw "BXM decoder produced invalid XML for $BxmPath`: $($_.Exception.Message)"
+    }
+    return $XmlPath
+}
+
+function Convert-XmlToBxm(
+    [string]$GbfrDataToolsPath,
+    [string]$XmlPath,
+    [string]$BxmPath
+) {
+    if (-not (Test-Path -LiteralPath $GbfrDataToolsPath -PathType Leaf)) {
+        throw "GBFRDataTools.exe not found: $GbfrDataToolsPath"
+    }
+    if (-not (Test-Path -LiteralPath $XmlPath -PathType Leaf)) {
+        throw "XML source not found: $XmlPath"
+    }
+    try {
+        [xml]([IO.File]::ReadAllText($XmlPath, [Text.Encoding]::UTF8)) | Out-Null
+    } catch {
+        throw "Invalid cloth XML $XmlPath`: $($_.Exception.Message)"
+    }
+
+    $outputDir = [IO.Path]::GetDirectoryName($BxmPath)
+    New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
+    $oldErrorAction = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $result = @(& $GbfrDataToolsPath xml-to-bxm -i $XmlPath -o $BxmPath 2>&1)
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $oldErrorAction
+    }
+    if ($exitCode -ne 0 -or -not (Test-Path -LiteralPath $BxmPath -PathType Leaf)) {
+        throw "BXM encode failed for $XmlPath`n$($result -join [Environment]::NewLine)"
+    }
+
+    $bytes = [IO.File]::ReadAllBytes($BxmPath)
+    if ($bytes.Length -lt 16) { throw "BXM output is too small: $BxmPath" }
+    $magic = [Text.Encoding]::ASCII.GetString($bytes, 0, 4)
+    if ($magic -ne "BXM`0" -and $magic -ne "XML`0") {
+        throw "Invalid BXM output magic: $BxmPath"
+    }
+    return $BxmPath
+}

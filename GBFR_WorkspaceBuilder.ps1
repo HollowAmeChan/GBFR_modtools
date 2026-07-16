@@ -12,6 +12,7 @@ $libRoot = Join-Path $PSScriptRoot "_lib"
 $flatcExe = Join-Path $libRoot "flatc.exe"
 $graniteExe = Join-Path $libRoot "GraniteTextureReader.exe"
 $texconvExe = Join-Path $libRoot "texconv.exe"
+$gbfrDataToolsExe = Join-Path $libRoot "GBFRDataTools.exe"
 $nierCliExe = Get-ChildItem -LiteralPath $libRoot -Directory -Filter "nier_cli_mgrr_*" -ErrorAction SilentlyContinue |
     Sort-Object Name -Descending |
     ForEach-Object { Join-Path $_.FullName "nier_cli_mgrr.exe" } |
@@ -86,6 +87,33 @@ function Get-WorkspaceOperations([string]$Manifest) {
         })
     }
 
+    if ($workspace.PSObject.Properties.Name -contains "ClothFiles") {
+        foreach ($cloth in @($workspace.ClothFiles)) {
+            $xmlPath = Resolve-WorkspaceFile $root ([string]$cloth.Xml)
+            $available = Test-Path -LiteralPath $xmlPath -PathType Leaf
+            if (-not $available) { $missing++ }
+            $changed = $available -and (Get-WorkspaceSha256 $xmlPath) -ne [string]$cloth.BaselineSha256
+            $typeLabel = switch ([string]$cloth.Category) {
+                "clp" { $B.type_cloth_clp }
+                "clh" { $B.type_cloth_clh }
+                "sequence" { $B.type_cloth_sequence }
+                "reset" { $B.type_cloth_reset }
+                default { $B.type_cloth }
+            }
+            $operations.Add([PSCustomObject]@{
+                Kind = "cloth"
+                TypeLabel = $typeLabel
+                InputLabel = [IO.Path]::GetFileName($xmlPath)
+                OutputLabel = [string]$cloth.Output
+                Changed = $changed
+                Available = $available
+                Record = $cloth
+                XmlPath = $xmlPath
+                ClothCategory = [string]$cloth.Category
+            })
+        }
+    }
+
     if ($workspace.PSObject.Properties.Name -contains "NewTextures") {
         foreach ($texture in @($workspace.NewTextures)) {
             $inputPath = Resolve-WorkspaceFile $root ([string]$texture.Input)
@@ -140,6 +168,15 @@ function Invoke-WorkspaceBuild([object]$Context, [object[]]$Operations, [scriptb
                 if (-not (Test-Path -LiteralPath $flatcExe)) { throw $B.err_flatc_missing }
                 if (-not (Test-Path -LiteralPath $schemaFbs)) { throw $B.err_schema_missing }
                 Convert-JsonToMmat $flatcExe $schemaFbs ([string]$operation.JsonPath) $outputPath | Out-Null
+            } elseif ($operation.Kind -eq "cloth") {
+                if (-not (Test-Path -LiteralPath $gbfrDataToolsExe)) { throw $B.err_gbfrdatatools_missing }
+                $tempOutput = "$outputPath.tmp"
+                try {
+                    Convert-XmlToBxm $gbfrDataToolsExe ([string]$operation.XmlPath) $tempOutput | Out-Null
+                    Move-Item -LiteralPath $tempOutput -Destination $outputPath -Force
+                } finally {
+                    if (Test-Path -LiteralPath $tempOutput) { Remove-Item -LiteralPath $tempOutput -Force }
+                }
             } else {
                 throw "$($B.err_unknown_type): $($operation.Kind)"
             }
@@ -210,6 +247,33 @@ function Restore-WorkspaceMaterial([object]$Context, [object]$Operation) {
         $destinationDir = [IO.Path]::GetDirectoryName($jsonPath)
         New-Item -ItemType Directory -Force -Path $destinationDir | Out-Null
         [IO.File]::Copy($tempJson, $jsonPath, $true)
+    } finally {
+        if (Test-Path -LiteralPath $tempDir) { Remove-Item -LiteralPath $tempDir -Recurse -Force }
+    }
+}
+
+function Restore-WorkspaceCloth([object]$Context, [object]$Operation) {
+    if (-not (Test-Path -LiteralPath $gbfrDataToolsExe -PathType Leaf)) { throw $B.err_gbfrdatatools_missing }
+    $sourcePath = Resolve-WorkspaceFile $Context.Root ([string]$Operation.Record.Source)
+    if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+        throw "$($B.err_source_missing): $sourcePath"
+    }
+    if ((Get-WorkspaceSha256 $sourcePath) -ne [string]$Operation.Record.SourceSha256) {
+        throw "$($B.err_source_changed): $sourcePath"
+    }
+
+    $xmlPath = Resolve-WorkspaceFile $Context.Root ([string]$Operation.Record.Xml)
+    $tempDir = Join-Path ([IO.Path]::GetTempPath()) ("gbfr_restore_cloth_" + [Guid]::NewGuid().ToString('N'))
+    $tempXml = Join-Path $tempDir ([IO.Path]::GetFileName($xmlPath))
+    try {
+        New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
+        Convert-BxmToXml $gbfrDataToolsExe $sourcePath $tempXml | Out-Null
+        if ((Get-WorkspaceSha256 $tempXml) -ne [string]$Operation.Record.BaselineSha256) {
+            throw "Restored cloth XML does not match workspace baseline: $($Operation.Record.Xml)"
+        }
+        $destinationDir = [IO.Path]::GetDirectoryName($xmlPath)
+        New-Item -ItemType Directory -Force -Path $destinationDir | Out-Null
+        [IO.File]::Copy($tempXml, $xmlPath, $true)
     } finally {
         if (Test-Path -LiteralPath $tempDir) { Remove-Item -LiteralPath $tempDir -Recurse -Force }
     }
@@ -314,6 +378,7 @@ function Restore-WorkspaceOperations([object]$Context, [object[]]$Operations, [s
                 "texture" { Restore-WorkspaceTexture $Context $operation }
                 "new_texture" { Restore-WorkspaceGraniteTexture $Context $operation }
                 "mmat" { Restore-WorkspaceMaterial $Context $operation }
+                "cloth" { Restore-WorkspaceCloth $Context $operation }
                 default { throw "$($B.err_unknown_type): $($operation.Kind)" }
             }
             $ok++
@@ -614,15 +679,44 @@ $btnChooseCloth.Anchor = "Top,Right"
 $pageCloth.Controls.Add($btnChooseCloth)
 
 $lblClothSummary = New-Object Windows.Forms.Label
-$lblClothSummary.Text = $B.cloth_editor_pending
+$lblClothSummary.Text = $B.cloth_no_selection
 $lblClothSummary.Location = New-Object Drawing.Point(12, 50)
 $lblClothSummary.Size = New-Object Drawing.Size(922, 24)
 $lblClothSummary.Anchor = "Top,Left,Right"
 $pageCloth.Controls.Add($lblClothSummary)
 
+$clothHeaderGrid = New-Object Windows.Forms.DataGridView
+$clothHeaderGrid.Location = New-Object Drawing.Point(12, 78)
+$clothHeaderGrid.Size = New-Object Drawing.Size(922, 130)
+$clothHeaderGrid.AllowUserToAddRows = $false
+$clothHeaderGrid.AllowUserToDeleteRows = $false
+$clothHeaderGrid.AllowUserToResizeRows = $false
+$clothHeaderGrid.AutoGenerateColumns = $false
+$clothHeaderGrid.MultiSelect = $false
+$clothHeaderGrid.RowHeadersVisible = $false
+$clothHeaderGrid.ReadOnly = $true
+$clothHeaderGrid.BackgroundColor = [Drawing.SystemColors]::Window
+$clothHeaderGrid.RowTemplate.Height = 26
+$clothHeaderGrid.ColumnHeadersHeight = 30
+$colClothProperty = New-Object Windows.Forms.DataGridViewTextBoxColumn
+$colClothProperty.Name = "Property"
+$colClothProperty.HeaderText = $B.col_quick_property
+$colClothProperty.Width = 210
+$colClothProperty.ReadOnly = $true
+$colClothProperty.SortMode = "NotSortable"
+[void]$clothHeaderGrid.Columns.Add($colClothProperty)
+$colClothValue = New-Object Windows.Forms.DataGridViewTextBoxColumn
+$colClothValue.Name = "Value"
+$colClothValue.HeaderText = $B.col_quick_value
+$colClothValue.AutoSizeMode = "Fill"
+$colClothValue.ReadOnly = $true
+$colClothValue.SortMode = "NotSortable"
+[void]$clothHeaderGrid.Columns.Add($colClothValue)
+$pageCloth.Controls.Add($clothHeaderGrid)
+
 $clothGrid = New-Object Windows.Forms.DataGridView
-$clothGrid.Location = New-Object Drawing.Point(12, 78)
-$clothGrid.Size = New-Object Drawing.Size(922, 462)
+$clothGrid.Location = New-Object Drawing.Point(12, 216)
+$clothGrid.Size = New-Object Drawing.Size(922, 324)
 $clothGrid.Anchor = "Top,Bottom,Left,Right"
 $clothGrid.AllowUserToAddRows = $false
 $clothGrid.AllowUserToDeleteRows = $false
@@ -634,27 +728,13 @@ $clothGrid.ReadOnly = $true
 $clothGrid.BackgroundColor = [Drawing.SystemColors]::Window
 $clothGrid.RowTemplate.Height = 28
 $clothGrid.ColumnHeadersHeight = 32
-$colClothProperty = New-Object Windows.Forms.DataGridViewTextBoxColumn
-$colClothProperty.Name = "Property"
-$colClothProperty.HeaderText = $B.col_quick_property
-$colClothProperty.Width = 180
-$colClothProperty.ReadOnly = $true
-$colClothProperty.SortMode = "NotSortable"
-[void]$clothGrid.Columns.Add($colClothProperty)
-$colClothValue = New-Object Windows.Forms.DataGridViewTextBoxColumn
-$colClothValue.Name = "Value"
-$colClothValue.HeaderText = $B.col_quick_value
-$colClothValue.AutoSizeMode = "Fill"
-$colClothValue.ReadOnly = $true
-$colClothValue.SortMode = "NotSortable"
-[void]$clothGrid.Columns.Add($colClothValue)
 $pageCloth.Controls.Add($clothGrid)
 
 foreach ($control in @(
     $lblSummary, $grid, $btnModified, $btnClear, $btnRefresh, $btnRestore,
     $btnOpenBuild, $btnBuild, $log, $lblMmatObject, $txtMmatObject,
     $btnClearMmatA4, $lblMmatSummary, $mmatGrid, $lblClothObject,
-    $txtClothObject, $btnChooseCloth, $lblClothSummary, $clothGrid
+    $txtClothObject, $btnChooseCloth, $lblClothSummary, $clothHeaderGrid, $clothGrid
 )) {
     $control.Anchor = "Top,Left"
 }
@@ -697,7 +777,8 @@ function Update-WorkspaceEditorLayout {
         $txtClothObject.SetBounds(90, 12, [Math]::Max(120, $clothButtonX - 104), 27)
         $btnChooseCloth.SetBounds($clothButtonX, 10, 100, 32)
         $lblClothSummary.SetBounds(12, 50, $clothWidth - 24, 24)
-        $clothGrid.SetBounds(12, 78, $clothWidth - 24, [Math]::Max(80, $clothHeight - 90))
+        $clothHeaderGrid.SetBounds(12, 78, $clothWidth - 24, 130)
+        $clothGrid.SetBounds(12, 216, $clothWidth - 24, [Math]::Max(80, $clothHeight - 228))
     }
 }
 
@@ -711,6 +792,8 @@ Update-WorkspaceEditorLayout
 $script:context = $null
 $script:mmatOperation = $null
 $script:mmatOperationKey = ""
+$script:clothOperation = $null
+$script:clothOperationKey = ""
 function Add-Log([string]$Message) {
     $log.AppendText($Message + "`r`n")
     $log.SelectionStart = $log.TextLength
@@ -773,28 +856,160 @@ function Open-MmatEditor([object]$Operation) {
     $tabs.SelectedTab = $pageMmat
 }
 
-function Show-ClothQuickInfo([string]$Path) {
+function Set-ClothGridColumns([object[]]$Definitions) {
+    $clothGrid.Columns.Clear()
+    foreach ($definition in $Definitions) {
+        $column = New-Object Windows.Forms.DataGridViewTextBoxColumn
+        $column.Name = [string]$definition.Name
+        $column.HeaderText = [string]$definition.Header
+        if ($definition.ContainsKey("Fill") -and $definition.Fill) {
+            $column.AutoSizeMode = "Fill"
+            $column.MinimumWidth = if ($definition.ContainsKey("Width")) { [int]$definition.Width } else { 120 }
+        } else {
+            $column.Width = [int]$definition.Width
+        }
+        $column.ReadOnly = $true
+        $column.SortMode = "NotSortable"
+        [void]$clothGrid.Columns.Add($column)
+    }
+}
+
+function Add-ClothHeaderRow([string]$Name, [object]$Value) {
+    [void]$clothHeaderGrid.Rows.Add($Name, [string]$Value)
+}
+
+function Refresh-ClothEditor {
+    $clothHeaderGrid.Rows.Clear()
     $clothGrid.Rows.Clear()
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    $clothGrid.Columns.Clear()
+    if ($null -eq $script:clothOperation) {
         $txtClothObject.Text = $B.no_edit_object
-        $lblClothSummary.Text = $B.cloth_editor_pending
+        $lblClothSummary.Text = $B.cloth_no_selection
         return
     }
-    $file = Get-Item -LiteralPath $Path
-    $type = switch -Regex ($file.Name) {
-        "_clp\.bxm$" { $B.cloth_type_clp; break }
-        "_clh\.bxm$" { $B.cloth_type_clh; break }
-        "_seq_edit_cloth\.bxm$" { $B.cloth_type_sequence; break }
-        default { $B.cloth_type_bxm }
+
+    $path = [string]$script:clothOperation.XmlPath
+    $txtClothObject.Text = $path
+    if (-not $script:clothOperation.Available -or -not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        $lblClothSummary.Text = $B.state_missing
+        return
     }
-    $txtClothObject.Text = $file.FullName
-    $lblClothSummary.Text = $B.cloth_editor_pending
-    [void]$clothGrid.Rows.Add($B.quick_file_name, $file.Name)
-    [void]$clothGrid.Rows.Add($B.quick_type, $type)
-    [void]$clothGrid.Rows.Add($B.quick_size, "$($file.Length) bytes")
-    [void]$clothGrid.Rows.Add($B.quick_directory, $file.DirectoryName)
-    [void]$clothGrid.Rows.Add($B.quick_edit_state, $B.cloth_read_only_state)
-    $clothGrid.Rows[3].Cells["Value"].ToolTipText = $file.DirectoryName
+
+    try {
+        [xml]$xml = [IO.File]::ReadAllText($path, [Text.Encoding]::UTF8)
+        $category = [string]$script:clothOperation.ClothCategory
+        if (-not $category) {
+            $category = switch ($xml.DocumentElement.Name) {
+                "CLOTH" { "clp" }
+                "CLOTH_AT" { "clh" }
+                "SeqRoot" { "sequence" }
+                "RESET_MOT_LIST" { "reset" }
+                default { "other" }
+            }
+        }
+        Add-ClothHeaderRow $B.quick_file_name ([IO.Path]::GetFileName($path))
+        Add-ClothHeaderRow $B.quick_type $category
+
+        switch ($category) {
+            "clp" {
+                $header = $xml.CLOTH.CLOTH_HEADER
+                foreach ($child in @($header.ChildNodes)) {
+                    if ($child.NodeType -eq [Xml.XmlNodeType]::Element) {
+                        Add-ClothHeaderRow $child.Name $child.InnerText
+                    }
+                }
+                $nodes = @($xml.CLOTH.CLOTH_WK_LIST.CLOTH_WK)
+                $roots = @($nodes | Where-Object { [int]$_.noUp -eq 4095 }).Count
+                $sideLinks = @($nodes | Where-Object { [int]$_.noSide -ne 4095 }).Count
+                $lblClothSummary.Text = "$($B.cloth_nodes) $($nodes.Count) | $($B.cloth_roots) $roots | $($B.cloth_side_links) $sideLinks"
+                Set-ClothGridColumns @(
+                    @{ Name="No"; Header="no"; Width=65 }, @{ Name="Up"; Header="noUp"; Width=65 },
+                    @{ Name="Down"; Header="noDown"; Width=70 }, @{ Name="Side"; Header="noSide"; Width=70 },
+                    @{ Name="Poly"; Header="noPoly"; Width=70 }, @{ Name="Fix"; Header="noFix"; Width=65 },
+                    @{ Name="Rot"; Header="rotLimit"; Width=85 }, @{ Name="Friction"; Header="friction"; Width=80 },
+                    @{ Name="Weight"; Header="weight"; Width=75 }, @{ Name="Thick"; Header="thick"; Width=75 },
+                    @{ Name="Wind"; Header="windForceArea"; Width=105 }, @{ Name="Offset"; Header="offset"; Width=180; Fill=$true }
+                )
+                foreach ($node in $nodes) {
+                    [void]$clothGrid.Rows.Add(
+                        $node.no, $node.noUp, $node.noDown, $node.noSide, $node.noPoly, $node.noFix,
+                        $node.rotLimit, $node.friction, $node.weight_, $node.thick_, $node.windForceArea_, $node.offset
+                    )
+                }
+            }
+            "clh" {
+                $collisions = @($xml.CLOTH_AT.ClothCollision_LIST.ClothCollision)
+                Add-ClothHeaderRow "CLOTH_AT_NUM" $xml.CLOTH_AT.CLOTH_AT_NUM
+                $lblClothSummary.Text = "$($B.cloth_collisions) $($collisions.Count)"
+                Set-ClothGridColumns @(
+                    @{ Name="Id"; Header="id"; Width=55 }, @{ Name="P1"; Header="p1"; Width=65 },
+                    @{ Name="P2"; Header="p2"; Width=65 }, @{ Name="Capsule"; Header="capsule"; Width=70 },
+                    @{ Name="Radius"; Header="radius"; Width=75 }, @{ Name="Weight"; Header="weight"; Width=75 },
+                    @{ Name="Offset1"; Header="offset1"; Width=180 }, @{ Name="Offset2"; Header="offset2"; Width=180; Fill=$true },
+                    @{ Name="Battle"; Header="battle off"; Width=80 }, @{ Name="Idle"; Header="idle off"; Width=70 }
+                )
+                foreach ($collision in $collisions) {
+                    [void]$clothGrid.Rows.Add(
+                        $collision.id_, $collision.p1, $collision.p2, $collision.capsule,
+                        $collision.radius, $collision.weight, $collision.offset1, $collision.offset2,
+                        $collision.notUseInBattle, $collision.notUseInIdle
+                    )
+                }
+            }
+            "sequence" {
+                $sequences = @($xml.SeqRoot.ClothTrack.Seq)
+                Add-ClothHeaderRow "SeqNum" $xml.SeqRoot.ClothTrack.SeqNum
+                $lblClothSummary.Text = "$($B.cloth_sequence_events) $($sequences.Count)"
+                Set-ClothGridColumns @(
+                    @{ Name="Start"; Header="StartTime"; Width=85 }, @{ Name="FileId"; Header="FileId"; Width=60 },
+                    @{ Name="Collisions"; Header="CollisionIds"; Width=155 }, @{ Name="Scale"; Header="ScaleRate"; Width=75 },
+                    @{ Name="Fade"; Header="FadeInFrame"; Width=90 }, @{ Name="Floor"; Header="FloorOffset"; Width=85 },
+                    @{ Name="FloorFade"; Header="FloorFade"; Width=80 }, @{ Name="Flag"; Header="SeqFlag"; Width=65 },
+                    @{ Name="Layer"; Header="LayerFlag"; Width=105; Fill=$true }
+                )
+                foreach ($sequence in $sequences) {
+                    $collisionIds = @($sequence.Attributes | Where-Object {
+                        $_.Name -like "CollisionId*" -and [int]$_.Value -ge 0
+                    } | Sort-Object Name | ForEach-Object { $_.Value }) -join ", "
+                    [void]$clothGrid.Rows.Add(
+                        $sequence.StartTime, $sequence.FileId, $collisionIds, $sequence.ScaleRate,
+                        $sequence.FadeInFrame, $sequence.FloorAdditiveOffset,
+                        $sequence.FloorAdditiveOffsetFadeInFrame, $sequence.SeqFlag, $sequence.LayerFlag
+                    )
+                }
+            }
+            "reset" {
+                $motions = @($xml.RESET_MOT_LIST.MOT_LIST.RESET_MOT_LIST_WK)
+                Add-ClothHeaderRow "RESET_MOT_NUM" $xml.RESET_MOT_LIST.RESET_MOT_NUM
+                $lblClothSummary.Text = "$($B.cloth_reset_motions) $($motions.Count)"
+                Set-ClothGridColumns @(
+                    @{ Name="Front"; Header="frontMot"; Width=220 },
+                    @{ Name="Back"; Header="backMot"; Width=220; Fill=$true }
+                )
+                foreach ($motion in $motions) { [void]$clothGrid.Rows.Add($motion.frontMot, $motion.backMot) }
+            }
+            default {
+                $lblClothSummary.Text = $xml.DocumentElement.Name
+                Set-ClothGridColumns @(
+                    @{ Name="Property"; Header=$B.col_quick_property; Width=220 },
+                    @{ Name="Value"; Header=$B.col_quick_value; Width=300; Fill=$true }
+                )
+                foreach ($child in @($xml.DocumentElement.ChildNodes)) {
+                    [void]$clothGrid.Rows.Add($child.Name, $child.InnerText)
+                }
+            }
+        }
+    } catch {
+        $lblClothSummary.Text = "$($B.cloth_xml_error): $($_.Exception.Message)"
+    }
+}
+
+function Open-ClothEditor([object]$Operation) {
+    if ($null -eq $Operation -or [string]$Operation.Kind -ne "cloth") { return }
+    $script:clothOperation = $Operation
+    $script:clothOperationKey = Get-OperationKey $Operation
+    Refresh-ClothEditor
+    $tabs.SelectedTab = $pageCloth
 }
 
 function Update-SelectionSummary {
@@ -848,8 +1063,8 @@ function Load-Manifest([string]$Path, [switch]$PreserveSelection) {
                 [bool]$operation.Changed
             }
 
-            $editLabel = if ([string]$operation.Kind -eq "mmat" -and $operation.Available) { $B.edit } else { "" }
-            $editEnabled = [string]$operation.Kind -eq "mmat" -and $operation.Available
+            $editEnabled = [string]$operation.Kind -in @("mmat", "cloth") -and $operation.Available
+            $editLabel = if ($editEnabled) { $B.edit } else { "" }
 
             $rowIndex = $grid.Rows.Add(
                 $isChecked, $state, $operation.TypeLabel, $operation.InputLabel,
@@ -879,6 +1094,12 @@ function Load-Manifest([string]$Path, [switch]$PreserveSelection) {
                 (Get-OperationKey $_) -eq $script:mmatOperationKey
             } | Select-Object -First 1)[0]
             Refresh-MmatEditor
+        }
+        if ($script:clothOperationKey) {
+            $script:clothOperation = @($script:context.Operations | Where-Object {
+                (Get-OperationKey $_) -eq $script:clothOperationKey
+            } | Select-Object -First 1)[0]
+            Refresh-ClothEditor
         }
         Update-SelectionSummary
     } catch {
@@ -971,8 +1192,9 @@ $grid.Add_CellContentClick({
         return
     }
 
-    if ($columnName -eq "Edit" -and [string]$operation.Kind -eq "mmat" -and $operation.Available) {
-        Open-MmatEditor $operation
+    if ($columnName -eq "Edit" -and $operation.Available) {
+        if ([string]$operation.Kind -eq "mmat") { Open-MmatEditor $operation }
+        elseif ([string]$operation.Kind -eq "cloth") { Open-ClothEditor $operation }
         return
     }
 })
@@ -1004,12 +1226,21 @@ $btnClearMmatA4.Add_Click({
 $btnChooseCloth.Add_Click({
     $dialog = New-Object Windows.Forms.OpenFileDialog
     $dialog.Title = $B.select_cloth_object
-    $dialog.Filter = "GBFR cloth BXM (*.bxm)|*.bxm|All files (*.*)|*.*"
+    $dialog.Filter = "GBFR cloth XML (*.bxm.xml;*.xml)|*.bxm.xml;*.xml|All files (*.*)|*.*"
     if ($null -ne $script:context) {
-        $clothDir = Join-Path $script:context.Root "source\data\pl\$($script:context.Workspace.CharacterId)\cloth"
+        $clothDir = Join-Path $script:context.Root "unpack\data\pl\$($script:context.Workspace.CharacterId)"
         if (Test-Path -LiteralPath $clothDir -PathType Container) { $dialog.InitialDirectory = $clothDir }
     }
-    if ($dialog.ShowDialog() -eq "OK") { Show-ClothQuickInfo $dialog.FileName }
+    if ($dialog.ShowDialog() -eq "OK") {
+        $manualOperation = [PSCustomObject]@{
+            Kind = "cloth"
+            OutputLabel = $dialog.FileName
+            XmlPath = $dialog.FileName
+            Available = $true
+            ClothCategory = ""
+        }
+        Open-ClothEditor $manualOperation
+    }
 })
 $btnOpenBuild.Add_Click({
     if ($null -ne $script:context) {
@@ -1061,14 +1292,22 @@ if ($UiSmokeTest) {
     }
     if (-not $actionColumnsVisible) { throw "Restore/Edit columns are not displayed in the resized build grid" }
     $mmatRows = @($grid.Rows | Where-Object { $null -ne $_.Tag -and [string]$_.Tag.Kind -eq "mmat" })
+    $clothRows = @($grid.Rows | Where-Object { $null -ne $_.Tag -and [string]$_.Tag.Kind -eq "cloth" })
     $restoreButtons = @($grid.Rows | Where-Object { $_.Cells["Restore"].Value -eq $B.restore_row })
-    $editButtons = @($mmatRows | Where-Object { $_.Cells["Edit"].Value -eq $B.edit })
+    $mmatEditButtons = @($mmatRows | Where-Object { $_.Cells["Edit"].Value -eq $B.edit })
+    $clothEditButtons = @($clothRows | Where-Object { $_.Cells["Edit"].Value -eq $B.edit })
     if ($mmatRows.Count -gt 0) { Open-MmatEditor $mmatRows[0].Tag }
     $mmatTabSelected = $tabs.SelectedTab -eq $pageMmat
-    $clothDir = Join-Path $script:context.Root "source\data\pl\$($script:context.Workspace.CharacterId)\cloth"
-    $clothSample = Get-ChildItem -LiteralPath $clothDir -Filter "*.bxm" -File -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($null -ne $clothSample) { Show-ClothQuickInfo $clothSample.FullName }
-    Write-Host "UI smoke: layout=$layoutOk, actionColumns=$actionColumnsVisible, page=$($pageBuild.ClientSize.Width)x$($pageBuild.ClientSize.Height), grid=$($grid.Width)x$($grid.Height), rows=$($grid.Rows.Count), restore=$($restoreButtons.Count), bulkRestore=$($btnRestore.Text -eq $B.restore_selected), edit=$($editButtons.Count), mmatEntries=$($mmatGrid.Rows.Count), mmatTab=$mmatTabSelected, clothTab=$($tabs.TabPages.Contains($pageCloth)), clothQuick=$($clothGrid.Rows.Count)"
+    $clothViews = [System.Collections.Generic.List[string]]::new()
+    foreach ($category in @("clp", "clh", "sequence", "reset")) {
+        $categoryRow = $clothRows | Where-Object { [string]$_.Tag.ClothCategory -eq $category } | Select-Object -First 1
+        if ($null -eq $categoryRow) { continue }
+        Open-ClothEditor $categoryRow.Tag
+        if ($clothGrid.Rows.Count -eq 0) { throw "Cloth $category view contains no rows" }
+        $clothViews.Add("${category}:$($clothGrid.Rows.Count)")
+    }
+    $clothTabSelected = if ($clothRows.Count -gt 0) { $tabs.SelectedTab -eq $pageCloth } else { $true }
+    Write-Host "UI smoke: layout=$layoutOk, actionColumns=$actionColumnsVisible, page=$($pageBuild.ClientSize.Width)x$($pageBuild.ClientSize.Height), grid=$($grid.Width)x$($grid.Height), rows=$($grid.Rows.Count), restore=$($restoreButtons.Count), bulkRestore=$($btnRestore.Text -eq $B.restore_selected), mmatEdit=$($mmatEditButtons.Count), clothEdit=$($clothEditButtons.Count), mmatEntries=$($mmatGrid.Rows.Count), mmatTab=$mmatTabSelected, clothTab=$clothTabSelected, clothViews=$($clothViews -join ',')"
     $form.Close()
     exit 0
 }

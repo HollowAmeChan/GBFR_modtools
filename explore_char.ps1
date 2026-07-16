@@ -12,6 +12,7 @@ $libRoot = Join-Path $PSScriptRoot "_lib"
 $flatcExe = Join-Path $libRoot "flatc.exe"
 $graniteExe = Join-Path $libRoot "GraniteTextureReader.exe"
 $texconvExe = Join-Path $libRoot "texconv.exe"
+$gbfrDataToolsExe = Join-Path $libRoot "GBFRDataTools.exe"
 $schemaFbs = Join-Path $libRoot "MMat_ModelMaterial.fbs"
 . (Join-Path $libRoot "workspace_lib.ps1")
 
@@ -219,6 +220,7 @@ function Copy-DiscoveredSources {
 function Initialize-WorkspaceArtifacts {
     $textures = [System.Collections.Generic.List[PSCustomObject]]::new()
     $materials = [System.Collections.Generic.List[PSCustomObject]]::new()
+    $clothFiles = [System.Collections.Generic.List[PSCustomObject]]::new()
     $errors = [System.Collections.Generic.List[string]]::new()
 
     foreach ($source in ($sourceFiles | Sort-Object)) {
@@ -264,6 +266,57 @@ function Initialize-WorkspaceArtifacts {
             } catch {
                 $errors.Add("mmat: $relativeDataPath -- $($_.Exception.Message)")
             }
+        } elseif ([IO.Path]::GetExtension($source) -ieq ".bxm") {
+            $relativeParent = ConvertTo-WorkspacePath ([IO.Path]::GetDirectoryName($relativeDataPath))
+            $fileName = [IO.Path]::GetFileName($relativeDataPath)
+            $clothParent = "pl/$charId/cloth"
+            $characterParent = "pl/$charId"
+            $isBaseCloth = $relativeParent -ieq $clothParent
+            $sequenceMatch = [regex]::Match(
+                $fileName,
+                "^$([regex]::Escape($charId))_([0-9a-fA-F]{4})_(\d+)_seq_edit_cloth\.bxm$"
+            )
+            $isSequenceCloth = $relativeParent -ieq $characterParent -and $sequenceMatch.Success
+            if (-not $isBaseCloth -and -not $isSequenceCloth) { continue }
+
+            try {
+                if (-not (Test-Path -LiteralPath $gbfrDataToolsExe -PathType Leaf)) {
+                    throw "GBFRDataTools.exe not found"
+                }
+                $xmlRelative = ConvertTo-WorkspacePath (Join-Path "unpack\data" ($relativeDataPath + ".xml"))
+                $xmlPath = Resolve-WorkspaceFile $outDir $xmlRelative
+                Convert-BxmToXml $gbfrDataToolsExe $sourceCopy $xmlPath | Out-Null
+
+                $category = "other"
+                $groupId = $null
+                $motionId = $null
+                $variant = $null
+                $groupMatch = [regex]::Match($fileName, "_0_(\d+)_(clp|clh)\.bxm$")
+                if ($groupMatch.Success) {
+                    $groupId = [int]$groupMatch.Groups[1].Value
+                    $category = $groupMatch.Groups[2].Value.ToLowerInvariant()
+                } elseif ($fileName -match "_rmslst\.bxm$") {
+                    $category = "reset"
+                } elseif ($isSequenceCloth) {
+                    $category = "sequence"
+                    $motionId = $sequenceMatch.Groups[1].Value.ToLowerInvariant()
+                    $variant = [int]$sequenceMatch.Groups[2].Value
+                }
+
+                $clothFiles.Add([PSCustomObject]@{
+                    Source = $sourceRelative
+                    SourceSha256 = Get-WorkspaceSha256 $sourceCopy
+                    Xml = $xmlRelative
+                    Output = ConvertTo-WorkspacePath (Join-Path "build\data" $relativeDataPath)
+                    BaselineSha256 = Get-WorkspaceSha256 $xmlPath
+                    Category = $category
+                    GroupId = $groupId
+                    MotionId = $motionId
+                    Variant = $variant
+                })
+            } catch {
+                $errors.Add("cloth: $relativeDataPath -- $($_.Exception.Message)")
+            }
         }
     }
 
@@ -278,6 +331,7 @@ function Initialize-WorkspaceArtifacts {
         BuildRoot = "build"
         Textures = @($textures)
         Materials = @($materials)
+        ClothFiles = @($clothFiles)
         DecodeErrors = @($errors)
     }
     $json = $workspace | ConvertTo-Json -Depth 8
@@ -286,6 +340,7 @@ function Initialize-WorkspaceArtifacts {
     return [PSCustomObject]@{
         TextureCount = $textures.Count
         MaterialCount = $materials.Count
+        ClothCount = $clothFiles.Count
         ErrorCount = $errors.Count
         Errors = $errors
     }
@@ -926,6 +981,7 @@ L "| **$($S.copy_total_size)** | $(Format-FileSize $copyResult.TotalBytes) |"
 L "| **$($S.decoded_textures)** | $($artifactResult.TextureCount) |"
 L "| **$($S.decoded_granite)** | $($graniteResult.FileCount) |"
 L "| **$($S.decoded_materials)** | $($artifactResult.MaterialCount) |"
+L "| **$($S.decoded_cloth)** | $($artifactResult.ClothCount) |"
 L "| **$($S.decode_failed)** | $($artifactResult.ErrorCount + $graniteResult.ErrorCount) |"
 if ($copyResult.Failed.Count -gt 0) {
     L "| **$($S.copy_failed)** | $($copyResult.Failed.Count) |"
@@ -991,7 +1047,7 @@ Write-Host "  $sourceRoot" -ForegroundColor Green
 if ($copyResult.Failed.Count -gt 0) {
     Write-Host "$($S.copy_failed): $($copyResult.Failed.Count)" -ForegroundColor Yellow
 }
-Write-Host "$($S.decode_done): texture $($artifactResult.TextureCount), mmat $($artifactResult.MaterialCount)" -ForegroundColor Green
+Write-Host "$($S.decode_done): texture $($artifactResult.TextureCount), mmat $($artifactResult.MaterialCount), cloth $($artifactResult.ClothCount)" -ForegroundColor Green
 Write-Host "  $unpackRoot" -ForegroundColor Green
 Write-Host "$($S.granite_done): $($graniteResult.FileCount) DDS, $($graniteResult.MissingCount) $($S.granite_missing)" -ForegroundColor Green
 if ($artifactResult.ErrorCount -gt 0) {
