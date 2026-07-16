@@ -2,6 +2,7 @@
 #include <gbfr/core/workspace.hpp>
 #include <gbfr/formats/model.hpp>
 #include <gbfr/formats/cloth.hpp>
+#include <nlohmann/json.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -44,7 +45,14 @@ int main() {
     const fs::path integration = fs::path(GBFR_SOURCE_DIR) / L"explore_output/workspace.json";
     if (fs::is_regular_file(integration)) {
         const auto pl1400 = gbfr::Workspace::load(integration);
-        if (pl1400.assets().size() != 188) return 6;
+        nlohmann::json document;
+        std::ifstream(integration) >> document;
+        const auto expected_assets=document.value("Textures",nlohmann::json::array()).size()+
+            document.value("Materials",nlohmann::json::array()).size()+
+            document.value("ClothFiles",nlohmann::json::array()).size()+
+            document.value("ModelFiles",nlohmann::json::array()).size()+
+            document.value("NewTextures",nlohmann::json::array()).size();
+        if (pl1400.assets().size() != expected_assets) return 6;
         const auto model_root = integration.parent_path() / L"unpack/data/model/pl/pl1400";
         const auto minfo = gbfr::load_minfo(model_root / L"pl1400.minfo");
         const auto skeleton = gbfr::load_skeleton(model_root / L"pl1400.skeleton");

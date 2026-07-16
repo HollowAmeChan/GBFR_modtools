@@ -70,7 +70,7 @@ out\bin\RelWithDebInfo\GBFRModtools.exe
 `build.bat test` 包含：
 
 - 临时 Version 1 工作区的哈希、修改检测、模型 build 和恢复。
-- 有本地 `explore_output` 时，断言 pl1400 与 PowerShell 一致为 188 个候选。
+- 有本地 `explore_output` 时，从 workspace 各资源数组计算预期候选总数，并断言 C++ 与 PowerShell 工作区一致。2026-07-16 使用新版 GBFRDataTools 重解包后，当前 pl1400 基线为 319 个候选。
 - pl1400 LOD0 的 minfo、skeleton 和 mmesh 集成解析。
 - pl1400 `0_0` CLH 8 条碰撞、CLP 60 个节点解析，以及临时 CLH 副本写回。
 - 损坏 FlatBuffer 的越界拒绝。
