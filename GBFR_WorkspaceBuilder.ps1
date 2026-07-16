@@ -378,16 +378,32 @@ $btnBrowse.Size = New-Object Drawing.Size(100, 30)
 $btnBrowse.Anchor = "Top,Right"
 $form.Controls.Add($btnBrowse)
 
+$tabs = New-Object Windows.Forms.TabControl
+$tabs.Location = New-Object Drawing.Point(8, 50)
+$tabs.Size = New-Object Drawing.Size(964, 592)
+$tabs.Anchor = "Top,Bottom,Left,Right"
+
+$pageBuild = New-Object Windows.Forms.TabPage
+$pageBuild.Text = $B.tab_build
+$pageMmat = New-Object Windows.Forms.TabPage
+$pageMmat.Text = $B.tab_mmat
+$pageCloth = New-Object Windows.Forms.TabPage
+$pageCloth.Text = $B.tab_cloth
+[void]$tabs.TabPages.Add($pageBuild)
+[void]$tabs.TabPages.Add($pageMmat)
+[void]$tabs.TabPages.Add($pageCloth)
+$form.Controls.Add($tabs)
+
 $lblSummary = New-Object Windows.Forms.Label
 $lblSummary.Text = $B.select_hint
-$lblSummary.Location = New-Object Drawing.Point(14, 54)
-$lblSummary.Size = New-Object Drawing.Size(948, 24)
+$lblSummary.Location = New-Object Drawing.Point(8, 8)
+$lblSummary.Size = New-Object Drawing.Size(932, 24)
 $lblSummary.Anchor = "Top,Left,Right"
-$form.Controls.Add($lblSummary)
+$pageBuild.Controls.Add($lblSummary)
 
 $grid = New-Object Windows.Forms.DataGridView
-$grid.Location = New-Object Drawing.Point(14, 82)
-$grid.Size = New-Object Drawing.Size(948, 390)
+$grid.Location = New-Object Drawing.Point(8, 36)
+$grid.Size = New-Object Drawing.Size(932, 356)
 $grid.Anchor = "Top,Bottom,Left,Right"
 $grid.AllowUserToAddRows = $false
 $grid.AllowUserToDeleteRows = $false
@@ -441,75 +457,286 @@ $colRestore.FlatStyle = "Flat"
 $colRestore.SortMode = "NotSortable"
 [void]$grid.Columns.Add($colRestore)
 
-$colA4 = New-Object Windows.Forms.DataGridViewButtonColumn
-$colA4.Name = "A4Action"
-$colA4.HeaderText = $B.col_mmat_action
-$colA4.Width = 110
-$colA4.ReadOnly = $true
-$colA4.FlatStyle = "Flat"
-$colA4.SortMode = "NotSortable"
-[void]$grid.Columns.Add($colA4)
-$form.Controls.Add($grid)
+$colEdit = New-Object Windows.Forms.DataGridViewButtonColumn
+$colEdit.Name = "Edit"
+$colEdit.HeaderText = $B.col_edit
+$colEdit.Width = 70
+$colEdit.ReadOnly = $true
+$colEdit.FlatStyle = "Flat"
+$colEdit.SortMode = "NotSortable"
+[void]$grid.Columns.Add($colEdit)
+$pageBuild.Controls.Add($grid)
 
 $btnModified = New-Object Windows.Forms.Button
 $btnModified.Text = $B.select_modified
-$btnModified.Location = New-Object Drawing.Point(14, 484)
+$btnModified.Location = New-Object Drawing.Point(8, 404)
 $btnModified.Size = New-Object Drawing.Size(115, 32)
 $btnModified.Anchor = "Bottom,Left"
-$form.Controls.Add($btnModified)
+$pageBuild.Controls.Add($btnModified)
 
 $btnClear = New-Object Windows.Forms.Button
 $btnClear.Text = $B.clear_selection
-$btnClear.Location = New-Object Drawing.Point(138, 484)
+$btnClear.Location = New-Object Drawing.Point(132, 404)
 $btnClear.Size = New-Object Drawing.Size(100, 32)
 $btnClear.Anchor = "Bottom,Left"
-$form.Controls.Add($btnClear)
+$pageBuild.Controls.Add($btnClear)
 
 $btnRefresh = New-Object Windows.Forms.Button
 $btnRefresh.Text = $B.refresh_list
-$btnRefresh.Location = New-Object Drawing.Point(247, 484)
+$btnRefresh.Location = New-Object Drawing.Point(241, 404)
 $btnRefresh.Size = New-Object Drawing.Size(100, 32)
 $btnRefresh.Anchor = "Bottom,Left"
-$form.Controls.Add($btnRefresh)
+$pageBuild.Controls.Add($btnRefresh)
 
 $btnRestore = New-Object Windows.Forms.Button
 $btnRestore.Text = $B.restore_selected
-$btnRestore.Location = New-Object Drawing.Point(356, 484)
+$btnRestore.Location = New-Object Drawing.Point(350, 404)
 $btnRestore.Size = New-Object Drawing.Size(130, 32)
 $btnRestore.Anchor = "Bottom,Left"
 $btnRestore.Enabled = $false
-$form.Controls.Add($btnRestore)
+$pageBuild.Controls.Add($btnRestore)
 
 $btnOpenBuild = New-Object Windows.Forms.Button
 $btnOpenBuild.Text = $B.open_build
-$btnOpenBuild.Location = New-Object Drawing.Point(495, 484)
+$btnOpenBuild.Location = New-Object Drawing.Point(489, 404)
 $btnOpenBuild.Size = New-Object Drawing.Size(105, 32)
 $btnOpenBuild.Anchor = "Bottom,Left"
-$form.Controls.Add($btnOpenBuild)
+$pageBuild.Controls.Add($btnOpenBuild)
 
 $btnBuild = New-Object Windows.Forms.Button
 $btnBuild.Text = $B.build_selected
-$btnBuild.Location = New-Object Drawing.Point(812, 482)
+$btnBuild.Location = New-Object Drawing.Point(790, 402)
 $btnBuild.Size = New-Object Drawing.Size(150, 36)
 $btnBuild.Anchor = "Bottom,Right"
 $btnBuild.Enabled = $false
-$form.Controls.Add($btnBuild)
+$pageBuild.Controls.Add($btnBuild)
 
 $log = New-Object Windows.Forms.TextBox
-$log.Location = New-Object Drawing.Point(14, 528)
-$log.Size = New-Object Drawing.Size(948, 105)
+$log.Location = New-Object Drawing.Point(8, 448)
+$log.Size = New-Object Drawing.Size(932, 102)
 $log.Anchor = "Bottom,Left,Right"
 $log.Multiline = $true
 $log.ScrollBars = "Vertical"
 $log.ReadOnly = $true
 $log.Font = New-Object Drawing.Font("Consolas", 9)
-$form.Controls.Add($log)
+$pageBuild.Controls.Add($log)
+
+$lblMmatObject = New-Object Windows.Forms.Label
+$lblMmatObject.Text = $B.edit_object
+$lblMmatObject.Location = New-Object Drawing.Point(12, 16)
+$lblMmatObject.AutoSize = $true
+$pageMmat.Controls.Add($lblMmatObject)
+
+$txtMmatObject = New-Object Windows.Forms.TextBox
+$txtMmatObject.Location = New-Object Drawing.Point(90, 12)
+$txtMmatObject.Size = New-Object Drawing.Size(650, 27)
+$txtMmatObject.Anchor = "Top,Left,Right"
+$txtMmatObject.ReadOnly = $true
+$txtMmatObject.Text = $B.no_edit_object
+$pageMmat.Controls.Add($txtMmatObject)
+
+$btnClearMmatA4 = New-Object Windows.Forms.Button
+$btnClearMmatA4.Text = $B.clear_all_a4
+$btnClearMmatA4.Location = New-Object Drawing.Point(754, 10)
+$btnClearMmatA4.Size = New-Object Drawing.Size(180, 32)
+$btnClearMmatA4.Anchor = "Top,Right"
+$btnClearMmatA4.Enabled = $false
+$pageMmat.Controls.Add($btnClearMmatA4)
+
+$lblMmatSummary = New-Object Windows.Forms.Label
+$lblMmatSummary.Text = $B.mmat_no_selection
+$lblMmatSummary.Location = New-Object Drawing.Point(12, 50)
+$lblMmatSummary.Size = New-Object Drawing.Size(922, 24)
+$lblMmatSummary.Anchor = "Top,Left,Right"
+$pageMmat.Controls.Add($lblMmatSummary)
+
+$mmatGrid = New-Object Windows.Forms.DataGridView
+$mmatGrid.Location = New-Object Drawing.Point(12, 78)
+$mmatGrid.Size = New-Object Drawing.Size(922, 462)
+$mmatGrid.Anchor = "Top,Bottom,Left,Right"
+$mmatGrid.AllowUserToAddRows = $false
+$mmatGrid.AllowUserToDeleteRows = $false
+$mmatGrid.AllowUserToResizeRows = $false
+$mmatGrid.AutoGenerateColumns = $false
+$mmatGrid.MultiSelect = $false
+$mmatGrid.RowHeadersVisible = $false
+$mmatGrid.SelectionMode = "FullRowSelect"
+$mmatGrid.ReadOnly = $true
+$mmatGrid.BackgroundColor = [Drawing.SystemColors]::Window
+$mmatGrid.RowTemplate.Height = 28
+$mmatGrid.ColumnHeadersHeight = 32
+
+foreach ($definition in @(
+    @{ Name = "Entry"; Header = $B.col_entry; Width = 55 },
+    @{ Name = "A5"; Header = "A5"; Width = 105 },
+    @{ Name = "A1"; Header = "A1"; Width = 50 },
+    @{ Name = "A2"; Header = "A2"; Width = 50 },
+    @{ Name = "A3"; Header = "A3"; Width = 50 },
+    @{ Name = "A4"; Header = "A4"; Width = 50 }
+)) {
+    $column = New-Object Windows.Forms.DataGridViewTextBoxColumn
+    $column.Name = $definition.Name
+    $column.HeaderText = $definition.Header
+    $column.Width = $definition.Width
+    $column.ReadOnly = $true
+    $column.SortMode = "NotSortable"
+    [void]$mmatGrid.Columns.Add($column)
+}
+$colMmatTextures = New-Object Windows.Forms.DataGridViewTextBoxColumn
+$colMmatTextures.Name = "Textures"
+$colMmatTextures.HeaderText = $B.col_texture_references
+$colMmatTextures.AutoSizeMode = "Fill"
+$colMmatTextures.MinimumWidth = 260
+$colMmatTextures.ReadOnly = $true
+$colMmatTextures.SortMode = "NotSortable"
+[void]$mmatGrid.Columns.Add($colMmatTextures)
+$pageMmat.Controls.Add($mmatGrid)
+
+$lblClothObject = New-Object Windows.Forms.Label
+$lblClothObject.Text = $B.edit_object
+$lblClothObject.Location = New-Object Drawing.Point(12, 16)
+$lblClothObject.AutoSize = $true
+$pageCloth.Controls.Add($lblClothObject)
+
+$txtClothObject = New-Object Windows.Forms.TextBox
+$txtClothObject.Location = New-Object Drawing.Point(90, 12)
+$txtClothObject.Size = New-Object Drawing.Size(730, 27)
+$txtClothObject.Anchor = "Top,Left,Right"
+$txtClothObject.ReadOnly = $true
+$txtClothObject.Text = $B.no_edit_object
+$pageCloth.Controls.Add($txtClothObject)
+
+$btnChooseCloth = New-Object Windows.Forms.Button
+$btnChooseCloth.Text = $B.browse
+$btnChooseCloth.Location = New-Object Drawing.Point(834, 10)
+$btnChooseCloth.Size = New-Object Drawing.Size(100, 32)
+$btnChooseCloth.Anchor = "Top,Right"
+$pageCloth.Controls.Add($btnChooseCloth)
+
+$lblClothSummary = New-Object Windows.Forms.Label
+$lblClothSummary.Text = $B.cloth_editor_pending
+$lblClothSummary.Location = New-Object Drawing.Point(12, 50)
+$lblClothSummary.Size = New-Object Drawing.Size(922, 24)
+$lblClothSummary.Anchor = "Top,Left,Right"
+$pageCloth.Controls.Add($lblClothSummary)
+
+$clothGrid = New-Object Windows.Forms.DataGridView
+$clothGrid.Location = New-Object Drawing.Point(12, 78)
+$clothGrid.Size = New-Object Drawing.Size(922, 462)
+$clothGrid.Anchor = "Top,Bottom,Left,Right"
+$clothGrid.AllowUserToAddRows = $false
+$clothGrid.AllowUserToDeleteRows = $false
+$clothGrid.AllowUserToResizeRows = $false
+$clothGrid.AutoGenerateColumns = $false
+$clothGrid.MultiSelect = $false
+$clothGrid.RowHeadersVisible = $false
+$clothGrid.ReadOnly = $true
+$clothGrid.BackgroundColor = [Drawing.SystemColors]::Window
+$clothGrid.RowTemplate.Height = 28
+$clothGrid.ColumnHeadersHeight = 32
+$colClothProperty = New-Object Windows.Forms.DataGridViewTextBoxColumn
+$colClothProperty.Name = "Property"
+$colClothProperty.HeaderText = $B.col_quick_property
+$colClothProperty.Width = 180
+$colClothProperty.ReadOnly = $true
+$colClothProperty.SortMode = "NotSortable"
+[void]$clothGrid.Columns.Add($colClothProperty)
+$colClothValue = New-Object Windows.Forms.DataGridViewTextBoxColumn
+$colClothValue.Name = "Value"
+$colClothValue.HeaderText = $B.col_quick_value
+$colClothValue.AutoSizeMode = "Fill"
+$colClothValue.ReadOnly = $true
+$colClothValue.SortMode = "NotSortable"
+[void]$clothGrid.Columns.Add($colClothValue)
+$pageCloth.Controls.Add($clothGrid)
 
 $script:context = $null
+$script:mmatOperation = $null
+$script:mmatOperationKey = ""
 function Add-Log([string]$Message) {
     $log.AppendText($Message + "`r`n")
     $log.SelectionStart = $log.TextLength
     $log.ScrollToCaret()
+}
+
+function Refresh-MmatEditor {
+    $mmatGrid.Rows.Clear()
+    $btnClearMmatA4.Enabled = $false
+    if ($null -eq $script:mmatOperation) {
+        $txtMmatObject.Text = $B.no_edit_object
+        $lblMmatSummary.Text = $B.mmat_no_selection
+        return
+    }
+
+    $txtMmatObject.Text = [string]$script:mmatOperation.JsonPath
+    if (-not $script:mmatOperation.Available -or
+        -not (Test-Path -LiteralPath $script:mmatOperation.JsonPath -PathType Leaf)) {
+        $lblMmatSummary.Text = $B.state_missing
+        return
+    }
+
+    try {
+        $material = ConvertFrom-Json ([IO.File]::ReadAllText($script:mmatOperation.JsonPath, [Text.Encoding]::UTF8))
+        $entries = @($material.Entries1)
+        $a4Total = 0
+        for ($index = 0; $index -lt $entries.Count; $index++) {
+            $entry = $entries[$index]
+            if ($null -eq $entry) { continue }
+            $hasA4 = $entry.PSObject.Properties.Name -contains "A4" -and $null -ne $entry.A4
+            $a4Count = if ($hasA4) { @($entry.A4).Count } else { 0 }
+            if ($hasA4) { $a4Total++ }
+            $textureNames = @($entry.A2 | ForEach-Object {
+                if ($null -ne $_ -and $_.PSObject.Properties.Name -contains "Name") { [string]$_.Name }
+            }) -join ", "
+            $rowIndex = $mmatGrid.Rows.Add(
+                $index, [string]$entry.A5, @($entry.A1).Count, @($entry.A2).Count,
+                @($entry.A3).Count, $a4Count, $textureNames
+            )
+            $row = $mmatGrid.Rows[$rowIndex]
+            $row.Cells["Textures"].ToolTipText = $textureNames
+            if ($hasA4) {
+                $row.Cells["A4"].Style.ForeColor = [Drawing.Color]::DarkRed
+                $row.Cells["A4"].Style.BackColor = [Drawing.Color]::MistyRose
+            }
+        }
+        $entries2Count = @($material.Entries2).Count
+        $lblMmatSummary.Text = "$($B.mmat_entries) $($entries.Count) | Entries2 $entries2Count | $($B.a4_blocks) $a4Total"
+        $btnClearMmatA4.Enabled = $a4Total -gt 0
+    } catch {
+        $lblMmatSummary.Text = "$($B.a4_json_error): $($_.Exception.Message)"
+    }
+}
+
+function Open-MmatEditor([object]$Operation) {
+    if ($null -eq $Operation -or [string]$Operation.Kind -ne "mmat") { return }
+    $script:mmatOperation = $Operation
+    $script:mmatOperationKey = Get-OperationKey $Operation
+    Refresh-MmatEditor
+    $tabs.SelectedTab = $pageMmat
+}
+
+function Show-ClothQuickInfo([string]$Path) {
+    $clothGrid.Rows.Clear()
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        $txtClothObject.Text = $B.no_edit_object
+        $lblClothSummary.Text = $B.cloth_editor_pending
+        return
+    }
+    $file = Get-Item -LiteralPath $Path
+    $type = switch -Regex ($file.Name) {
+        "_clp\.bxm$" { $B.cloth_type_clp; break }
+        "_clh\.bxm$" { $B.cloth_type_clh; break }
+        "_seq_edit_cloth\.bxm$" { $B.cloth_type_sequence; break }
+        default { $B.cloth_type_bxm }
+    }
+    $txtClothObject.Text = $file.FullName
+    $lblClothSummary.Text = $B.cloth_editor_pending
+    [void]$clothGrid.Rows.Add($B.quick_file_name, $file.Name)
+    [void]$clothGrid.Rows.Add($B.quick_type, $type)
+    [void]$clothGrid.Rows.Add($B.quick_size, "$($file.Length) bytes")
+    [void]$clothGrid.Rows.Add($B.quick_directory, $file.DirectoryName)
+    [void]$clothGrid.Rows.Add($B.quick_edit_state, $B.cloth_read_only_state)
+    $clothGrid.Rows[3].Cells["Value"].ToolTipText = $file.DirectoryName
 }
 
 function Update-SelectionSummary {
@@ -563,38 +790,25 @@ function Load-Manifest([string]$Path, [switch]$PreserveSelection) {
                 [bool]$operation.Changed
             }
 
-            $a4Label = ""
-            $a4ActionEnabled = $false
-            if ([string]$operation.Kind -eq "mmat" -and $operation.Available) {
-                try {
-                    $a4Count = Get-WorkspaceMaterialA4Count $script:context $operation
-                    if ($a4Count -gt 0) {
-                        $a4Label = "$($B.clear_a4) ($a4Count)"
-                        $a4ActionEnabled = $true
-                    } else {
-                        $a4Label = $B.a4_cleared
-                    }
-                } catch {
-                    $a4Label = $B.a4_json_error
-                }
-            }
+            $editLabel = if ([string]$operation.Kind -eq "mmat" -and $operation.Available) { $B.edit } else { "" }
+            $editEnabled = [string]$operation.Kind -eq "mmat" -and $operation.Available
 
             $rowIndex = $grid.Rows.Add(
                 $isChecked, $state, $operation.TypeLabel, $operation.InputLabel,
-                $operation.OutputLabel, $B.restore_row, $a4Label
+                $operation.OutputLabel, $B.restore_row, $editLabel
             )
             $row = $grid.Rows[$rowIndex]
             $row.Tag = $operation
             $row.Cells["Input"].ToolTipText = $operation.InputLabel
             $row.Cells["Output"].ToolTipText = $operation.OutputLabel
             $row.Cells["Restore"].Style.ForeColor = [Drawing.SystemColors]::ControlText
-            if (-not $a4ActionEnabled) {
+            if (-not $editEnabled) {
                 $textCell = New-Object Windows.Forms.DataGridViewTextBoxCell
-                $textCell.Value = $a4Label
-                $row.Cells["A4Action"] = $textCell
-                $row.Cells["A4Action"].ReadOnly = $true
+                $textCell.Value = $editLabel
+                $row.Cells["Edit"] = $textCell
+                $row.Cells["Edit"].ReadOnly = $true
             } else {
-                $row.Cells["A4Action"].Style.ForeColor = [Drawing.SystemColors]::ControlText
+                $row.Cells["Edit"].Style.ForeColor = [Drawing.SystemColors]::ControlText
             }
             if (-not $operation.Available) { $row.DefaultCellStyle.ForeColor = [Drawing.Color]::DarkOrange }
             elseif (-not $operation.Changed) { $row.DefaultCellStyle.ForeColor = [Drawing.Color]::Gray }
@@ -602,6 +816,12 @@ function Load-Manifest([string]$Path, [switch]$PreserveSelection) {
         $grid.ResumeLayout()
         if ($PreserveSelection) { Add-Log $B.workspace_refreshed }
         else { Add-Log "$($B.workspace_loaded): $($script:context.Root)" }
+        if ($script:mmatOperationKey) {
+            $script:mmatOperation = @($script:context.Operations | Where-Object {
+                (Get-OperationKey $_) -eq $script:mmatOperationKey
+            } | Select-Object -First 1)[0]
+            Refresh-MmatEditor
+        }
         Update-SelectionSummary
     } catch {
         try { $grid.ResumeLayout() } catch {}
@@ -693,24 +913,45 @@ $grid.Add_CellContentClick({
         return
     }
 
-    if ($columnName -eq "A4Action" -and [string]$operation.Kind -eq "mmat" -and $operation.Available) {
-        try {
-            $a4Count = Get-WorkspaceMaterialA4Count $script:context $operation
-            if ($a4Count -le 0) { return }
-            $answer = [Windows.Forms.MessageBox]::Show(
-                "$($B.confirm_clear_a4_prefix) $a4Count $($B.confirm_clear_a4_suffix):`r`n`r`n$($operation.InputLabel)",
-                $B.confirm_title, "OKCancel", "Warning"
-            )
-            if ($answer -ne "OK") { return }
-            $removed = Remove-WorkspaceMaterialA4 $script:context $operation
-            Add-Log "[OK] $($B.a4_removed): $($operation.InputLabel) ($removed)"
-            $row.Cells["Selected"].Value = $true
-            Load-Manifest $txtManifest.Text -PreserveSelection
-        } catch {
-            Add-Log "[$($B.failed)] $($operation.InputLabel): $($_.Exception.Message)"
-            [Windows.Forms.MessageBox]::Show($_.Exception.Message, $B.a4_remove_failed, "OK", "Error") | Out-Null
-        }
+    if ($columnName -eq "Edit" -and [string]$operation.Kind -eq "mmat" -and $operation.Available) {
+        Open-MmatEditor $operation
+        return
     }
+})
+$btnClearMmatA4.Add_Click({
+    if ($null -eq $script:mmatOperation -or $null -eq $script:context) { return }
+    try {
+        $a4Count = Get-WorkspaceMaterialA4Count $script:context $script:mmatOperation
+        if ($a4Count -le 0) { return }
+        $answer = [Windows.Forms.MessageBox]::Show(
+            "$($B.confirm_clear_a4_prefix) $a4Count $($B.confirm_clear_a4_suffix):`r`n`r`n$($script:mmatOperation.InputLabel)",
+            $B.confirm_edit_title, "OKCancel", "Warning"
+        )
+        if ($answer -ne "OK") { return }
+        $operationKey = $script:mmatOperationKey
+        $removed = Remove-WorkspaceMaterialA4 $script:context $script:mmatOperation
+        Add-Log "[OK] $($B.a4_removed): $($script:mmatOperation.InputLabel) ($removed)"
+        foreach ($buildRow in @($grid.Rows)) {
+            if ($null -ne $buildRow.Tag -and (Get-OperationKey $buildRow.Tag) -eq $operationKey) {
+                $buildRow.Cells["Selected"].Value = $true
+                break
+            }
+        }
+        Load-Manifest $txtManifest.Text -PreserveSelection
+    } catch {
+        Add-Log "[$($B.failed)] $($script:mmatOperation.InputLabel): $($_.Exception.Message)"
+        [Windows.Forms.MessageBox]::Show($_.Exception.Message, $B.a4_remove_failed, "OK", "Error") | Out-Null
+    }
+})
+$btnChooseCloth.Add_Click({
+    $dialog = New-Object Windows.Forms.OpenFileDialog
+    $dialog.Title = $B.select_cloth_object
+    $dialog.Filter = "GBFR cloth BXM (*.bxm)|*.bxm|All files (*.*)|*.*"
+    if ($null -ne $script:context) {
+        $clothDir = Join-Path $script:context.Root "source\data\pl\$($script:context.Workspace.CharacterId)\cloth"
+        if (Test-Path -LiteralPath $clothDir -PathType Container) { $dialog.InitialDirectory = $clothDir }
+    }
+    if ($dialog.ShowDialog() -eq "OK") { Show-ClothQuickInfo $dialog.FileName }
 })
 $btnOpenBuild.Add_Click({
     if ($null -ne $script:context) {
@@ -746,8 +987,13 @@ if ($ManifestPath -and (Test-Path -LiteralPath $ManifestPath)) { Load-Manifest $
 if ($UiSmokeTest) {
     $mmatRows = @($grid.Rows | Where-Object { $null -ne $_.Tag -and [string]$_.Tag.Kind -eq "mmat" })
     $restoreButtons = @($grid.Rows | Where-Object { $_.Cells["Restore"].Value -eq $B.restore_row })
-    $a4Buttons = @($mmatRows | Where-Object { [string]$_.Cells["A4Action"].Value -like "$($B.clear_a4)*" })
-    Write-Host "UI smoke: rows=$($grid.Rows.Count), restore=$($restoreButtons.Count), bulkRestore=$($btnRestore.Text -eq $B.restore_selected), mmat=$($mmatRows.Count), clearA4=$($a4Buttons.Count)"
+    $editButtons = @($mmatRows | Where-Object { $_.Cells["Edit"].Value -eq $B.edit })
+    if ($mmatRows.Count -gt 0) { Open-MmatEditor $mmatRows[0].Tag }
+    $mmatTabSelected = $tabs.SelectedTab -eq $pageMmat
+    $clothDir = Join-Path $script:context.Root "source\data\pl\$($script:context.Workspace.CharacterId)\cloth"
+    $clothSample = Get-ChildItem -LiteralPath $clothDir -Filter "*.bxm" -File -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -ne $clothSample) { Show-ClothQuickInfo $clothSample.FullName }
+    Write-Host "UI smoke: rows=$($grid.Rows.Count), restore=$($restoreButtons.Count), bulkRestore=$($btnRestore.Text -eq $B.restore_selected), edit=$($editButtons.Count), mmatEntries=$($mmatGrid.Rows.Count), mmatTab=$mmatTabSelected, clothTab=$($tabs.TabPages.Contains($pageCloth)), clothQuick=$($clothGrid.Rows.Count)"
     exit 0
 }
 [void]$form.ShowDialog()
