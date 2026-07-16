@@ -30,6 +30,7 @@ namespace {
 gbfr::D3D11Context* g_d3d = nullptr;
 gbfr::PreviewRenderer* g_preview = nullptr;
 std::unique_ptr<gbfr::Workspace> g_workspace;
+std::string g_imgui_ini;
 std::optional<std::size_t> g_selected_asset;
 bool g_changed_only = false;
 gbfr::OrbitCamera g_camera;
@@ -79,6 +80,11 @@ void load_workspace(const std::filesystem::path& path) {
     try {
         g_workspace = std::make_unique<gbfr::Workspace>(gbfr::Workspace::load(path));
         g_selected_asset.reset();
+        const auto settings_directory=g_workspace->root()/L".gbfr";
+        std::filesystem::create_directories(settings_directory);
+        g_imgui_ini=utf8((settings_directory/L"imgui.ini").wstring());
+        ImGui::GetIO().IniFilename=g_imgui_ini.c_str();
+        if(std::filesystem::is_regular_file(settings_directory/L"imgui.ini"))ImGui::LoadIniSettingsFromDisk(g_imgui_ini.c_str());
         gbfr::Log::write(gbfr::LogLevel::info, "工作区已加载：" + utf8(g_workspace->root().wstring()));
     } catch (const std::exception& error) {
         gbfr::Log::write(gbfr::LogLevel::error, std::string("工作区加载失败：") + error.what());
