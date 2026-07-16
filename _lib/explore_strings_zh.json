@@ -175,6 +175,7 @@
   "decoded_granite": "已解码 Granite DDS",
   "decoded_materials": "已解码 mmat",
   "decoded_cloth": "已解码 cloth BXM",
+  "workspace_model_files": "可编辑模型文件",
   "granite_title": "Granite 流式贴图",
   "granite_path_note": "输出路径：unpack/data/granite/{2k,4k}/，可由构建器选择性新建普通 WTB texture。",
   "granite_references": "唯一 A4 哈希",

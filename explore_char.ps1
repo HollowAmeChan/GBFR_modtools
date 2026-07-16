@@ -221,6 +221,7 @@ function Initialize-WorkspaceArtifacts {
     $textures = [System.Collections.Generic.List[PSCustomObject]]::new()
     $materials = [System.Collections.Generic.List[PSCustomObject]]::new()
     $clothFiles = [System.Collections.Generic.List[PSCustomObject]]::new()
+    $modelFiles = [System.Collections.Generic.List[PSCustomObject]]::new()
     $errors = [System.Collections.Generic.List[string]]::new()
 
     foreach ($source in ($sourceFiles | Sort-Object)) {
@@ -228,7 +229,31 @@ function Initialize-WorkspaceArtifacts {
         $sourceRelative = ConvertTo-WorkspacePath (Join-Path "source\data" $relativeDataPath)
         $sourceCopy = Resolve-WorkspaceFile $outDir $sourceRelative
 
-        if ([IO.Path]::GetExtension($source) -ieq ".texture") {
+        $extension = [IO.Path]::GetExtension($source).ToLowerInvariant()
+        $relativeParent = ConvertTo-WorkspacePath ([IO.Path]::GetDirectoryName($relativeDataPath))
+        $isEditableModelFile = $extension -in @(".minfo", ".skeleton") -and
+            $relativeParent -match '^model/[^/]+/[^/]+$'
+        $isEditableLod0Mesh = $extension -eq ".mmesh" -and $relativeParent -ieq "model_streaming/lod0"
+
+        if ($isEditableModelFile -or $isEditableLod0Mesh) {
+            try {
+                $inputRelative = ConvertTo-WorkspacePath (Join-Path "unpack\data" $relativeDataPath)
+                $inputPath = Resolve-WorkspaceFile $outDir $inputRelative
+                $inputDir = [IO.Path]::GetDirectoryName($inputPath)
+                New-Item -ItemType Directory -Force -Path $inputDir | Out-Null
+                [IO.File]::Copy($sourceCopy, $inputPath, $true)
+                $modelFiles.Add([PSCustomObject]@{
+                    Source = $sourceRelative
+                    SourceSha256 = Get-WorkspaceSha256 $sourceCopy
+                    Input = $inputRelative
+                    Output = ConvertTo-WorkspacePath (Join-Path "build\data" $relativeDataPath)
+                    BaselineSha256 = Get-WorkspaceSha256 $inputPath
+                    FileType = $extension.TrimStart('.')
+                })
+            } catch {
+                $errors.Add("model: $relativeDataPath -- $($_.Exception.Message)")
+            }
+        } elseif ($extension -ieq ".texture") {
             try {
                 $relativeDir = [IO.Path]::GetDirectoryName($relativeDataPath)
                 $unpackDir = Join-Path (Join-Path $unpackRoot "data") $relativeDir
@@ -249,7 +274,7 @@ function Initialize-WorkspaceArtifacts {
             } catch {
                 $errors.Add("texture: $relativeDataPath -- $($_.Exception.Message)")
             }
-        } elseif ([IO.Path]::GetExtension($source) -ieq ".mmat") {
+        } elseif ($extension -ieq ".mmat") {
             try {
                 if (-not (Test-Path -LiteralPath $flatcExe)) { throw "flatc.exe not found" }
                 if (-not (Test-Path -LiteralPath $schemaFbs)) { throw "MMat_ModelMaterial.fbs not found" }
@@ -266,8 +291,7 @@ function Initialize-WorkspaceArtifacts {
             } catch {
                 $errors.Add("mmat: $relativeDataPath -- $($_.Exception.Message)")
             }
-        } elseif ([IO.Path]::GetExtension($source) -ieq ".bxm") {
-            $relativeParent = ConvertTo-WorkspacePath ([IO.Path]::GetDirectoryName($relativeDataPath))
+        } elseif ($extension -ieq ".bxm") {
             $fileName = [IO.Path]::GetFileName($relativeDataPath)
             $clothParent = "pl/$charId/cloth"
             $characterParent = "pl/$charId"
@@ -332,6 +356,7 @@ function Initialize-WorkspaceArtifacts {
         Textures = @($textures)
         Materials = @($materials)
         ClothFiles = @($clothFiles)
+        ModelFiles = @($modelFiles)
         DecodeErrors = @($errors)
     }
     $json = $workspace | ConvertTo-Json -Depth 8
@@ -341,6 +366,7 @@ function Initialize-WorkspaceArtifacts {
         TextureCount = $textures.Count
         MaterialCount = $materials.Count
         ClothCount = $clothFiles.Count
+        ModelCount = $modelFiles.Count
         ErrorCount = $errors.Count
         Errors = $errors
     }
@@ -982,6 +1008,7 @@ L "| **$($S.decoded_textures)** | $($artifactResult.TextureCount) |"
 L "| **$($S.decoded_granite)** | $($graniteResult.FileCount) |"
 L "| **$($S.decoded_materials)** | $($artifactResult.MaterialCount) |"
 L "| **$($S.decoded_cloth)** | $($artifactResult.ClothCount) |"
+L "| **$($S.workspace_model_files)** | $($artifactResult.ModelCount) |"
 L "| **$($S.decode_failed)** | $($artifactResult.ErrorCount + $graniteResult.ErrorCount) |"
 if ($copyResult.Failed.Count -gt 0) {
     L "| **$($S.copy_failed)** | $($copyResult.Failed.Count) |"
@@ -1047,7 +1074,7 @@ Write-Host "  $sourceRoot" -ForegroundColor Green
 if ($copyResult.Failed.Count -gt 0) {
     Write-Host "$($S.copy_failed): $($copyResult.Failed.Count)" -ForegroundColor Yellow
 }
-Write-Host "$($S.decode_done): texture $($artifactResult.TextureCount), mmat $($artifactResult.MaterialCount), cloth $($artifactResult.ClothCount)" -ForegroundColor Green
+Write-Host "$($S.decode_done): texture $($artifactResult.TextureCount), mmat $($artifactResult.MaterialCount), cloth $($artifactResult.ClothCount), model $($artifactResult.ModelCount)" -ForegroundColor Green
 Write-Host "  $unpackRoot" -ForegroundColor Green
 Write-Host "$($S.granite_done): $($graniteResult.FileCount) DDS, $($graniteResult.MissingCount) $($S.granite_missing)" -ForegroundColor Green
 if ($artifactResult.ErrorCount -gt 0) {

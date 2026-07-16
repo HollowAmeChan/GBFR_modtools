@@ -121,6 +121,33 @@ function Get-WorkspaceOperations([string]$Manifest) {
         }
     }
 
+    if ($workspace.PSObject.Properties.Name -contains "ModelFiles") {
+        foreach ($modelFile in @($workspace.ModelFiles)) {
+            $inputPath = Resolve-WorkspaceFile $root ([string]$modelFile.Input)
+            $available = Test-Path -LiteralPath $inputPath -PathType Leaf
+            if (-not $available) { $missing++ }
+            $changed = $available -and (Get-WorkspaceSha256 $inputPath) -ne [string]$modelFile.BaselineSha256
+            $fileType = [string]$modelFile.FileType
+            $typeLabel = switch ($fileType) {
+                "minfo" { $B.type_model_minfo }
+                "skeleton" { $B.type_model_skeleton }
+                "mmesh" { $B.type_model_mesh }
+                default { $B.type_model_file }
+            }
+            $operations.Add([PSCustomObject]@{
+                Kind = "model_file"
+                TypeLabel = $typeLabel
+                InputLabel = [IO.Path]::GetFileName($inputPath)
+                OutputLabel = [string]$modelFile.Output
+                Changed = $changed
+                Available = $available
+                Record = $modelFile
+                InputPath = $inputPath
+                FileType = $fileType
+            })
+        }
+    }
+
     if ($workspace.PSObject.Properties.Name -contains "NewTextures") {
         foreach ($texture in @($workspace.NewTextures)) {
             $inputPath = Resolve-WorkspaceFile $root ([string]$texture.Input)
@@ -180,6 +207,23 @@ function Invoke-WorkspaceBuild([object]$Context, [object[]]$Operations, [scriptb
                 $tempOutput = "$outputPath.tmp"
                 try {
                     Convert-XmlToBxm $gbfrDataToolsExe ([string]$operation.XmlPath) $tempOutput | Out-Null
+                    Move-Item -LiteralPath $tempOutput -Destination $outputPath -Force
+                } finally {
+                    if (Test-Path -LiteralPath $tempOutput) { Remove-Item -LiteralPath $tempOutput -Force }
+                }
+            } elseif ($operation.Kind -eq "model_file") {
+                $sourcePath = Resolve-WorkspaceFile $Context.Root ([string]$operation.Record.Source)
+                if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+                    throw "$($B.err_source_missing): $sourcePath"
+                }
+                if ((Get-WorkspaceSha256 $sourcePath) -ne [string]$operation.Record.SourceSha256) {
+                    throw "$($B.err_source_changed): $sourcePath"
+                }
+                $outputDir = [IO.Path]::GetDirectoryName($outputPath)
+                New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
+                $tempOutput = "$outputPath.tmp"
+                try {
+                    [IO.File]::Copy([string]$operation.InputPath, $tempOutput, $true)
                     Move-Item -LiteralPath $tempOutput -Destination $outputPath -Force
                 } finally {
                     if (Test-Path -LiteralPath $tempOutput) { Remove-Item -LiteralPath $tempOutput -Force }
@@ -286,6 +330,29 @@ function Restore-WorkspaceCloth([object]$Context, [object]$Operation) {
     }
 }
 
+function Restore-WorkspaceModelFile([object]$Context, [object]$Operation) {
+    $sourcePath = Resolve-WorkspaceFile $Context.Root ([string]$Operation.Record.Source)
+    if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+        throw "$($B.err_source_missing): $sourcePath"
+    }
+    if ((Get-WorkspaceSha256 $sourcePath) -ne [string]$Operation.Record.SourceSha256) {
+        throw "$($B.err_source_changed): $sourcePath"
+    }
+    if ((Get-WorkspaceSha256 $sourcePath) -ne [string]$Operation.Record.BaselineSha256) {
+        throw "Model source does not match workspace baseline: $($Operation.Record.Source)"
+    }
+    $destination = Resolve-WorkspaceFile $Context.Root ([string]$Operation.Record.Input)
+    $destinationDir = [IO.Path]::GetDirectoryName($destination)
+    New-Item -ItemType Directory -Force -Path $destinationDir | Out-Null
+    $tempPath = "$destination.tmp"
+    try {
+        [IO.File]::Copy($sourcePath, $tempPath, $true)
+        Move-Item -LiteralPath $tempPath -Destination $destination -Force
+    } finally {
+        if (Test-Path -LiteralPath $tempPath) { Remove-Item -LiteralPath $tempPath -Force }
+    }
+}
+
 function Restore-WorkspaceGraniteTexture([object]$Context, [object]$Operation) {
     if (-not (Test-Path -LiteralPath $graniteExe -PathType Leaf)) { throw $B.err_granite_missing }
     if (-not (Test-Path -LiteralPath $texconvExe -PathType Leaf)) { throw $B.err_texconv_missing }
@@ -386,6 +453,7 @@ function Restore-WorkspaceOperations([object]$Context, [object[]]$Operations, [s
                 "new_texture" { Restore-WorkspaceGraniteTexture $Context $operation }
                 "mmat" { Restore-WorkspaceMaterial $Context $operation }
                 "cloth" { Restore-WorkspaceCloth $Context $operation }
+                "model_file" { Restore-WorkspaceModelFile $Context $operation }
                 default { throw "$($B.err_unknown_type): $($operation.Kind)" }
             }
             $ok++
@@ -1107,7 +1175,7 @@ function Update-ClothBoneMap {
     if ($null -eq $script:context) { return }
 
     $characterId = [string]$script:context.Workspace.CharacterId
-    $skeletonPath = Join-Path $script:context.Root "source\data\model\pl\$characterId\$characterId.skeleton"
+    $skeletonPath = Join-Path $script:context.Root "unpack\data\model\pl\$characterId\$characterId.skeleton"
     if (-not (Test-Path -LiteralPath $skeletonPath -PathType Leaf)) { return }
 
     $script:skeletonBones = @(Get-GbfrSkeletonBones $skeletonPath)
@@ -1639,6 +1707,118 @@ function Get-CheckedGridOperations {
     } | ForEach-Object { $_.Tag })
 }
 
+function Get-DroppedModelFiles([string[]]$Paths) {
+    $files = [System.Collections.Generic.List[string]]::new()
+    foreach ($path in @($Paths)) {
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            if ([IO.Path]::GetExtension($path).ToLowerInvariant() -in @(".minfo", ".skeleton", ".mmesh")) {
+                $files.Add([IO.Path]::GetFullPath($path))
+            }
+        } elseif (Test-Path -LiteralPath $path -PathType Container) {
+            foreach ($file in @(Get-ChildItem -LiteralPath $path -File -Recurse -ErrorAction SilentlyContinue)) {
+                if ($file.Extension.ToLowerInvariant() -in @(".minfo", ".skeleton", ".mmesh")) {
+                    $files.Add($file.FullName)
+                }
+            }
+        }
+    }
+    return @($files | Select-Object -Unique)
+}
+
+function Test-DroppedModelFile([string]$Path, [object]$Operation) {
+    $file = Get-Item -LiteralPath $Path
+    if ($file.Length -lt 16) { throw "$($B.model_file_too_small): $Path" }
+    if ($file.Extension.ToLowerInvariant().TrimStart('.') -ne [string]$Operation.FileType) {
+        throw "$($B.model_type_mismatch): $Path"
+    }
+    if ([string]$Operation.FileType -eq "skeleton") {
+        $bones = @(Get-GbfrSkeletonBones $Path)
+        if ($bones.Count -eq 0) { throw "$($B.model_invalid_skeleton): $Path" }
+    }
+}
+
+function Import-DroppedModelFiles([string[]]$Paths) {
+    if ($null -eq $script:context) {
+        [Windows.Forms.MessageBox]::Show($B.model_load_workspace_first, $B.model_import_title, "OK", "Warning") | Out-Null
+        return
+    }
+    if (-not (Resolve-PendingSkeletonEdits)) { return }
+
+    try {
+        $droppedFiles = @(Get-DroppedModelFiles $Paths)
+        if ($droppedFiles.Count -eq 0) {
+            [Windows.Forms.MessageBox]::Show($B.model_no_supported_files, $B.model_import_title, "OK", "Information") | Out-Null
+            return
+        }
+
+        $modelOperations = @($script:context.Operations | Where-Object { [string]$_.Kind -eq "model_file" })
+        $plan = [System.Collections.Generic.List[PSCustomObject]]::new()
+        $usedTargets = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($path in $droppedFiles) {
+            $fileName = [IO.Path]::GetFileName($path)
+            $matches = @($modelOperations | Where-Object {
+                [string]$_.InputLabel -ieq $fileName
+            })
+            if ($matches.Count -eq 0) {
+                Add-Log "[$($B.model_ignored)] $fileName"
+                continue
+            }
+            if ($matches.Count -gt 1) {
+                throw "$($B.model_ambiguous): $fileName"
+            }
+            $operation = $matches[0]
+            if (-not $usedTargets.Add([string]$operation.InputPath)) {
+                throw "$($B.model_duplicate_drop): $fileName"
+            }
+            Test-DroppedModelFile $path $operation
+            $plan.Add([PSCustomObject]@{ Source=$path; Operation=$operation })
+        }
+        if ($plan.Count -eq 0) {
+            [Windows.Forms.MessageBox]::Show($B.model_no_matching_files, $B.model_import_title, "OK", "Information") | Out-Null
+            return
+        }
+
+        $targets = @($plan | ForEach-Object {
+            "- $([IO.Path]::GetFileName($_.Source)) -> $($_.Operation.Record.Input)"
+        }) -join "`r`n"
+        $answer = [Windows.Forms.MessageBox]::Show(
+            "$($B.model_import_confirm)`r`n`r`n$targets",
+            $B.model_import_title, "OKCancel", "Warning"
+        )
+        if ($answer -ne "OK") { return }
+
+        foreach ($item in $plan) {
+            $destination = [string]$item.Operation.InputPath
+            if ([IO.Path]::GetFullPath([string]$item.Source) -ieq [IO.Path]::GetFullPath($destination)) {
+                Add-Log "[$($B.model_ignored)] $([IO.Path]::GetFileName($destination)): $($B.model_same_path)"
+                continue
+            }
+            $destinationDir = [IO.Path]::GetDirectoryName($destination)
+            New-Item -ItemType Directory -Force -Path $destinationDir | Out-Null
+            $tempPath = "$destination.importing"
+            try {
+                [IO.File]::Copy([string]$item.Source, $tempPath, $true)
+                Move-Item -LiteralPath $tempPath -Destination $destination -Force
+            } finally {
+                if (Test-Path -LiteralPath $tempPath) { Remove-Item -LiteralPath $tempPath -Force }
+            }
+            Add-Log "[OK] $($B.model_imported): $([IO.Path]::GetFileName($destination))"
+        }
+        Load-Manifest $txtManifest.Text -PreserveSelection
+        $importedOutputs = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($item in $plan) { $importedOutputs.Add([string]$item.Operation.OutputLabel) | Out-Null }
+        foreach ($row in @($grid.Rows)) {
+            if ($null -ne $row.Tag -and $importedOutputs.Contains([string]$row.Tag.OutputLabel)) {
+                $row.Cells["Selected"].Value = $true
+            }
+        }
+        Update-SelectionSummary
+    } catch {
+        Add-Log "[$($B.failed)] $($B.model_import_title): $($_.Exception.Message)"
+        [Windows.Forms.MessageBox]::Show($_.Exception.Message, $B.model_import_title, "OK", "Error") | Out-Null
+    }
+}
+
 function Load-Manifest([string]$Path, [switch]$PreserveSelection) {
     try {
         $checkedKeys = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -1725,7 +1905,11 @@ $btnBrowse.Add_Click({
 $dropHandler = {
     if ($_.Data.GetDataPresent([Windows.Forms.DataFormats]::FileDrop)) {
         $files = @($_.Data.GetData([Windows.Forms.DataFormats]::FileDrop))
-        if ($files.Count -gt 0) { Load-Manifest $files[0] }
+        if ($files.Count -eq 1 -and [IO.Path]::GetFileName([string]$files[0]) -ieq "manifest.md") {
+            if (Resolve-PendingSkeletonEdits) { Load-Manifest $files[0] }
+        } elseif ($files.Count -gt 0) {
+            Import-DroppedModelFiles $files
+        }
     }
 }.GetNewClosure()
 $form.Add_DragEnter({ if ($_.Data.GetDataPresent([Windows.Forms.DataFormats]::FileDrop)) { $_.Effect = "Copy" } })
@@ -1733,6 +1917,15 @@ $form.Add_DragDrop($dropHandler)
 $txtManifest.AllowDrop = $true
 $txtManifest.Add_DragEnter({ if ($_.Data.GetDataPresent([Windows.Forms.DataFormats]::FileDrop)) { $_.Effect = "Copy" } })
 $txtManifest.Add_DragDrop($dropHandler)
+foreach ($dropControl in @(
+    $tabs, $pageBuild, $grid, $pageBoneCollision, $boneSplit,
+    $boneSplit.Panel1, $boneSplit.Panel2, $boneGrid, $boneCollisionGrid
+)) {
+    if ($null -eq $dropControl) { continue }
+    $dropControl.AllowDrop = $true
+    $dropControl.Add_DragEnter({ if ($_.Data.GetDataPresent([Windows.Forms.DataFormats]::FileDrop)) { $_.Effect = "Copy" } })
+    $dropControl.Add_DragDrop($dropHandler)
+}
 
 $grid.Add_CurrentCellDirtyStateChanged({
     if ($grid.IsCurrentCellDirty -and $grid.CurrentCell.ColumnIndex -eq $grid.Columns["Selected"].Index) {
@@ -1959,6 +2152,7 @@ if ($UiSmokeTest) {
     if (-not $actionColumnsVisible) { throw "Restore/Edit columns are not displayed in the resized build grid" }
     $mmatRows = @($grid.Rows | Where-Object { $null -ne $_.Tag -and [string]$_.Tag.Kind -eq "mmat" })
     $clothRows = @($grid.Rows | Where-Object { $null -ne $_.Tag -and [string]$_.Tag.Kind -eq "cloth" })
+    $modelRows = @($grid.Rows | Where-Object { $null -ne $_.Tag -and [string]$_.Tag.Kind -eq "model_file" })
     $restoreButtons = @($grid.Rows | Where-Object { $_.Cells["Restore"].Value -eq $B.restore_row })
     $mmatEditButtons = @($mmatRows | Where-Object { $_.Cells["Edit"].Value -eq $B.edit })
     $clothEditButtons = @($clothRows | Where-Object { $_.Cells["Edit"].Value -eq $B.edit })
@@ -2003,7 +2197,8 @@ if ($UiSmokeTest) {
         if ((Get-ClothBoneName 0) -ne "Hips (_000)" -or (Get-ClothBoneName 3141) -ne "_c45") {
             throw "Humanoid bone display mapping is incorrect"
         }
-        if (-not $txtSkeletonObject.Text.EndsWith(".skeleton", [StringComparison]::OrdinalIgnoreCase)) {
+        if (-not $txtSkeletonObject.Text.EndsWith(".skeleton", [StringComparison]::OrdinalIgnoreCase) -or
+            $txtSkeletonObject.Text.IndexOf("\unpack\", [StringComparison]::OrdinalIgnoreCase) -lt 0) {
             throw "Skeleton editor has no .skeleton edit object"
         }
         if ($boneGrid.Rows.Count -eq 0 -or $boneCollisionGrid.Rows.Count -eq 0) {
@@ -2046,6 +2241,60 @@ if ($UiSmokeTest) {
         if ($allRecords -lt $fileRecords) { throw "Skeleton overall view has fewer records than file view" }
         $skeletonView = "file:$fileRecords,all:$allRecords,bones:$($boneGrid.Rows.Count)"
     }
+    if ($modelRows.Count -gt 0) {
+        $expectedModelFiles = @($script:context.Workspace.ModelFiles).Count
+        if ($modelRows.Count -ne $expectedModelFiles) {
+            throw "Expected $expectedModelFiles editable model files, found $($modelRows.Count)"
+        }
+        foreach ($modelRow in $modelRows) {
+            $operation = $modelRow.Tag
+            $source = Resolve-WorkspaceFile $script:context.Root ([string]$operation.Record.Source)
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf) -or -not $operation.Available) {
+                throw "Model workspace mapping is incomplete: $($operation.InputLabel)"
+            }
+            if ([string]$operation.FileType -eq "mmesh" -and
+                [string]$operation.Record.Output -notmatch '^build/data/model_streaming/lod0/') {
+                throw "Editable mmesh is not mapped to LOD0: $($operation.Record.Output)"
+            }
+        }
+
+        $sample = @($modelRows | Where-Object { [string]$_.Tag.FileType -eq "skeleton" } | Select-Object -First 1)[0].Tag
+        Test-DroppedModelFile (Resolve-WorkspaceFile $script:context.Root ([string]$sample.Record.Source)) $sample
+        $smokeRelative = ".ui_smoke_model"
+        $smokeRoot = Join-Path $script:context.Root $smokeRelative
+        try {
+            New-Item -ItemType Directory -Force -Path $smokeRoot | Out-Null
+            $inputRelative = ConvertTo-WorkspacePath (Join-Path $smokeRelative "input.$($sample.FileType)")
+            $outputRelative = ConvertTo-WorkspacePath (Join-Path $smokeRelative "output.$($sample.FileType)")
+            $inputPath = Resolve-WorkspaceFile $script:context.Root $inputRelative
+            $sourcePath = Resolve-WorkspaceFile $script:context.Root ([string]$sample.Record.Source)
+            [IO.File]::Copy($sourcePath, $inputPath, $true)
+            $bytes = [IO.File]::ReadAllBytes($inputPath)
+            $bytes[$bytes.Length - 1] = $bytes[$bytes.Length - 1] -bxor 1
+            [IO.File]::WriteAllBytes($inputPath, $bytes)
+            $testRecord = [PSCustomObject]@{
+                Source=[string]$sample.Record.Source; SourceSha256=[string]$sample.Record.SourceSha256
+                Input=$inputRelative; Output=$outputRelative
+                BaselineSha256=[string]$sample.Record.BaselineSha256; FileType=[string]$sample.FileType
+            }
+            $testOperation = [PSCustomObject]@{
+                Kind="model_file"; TypeLabel=$sample.TypeLabel; InputLabel=[IO.Path]::GetFileName($inputPath)
+                OutputLabel=$outputRelative; Available=$true; Changed=$true; Record=$testRecord
+                InputPath=$inputPath; FileType=[string]$sample.FileType
+            }
+            $buildResult = Invoke-WorkspaceBuild $script:context @($testOperation)
+            $outputPath = Resolve-WorkspaceFile $script:context.Root $outputRelative
+            if ($buildResult.Failed -ne 0 -or (Get-WorkspaceSha256 $outputPath) -ne (Get-WorkspaceSha256 $inputPath)) {
+                throw "Model file build copy failed"
+            }
+            $restoreResult = Restore-WorkspaceOperations $script:context @($testOperation)
+            if ($restoreResult.Failed -ne 0 -or (Get-WorkspaceSha256 $inputPath) -ne [string]$sample.Record.BaselineSha256) {
+                throw "Model file restore failed"
+            }
+        } finally {
+            if (Test-Path -LiteralPath $smokeRoot) { Remove-Item -LiteralPath $smokeRoot -Recurse -Force }
+        }
+    }
     $form.ClientSize = New-Object Drawing.Size(800, 560)
     $form.PerformLayout()
     $tabs.PerformLayout()
@@ -2061,7 +2310,7 @@ if ($UiSmokeTest) {
         throw "Skeleton editor compact layout overlap: page=$($pageBoneCollision.ClientSize), object=$($txtSkeletonObject.Bounds), file=$($cmbBoneFile.Bounds), search=$($txtBoneSearch.Bounds), save=$($btnSaveBoneCollisions.Bounds), split=$($boneSplit.Bounds)"
     }
     $skeletonTabSelected = if ($null -ne $clhEditorRow) { $tabs.SelectedTab -eq $pageBoneCollision } else { $true }
-    Write-Host "UI smoke: layout=$layoutOk, actionColumns=$actionColumnsVisible, rows=$($grid.Rows.Count), restore=$($restoreButtons.Count), bulkRestore=$($btnRestore.Text -eq $B.restore_selected), mmatEdit=$($mmatEditButtons.Count), clothEdit=$($clothEditButtons.Count), mmatEntries=$($mmatGrid.Rows.Count), mmatTab=$mmatTabSelected, clothTab=$clothTabSelected, clothViews=$($clothViews -join ','), clothBones=$($clothBoneViews -join ','), skeletonTab=$skeletonTabSelected, skeletonLayout=$skeletonCompactLayout, skeleton=$skeletonView"
+    Write-Host "UI smoke: layout=$layoutOk, actionColumns=$actionColumnsVisible, rows=$($grid.Rows.Count), restore=$($restoreButtons.Count), modelFiles=$($modelRows.Count), bulkRestore=$($btnRestore.Text -eq $B.restore_selected), mmatEdit=$($mmatEditButtons.Count), clothEdit=$($clothEditButtons.Count), mmatEntries=$($mmatGrid.Rows.Count), mmatTab=$mmatTabSelected, clothTab=$clothTabSelected, clothViews=$($clothViews -join ','), clothBones=$($clothBoneViews -join ','), skeletonTab=$skeletonTabSelected, skeletonLayout=$skeletonCompactLayout, skeleton=$skeletonView"
     $form.Close()
     exit 0
 }

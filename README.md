@@ -37,7 +37,7 @@ explore_output/
   manifest.md                 资源报告，也是构建器入口
   workspace.json              路径映射与初始文件哈希
   source/data/                原始资源副本，只作封包模板
-  unpack/data/                可编辑的 DDS、*.mmat.json 与 cloth *.bxm.xml
+  unpack/data/                可编辑的 DDS、JSON、XML 与模型二进制
   build/data/                 最终 Mod 输出
 ```
 
@@ -48,6 +48,7 @@ explore_output/
 - 根据 mmat 的 `A4` 哈希，从 `data/granite/{2k,4k}/gts` 提取 `albd/msk1/msk2/nrml` 并转换为 DDS。
 - 将 `data/model/**/vars/*.mmat` 解码为 `*.mmat.json`。
 - 将角色 cloth 基础组、碰撞体、动作覆盖和重置表解码为 `*.bxm.xml`。
+- 将 pl/fp/wp 的 `.minfo`、`.skeleton` 与 LOD0 `.mmesh` 原样复制到 `unpack`，登记为可恢复、可构建的模型文件。
 - 记录中间态 SHA-256，用于识别真实修改。
 
 Granite DDS 输出到 `unpack/data/granite/{2k,4k}/`，格式为：
@@ -74,11 +75,16 @@ unpack/data/texture/4k/foo_0.dds
 unpack/data/granite/2k/foo_albd.dds
 unpack/data/granite/4k/foo_nrml.dds
 unpack/data/model/pl/pl1400/vars/0.mmat.json
+unpack/data/model/pl/pl1400/pl1400.minfo
+unpack/data/model/pl/pl1400/pl1400.skeleton
+unpack/data/model_streaming/lod0/pl1400.mmesh
 unpack/data/pl/pl1400/cloth/pl1400_0_0_clp.bxm.xml
 unpack/data/pl/pl1400/pl1400_0002_0_seq_edit_cloth.bxm.xml
 ```
 
 `source/` 是不可编辑的原始模板。删除 `unpack/` 中间文件后，该项会标为“缺少输入”：不能构建，但可用“恢复”从原始模板重新生成。
+
+Blender 插件导出完成后，可把整个 `_Exported_MInfo` 文件夹或其中的 `.minfo/.skeleton/.mmesh` 直接拖入编辑封包工具。工具按文件名匹配当前角色的 pl/fp/wp 目标，确认后覆盖对应 `unpack` 文件；插件生成的 `.json` 不进入 Mod 工作区。`.mmesh` 固定写入 `data/model_streaming/lod0/`，LOD1-3 仍只保留在 `source`，供后续分析或可视化使用。
 
 ### `vars/*.mmat` 编号与配色
 
@@ -115,6 +121,7 @@ Granite DDS 是可编辑中间态，构建器不会修改 GTS/GTP。对于 `sour
 - `skeleton 编辑` 以主体 `.skeleton` 的骨骼层级为入口，按当前 CLH 文件或全部 CLH 文件汇总该骨骼上的碰撞参数；修改会写回各自的 `unpack/*.clh.bxm.xml`，再由构建页封回 BXM，`.skeleton` 本身不会被改写。
 - 构建列表中点击 CLH 行的“编辑”会直接进入 `skeleton 编辑` 并选中该 CLH；也可以直接打开分页查看全部文件模式。
 - 分别列出已有贴图封回、新建贴图、mmat 编码与 cloth BXM 编码操作。
+- 列出 `.minfo/.skeleton/LOD0 .mmesh` 模型项，支持拖入 Blender 导出结果、修改检测、逐项恢复及原样构建。
 - 默认勾选哈希已变化的中间文件。
 - 允许手动勾选未修改项目以强制构建。
 - “刷新列表”会重新读取当前 DDS/JSON/XML 状态，并保留手动勾选。
@@ -146,7 +153,7 @@ data/pl/<角色>/<角色>_<动作>_<变体>_seq_edit_cloth.bxm
 
 `_clh` 解码后的根节点是 `CLOTH_AT`，其中每个 `ClothCollision` 有独立的 `id_`、`p1/p2`、偏移、半径、权重和 capsule 链接。碰撞 ID 可能不连续，动作文件必须按真实 `id_` 引用，不能用列表行号替代。
 
-CLP 的 `no/noUp/noDown/noSide/noPoly/noFix` 与 CLH 的 `p1/p2` 使用的是**骨骼名编码**，不是 `.skeleton` 的骨骼数组下标，也不是 FlatBuffers 中的 `BoneId`。数值按十六进制转换后就是 Blender 插件导入的原始骨骼名：例如 `3141 = 0xC45` 对应 `_c45`，`545 = 0x221` 对应 `_221`。因此每个碰撞体确实通过 `p1/p2` 引用了主体骨架；但 `p1 == p2` 或 `p1 != p2` 本身不能直接判断碰撞形状，还要结合 `offset1/offset2` 与 `capsule` 字段。编辑器只使用 `source/data/model/pl/<角色>/<角色>.skeleton` 验证并显示名称，不混用会出现重名的 fp/wp 骨架；未命中的引用会明确显示“未在主体骨架中找到”。
+CLP 的 `no/noUp/noDown/noSide/noPoly/noFix` 与 CLH 的 `p1/p2` 使用的是**骨骼名编码**，不是 `.skeleton` 的骨骼数组下标，也不是 FlatBuffers 中的 `BoneId`。数值按十六进制转换后就是 Blender 插件导入的原始骨骼名：例如 `3141 = 0xC45` 对应 `_c45`，`545 = 0x221` 对应 `_221`。因此每个碰撞体确实通过 `p1/p2` 引用了主体骨架；但 `p1 == p2` 或 `p1 != p2` 本身不能直接判断碰撞形状，还要结合 `offset1/offset2` 与 `capsule` 字段。编辑器使用 `unpack/data/model/pl/<角色>/<角色>.skeleton` 验证并显示名称，因此拖入 Blender 导出的新骨架后会立即刷新；它不会混用可能出现重名的 fp/wp 骨架，未命中的引用会明确显示“未在主体骨架中找到”。
 
 当前 `pl1400` 样本中，CLP 的 175 个不同骨骼引用与 CLH 的 38 个不同端点引用都能在 `pl1400.skeleton` 中找到。骨骼名 `_xxx` 是游戏原始标识；Blender 插件中的“Translate Bones”只会把一部分通用人体骨骼另行翻译为 `Hips/Chest/Head` 等便于阅读的别名，cloth 专用骨骼通常仍保留 `_c45` 这类名字。
 

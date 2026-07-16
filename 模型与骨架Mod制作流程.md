@@ -134,7 +134,15 @@ Blender 网格
 
 ## 5. 最终 Mod 路径
 
-插件导出的文件需要恢复到游戏原始路径，而不是原样复制 `_Exported_MInfo` 文件夹。
+插件导出完成后，将整个 `_Exported_MInfo` 文件夹拖入 `GBFR编辑封包工具.bat` 打开的窗口。构建器会忽略调试 JSON，并按文件名把三个二进制文件覆盖到当前工作区：
+
+```text
+unpack/data/model/pl/pl1400/pl1400.minfo
+unpack/data/model/pl/pl1400/pl1400.skeleton
+unpack/data/model_streaming/lod0/pl1400.mmesh
+```
+
+构建列表会将它们标记为已修改并自动勾选。需要撤销某个导出文件时，使用该行的“恢复”；构建后文件会恢复到游戏原始路径，而不是原样复制 `_Exported_MInfo` 文件夹。
 
 ```text
 Mod目录/
