@@ -1,6 +1,7 @@
 #include <gbfr/core/log.hpp>
 #include <gbfr/core/workspace.hpp>
 #include <gbfr/formats/model.hpp>
+#include <gbfr/formats/material.hpp>
 #include <gbfr/formats/cloth.hpp>
 #include <gbfr/render/d3d11_context.hpp>
 #include <gbfr/render/preview_renderer.hpp>
@@ -198,6 +199,19 @@ void launch_legacy_builder() {
 
 void update_collision_debug();
 
+std::filesystem::path resolve_base_albedo(const std::filesystem::path& workspace_root,const std::string& texture_name) {
+    if(texture_name.empty()||gbfr::is_color_variant_texture(texture_name)) return {};
+    const auto unpack=workspace_root/L"unpack";
+    const std::array directories={unpack/L"data/granite/2k",unpack/L"data/texture/2k",unpack/L"data/granite/4k",unpack/L"data/texture/4k"};
+    const auto wide_name=wide(texture_name);
+    const std::array filenames={wide_name+L".dds",wide_name+L"_0.dds"};
+    for(const auto& directory:directories) for(const auto& filename:filenames) {
+        const auto candidate=directory/filename;
+        if(std::filesystem::is_regular_file(candidate)) return candidate;
+    }
+    return {};
+}
+
 void load_selected_preview() {
     if (!g_workspace || !g_selected_asset || !g_preview) return;
     const auto& selected = g_workspace->assets()[*g_selected_asset];
@@ -218,20 +232,24 @@ void load_selected_preview() {
         const auto info = gbfr::load_minfo(minfo);
         g_skeleton = gbfr::load_skeleton(skeleton_path);
         const auto mesh = gbfr::load_mmesh(mesh_path, info);
-        std::filesystem::path albedo;
-        const auto granite = g_workspace->root() / L"unpack/data/granite/2k";
-        if (std::filesystem::is_directory(granite)) for (const auto& file : std::filesystem::recursive_directory_iterator(granite)) {
-            const auto name = file.path().filename().wstring();
-            if (file.is_regular_file() && file.path().extension() == L".dds" && name.starts_with(stem.wstring() + L"_") && name.find(L"_albd") != std::wstring::npos) { albedo = file.path(); break; }
+        const auto material_json=minfo.parent_path()/L"vars/0.mmat.json";
+        if(!std::filesystem::is_regular_file(material_json)) throw std::runtime_error("找不到 vars/0.mmat.json");
+        const auto materials=gbfr::load_mmat_json(material_json);
+        std::vector<std::filesystem::path> material_albedos(materials.entries.size());
+        std::size_t resolved_albedos{};
+        for(std::size_t i=0;i<materials.entries.size();++i) {
+            material_albedos[i]=resolve_base_albedo(g_workspace->root(),materials.entries[i].albedo_name);
+            if(!material_albedos[i].empty()) ++resolved_albedos;
         }
-        if (!g_preview->load(mesh, g_skeleton, albedo)) throw std::runtime_error("GPU 预览资源创建失败");
+        for(const auto& chunk:mesh.chunks) if(chunk.material>=materials.entries.size()) throw std::runtime_error("minfo MaterialID 超出 0.mmat 条目范围");
+        if (!g_preview->load(mesh, g_skeleton, material_albedos)) throw std::runtime_error("GPU 预览资源创建失败");
         g_preview->frame(g_camera);
         g_clh_files.clear(); g_clp_files.clear(); g_selected_collision=-1; g_selected_bone=-1; g_selected_clh=0;
         for(const auto& asset:g_workspace->assets()) if(asset.kind==gbfr::AssetKind::cloth&&asset.available) {
             try { if(asset.subtype=="clh") g_clh_files.push_back({asset.input,gbfr::load_clh(asset.input)}); else if(asset.subtype=="clp") g_clp_files.push_back({asset.input,gbfr::load_clp(asset.input)}); } catch(const std::exception& error) { gbfr::Log::write(gbfr::LogLevel::warning,std::string("cloth 跳过：")+error.what()); }
         }
         update_collision_debug();
-        gbfr::Log::write(gbfr::LogLevel::info, "预览已加载：" + std::to_string(mesh.vertices.size()) + " 顶点，" + std::to_string(mesh.indices.size()/3) + " 三角形，" + std::to_string(g_skeleton.bones.size()) + " 骨骼");
+        gbfr::Log::write(gbfr::LogLevel::info, "预览已加载：" + std::to_string(mesh.vertices.size()) + " 顶点，" + std::to_string(mesh.indices.size()/3) + " 三角形，" + std::to_string(mesh.chunks.size()) + " 材质分段，0.mmat 基础色 " + std::to_string(resolved_albedos) + "/" + std::to_string(materials.entries.size()));
     } catch (const std::exception& error) { gbfr::Log::write(gbfr::LogLevel::error, std::string("预览加载失败：") + error.what()); }
 }
 

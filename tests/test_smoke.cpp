@@ -1,6 +1,7 @@
 #include <gbfr/core/log.hpp>
 #include <gbfr/core/workspace.hpp>
 #include <gbfr/formats/model.hpp>
+#include <gbfr/formats/material.hpp>
 #include <gbfr/formats/cloth.hpp>
 #include <nlohmann/json.hpp>
 
@@ -14,6 +15,8 @@ int main() {
     gbfr::Log::clear();
     gbfr::Log::write(gbfr::LogLevel::info, "smoke");
     if (gbfr::Log::snapshot().size() != 1) return 1;
+    if(!gbfr::is_color_variant_texture("pl1400_body_lod0_c01_albd")||
+       gbfr::is_color_variant_texture("pl1400_body_lod0_albd"))return 14;
 
     const fs::path root = fs::temp_directory_path() / L"gbfr_workspace_test";
     fs::remove_all(root);
@@ -58,6 +61,10 @@ int main() {
         const auto skeleton = gbfr::load_skeleton(model_root / L"pl1400.skeleton");
         const auto mesh = gbfr::load_mmesh(integration.parent_path() / L"unpack/data/model_streaming/lod0/pl1400.mmesh", minfo);
         if (mesh.vertices.size() != minfo.vertex_count || mesh.indices.size() != minfo.index_count || skeleton.bones.empty()) return 7;
+        const auto materials=gbfr::load_mmat_json(model_root/L"vars/0.mmat.json");
+        if(materials.entries.size()!=11||materials.entries[0].albedo_name!="pl1400_body01_lod0_albd")return 11;
+        for(const auto& entry:materials.entries)if(gbfr::is_color_variant_texture(entry.albedo_name))return 12;
+        for(const auto& chunk:mesh.chunks)if(chunk.material>=materials.entries.size()||chunk.offset+chunk.count>mesh.indices.size())return 13;
         const auto cloth_root=integration.parent_path()/L"unpack/data/pl/pl1400/cloth";
         const auto clh_path=cloth_root/L"pl1400_0_0_clh.bxm.xml",clp_path=cloth_root/L"pl1400_0_0_clp.bxm.xml";
         const auto clh=gbfr::load_clh(clh_path);const auto clp=gbfr::load_clp(clp_path);
