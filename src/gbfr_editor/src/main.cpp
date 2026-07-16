@@ -53,7 +53,7 @@ std::filesystem::path g_loaded_texture;
 gbfr::OrbitCamera g_camera;
 gbfr::SkeletonAsset g_skeleton;
 bool g_show_mesh = true;
-bool g_wireframe = false;
+gbfr::PreviewShadingMode g_preview_shading = gbfr::PreviewShadingMode::lit;
 bool g_show_skeleton = true;
 struct ClhFile { std::filesystem::path path; gbfr::ClhAsset data; };
 struct ClpFile { std::filesystem::path path; gbfr::ClpAsset data; };
@@ -510,8 +510,9 @@ void draw_editor_shell() {
 
     ImGui::Begin("Viewport");
     if(g_preview_mode==PreviewMode::model){
-        ImGui::Checkbox("网格", &g_show_mesh); ImGui::SameLine();
-        ImGui::Checkbox("线框", &g_wireframe); ImGui::SameLine();
+        ImGui::Checkbox("模型", &g_show_mesh); ImGui::SameLine();
+        const char* modes[]={"无光照","柔和光照","线框"};int mode=static_cast<int>(g_preview_shading);ImGui::SetNextItemWidth(120);
+        if(ImGui::Combo("显示模式",&mode,modes,3))g_preview_shading=static_cast<gbfr::PreviewShadingMode>(mode);ImGui::SameLine();
         ImGui::Checkbox("骨架", &g_show_skeleton); ImGui::SameLine();
         if (g_preview && g_preview->has_model() && ImGui::Button("取景")) g_preview->frame(g_camera);
     }else if(g_preview_mode==PreviewMode::texture&&g_preview&&g_preview->texture_image()){
@@ -520,14 +521,20 @@ void draw_editor_shell() {
     ImVec2 available = ImGui::GetContentRegionAvail();
     if (g_preview&&g_preview_mode==PreviewMode::model&&available.x > 1 && available.y > 1) {
         g_preview->resize(static_cast<unsigned>(available.x), static_cast<unsigned>(available.y));
-        g_preview->render(g_camera, g_show_mesh, g_wireframe, g_show_skeleton);
+        g_preview->render(g_camera, g_show_mesh, g_preview_shading, g_show_skeleton);
         const ImVec2 image_origin=ImGui::GetCursorScreenPos();
         ImGui::Image(reinterpret_cast<ImTextureID>(g_preview->image()), available);
         if (ImGui::IsItemHovered()) {
             ImGuiIO& io = ImGui::GetIO();
             if (ImGui::IsMouseDragging(ImGuiMouseButton_Left)) { g_camera.yaw += io.MouseDelta.x * .008f; g_camera.pitch = std::clamp(g_camera.pitch + io.MouseDelta.y * .008f, -1.5f, 1.5f); }
             if (io.MouseWheel != 0) g_camera.distance = std::max(.02f, g_camera.distance * std::pow(.88f, io.MouseWheel));
-            if (ImGui::IsMouseDragging(ImGuiMouseButton_Middle)) { const float scale = g_camera.distance * .0015f; g_camera.target.x -= io.MouseDelta.x * scale; g_camera.target.y += io.MouseDelta.y * scale; }
+            if (ImGui::IsMouseDragging(ImGuiMouseButton_Middle)) {
+                const float scale=g_camera.distance*.0015f,sy=std::sin(g_camera.yaw),cy=std::cos(g_camera.yaw),sp=std::sin(g_camera.pitch),cp=std::cos(g_camera.pitch);
+                const gbfr::Vec3 right{-cy,0,sy},up{-sp*sy,cp,-sp*cy};
+                g_camera.target.x+=(right.x*io.MouseDelta.x-up.x*io.MouseDelta.y)*scale;
+                g_camera.target.y+=(right.y*io.MouseDelta.x-up.y*io.MouseDelta.y)*scale;
+                g_camera.target.z+=(right.z*io.MouseDelta.x-up.z*io.MouseDelta.y)*scale;
+            }
             if (g_show_skeleton && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
                 const float mx=io.MousePos.x-image_origin.x,my=io.MousePos.y-image_origin.y;float best=144.0f;int picked=-1;
                 for(const auto& bone:g_skeleton.bones){gbfr::Vec2 point{};if(!g_preview->project(bone.world_position,g_camera,point))continue;const float dx=point.x-mx,dy=point.y-my,distance=dx*dx+dy*dy;if(distance<best){best=distance;picked=cloth_bone_id(bone.name);}}

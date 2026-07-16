@@ -6,7 +6,8 @@
 #include <vector>
 
 namespace gbfr {
-struct OrbitCamera { float yaw{3.14159f}, pitch{0.15f}, distance{4.0f}; Vec3 target{0,1,0}; };
+struct OrbitCamera { float yaw{0.0f}, pitch{0.12f}, distance{4.0f}; Vec3 target{0,1,0}; };
+enum class PreviewShadingMode { unlit, lit, wireframe };
 
 class PreviewRenderer {
 public:
@@ -17,7 +18,7 @@ public:
     void clear();
     void set_collision_lines(const std::vector<Vec3>& points);
     void resize(unsigned width, unsigned height);
-    void render(const OrbitCamera& camera, bool show_mesh, bool wireframe, bool show_skeleton);
+    void render(const OrbitCamera& camera, bool show_mesh, PreviewShadingMode shading, bool show_skeleton);
     void frame(OrbitCamera& camera) const;
     bool project(Vec3 world, const OrbitCamera& camera, Vec2& screen) const;
     ID3D11ShaderResourceView* image() const noexcept { return color_srv_.Get(); }
@@ -36,7 +37,7 @@ private:
     };
     bool load_dds(const std::filesystem::path& path,
                   Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>& output,
-                  unsigned* width = nullptr, unsigned* height = nullptr);
+                  unsigned* width = nullptr, unsigned* height = nullptr, bool display_encoded = false);
     ID3D11Device* device_{};
     ID3D11DeviceContext* context_{};
     unsigned width_{1}, height_{1}, texture_width_{}, texture_height_{}, index_count_{}, line_vertex_count_{};

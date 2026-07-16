@@ -75,7 +75,9 @@ int main() {
         std::vector<fs::path> preview_materials(materials.entries.size(),dds);
         gbfr::OrbitCamera camera;
         if(!preview.load(mesh,skeleton,preview_materials))return 17;
-        preview.resize(320,320);preview.frame(camera);preview.render(camera,true,false,true);context->Flush();
+        preview.resize(320,320);preview.frame(camera);
+        for(const auto mode:{gbfr::PreviewShadingMode::unlit,gbfr::PreviewShadingMode::lit,gbfr::PreviewShadingMode::wireframe})preview.render(camera,true,mode,true);
+        context->Flush();
         if(FAILED(device->GetDeviceRemovedReason()))return 18;
         const auto cloth_root=integration.parent_path()/L"unpack/data/pl/pl1400/cloth";
         const auto clh_path=cloth_root/L"pl1400_0_0_clh.bxm.xml",clp_path=cloth_root/L"pl1400_0_0_clp.bxm.xml";
