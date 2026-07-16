@@ -26,6 +26,7 @@
 #include <unordered_map>
 #include <vector>
 #include <array>
+#include <cctype>
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
 
@@ -36,6 +37,19 @@ std::unique_ptr<gbfr::Workspace> g_workspace;
 std::string g_imgui_ini;
 std::optional<std::size_t> g_selected_asset;
 bool g_changed_only = false;
+enum class AssetFunction { all, model, texture, material, cloth };
+enum class PreviewMode { none, model, texture };
+struct ModelPreviewKey {
+    std::filesystem::path minfo;
+    std::filesystem::path skeleton;
+    std::filesystem::path mesh;
+    bool operator==(const ModelPreviewKey&) const = default;
+};
+AssetFunction g_asset_function = AssetFunction::all;
+std::array<char,256> g_asset_search{};
+PreviewMode g_preview_mode = PreviewMode::none;
+std::optional<ModelPreviewKey> g_loaded_model;
+std::filesystem::path g_loaded_texture;
 gbfr::OrbitCamera g_camera;
 gbfr::SkeletonAsset g_skeleton;
 bool g_show_mesh = true;
@@ -102,6 +116,8 @@ bool load_workspace(const std::filesystem::path& path) {
     try {
         g_workspace = std::make_unique<gbfr::Workspace>(gbfr::Workspace::load(path));
         g_selected_asset.reset();
+        g_asset_function=AssetFunction::all;g_asset_search.fill('\0');
+        g_preview_mode=PreviewMode::none;g_loaded_model.reset();g_loaded_texture.clear();
         g_skeleton.bones.clear(); g_clh_files.clear(); g_clp_files.clear();
         if(g_preview) g_preview->clear();
         const auto settings_directory=g_workspace->root()/L".gbfr";
@@ -179,11 +195,14 @@ void poll_workspace_extraction() {
     load_workspace(workspace);
 }
 
+bool load_model_preview(std::size_t index,bool force=false);
+
 void run_selected_model_action(bool restore) {
     if (!g_workspace || !g_selected_asset) return;
     try {
         if (restore) g_workspace->restore_model(*g_selected_asset);
         else g_workspace->build_model(*g_selected_asset);
+        if(restore) load_model_preview(*g_selected_asset,true);
         gbfr::Log::write(gbfr::LogLevel::info, restore ? "模型文件已恢复" : "模型文件已写入 build");
     } catch (const std::exception& error) {
         gbfr::Log::write(gbfr::LogLevel::error, error.what());
@@ -212,27 +231,33 @@ std::filesystem::path resolve_base_albedo(const std::filesystem::path& workspace
     return {};
 }
 
-void load_selected_preview() {
-    if (!g_workspace || !g_selected_asset || !g_preview) return;
-    const auto& selected = g_workspace->assets()[*g_selected_asset];
-    if (selected.kind != gbfr::AssetKind::model) return;
+ModelPreviewKey resolve_model_preview_key(const gbfr::WorkspaceAsset& selected) {
+    if(!g_workspace||selected.kind!=gbfr::AssetKind::model) throw std::runtime_error("选中项不是模型文件");
+    ModelPreviewKey key;
+    const auto stem=selected.input.stem();
+    for(const auto& asset:g_workspace->assets()) {
+        if(asset.kind!=gbfr::AssetKind::model||asset.input.stem()!=stem) continue;
+        if(asset.subtype=="minfo") key.minfo=asset.input;
+        else if(asset.subtype=="skeleton") key.skeleton=asset.input;
+        else if(asset.subtype=="mmesh") key.mesh=asset.input;
+    }
+    if(key.minfo.empty()) throw std::runtime_error("找不到同名 minfo");
+    if(key.skeleton.empty()) throw std::runtime_error("找不到同名 skeleton");
+    if(key.mesh.empty()) throw std::runtime_error("找不到同名 LOD0 mmesh");
+    return key;
+}
+
+bool load_model_preview(std::size_t index,bool force) {
+    if (!g_workspace || index>=g_workspace->assets().size() || !g_preview) return false;
+    const auto& selected = g_workspace->assets()[index];
+    if (selected.kind != gbfr::AssetKind::model) return false;
     try {
-        std::filesystem::path minfo;
-        if (selected.subtype == "minfo") minfo = selected.input;
-        else {
-            const auto stem = selected.input.stem();
-            for (const auto& asset : g_workspace->assets()) if (asset.kind == gbfr::AssetKind::model && asset.subtype == "minfo" && asset.input.stem() == stem) { minfo = asset.input; break; }
-        }
-        if (minfo.empty()) throw std::runtime_error("找不到同名 minfo");
-        const auto stem = minfo.stem();
-        const auto skeleton_path = minfo.parent_path() / (stem.wstring() + L".skeleton");
-        std::filesystem::path mesh_path;
-        for (const auto& asset : g_workspace->assets()) if (asset.kind == gbfr::AssetKind::model && asset.subtype == "mmesh" && asset.input.stem() == stem) { mesh_path = asset.input; break; }
-        if (mesh_path.empty()) throw std::runtime_error("找不到同名 LOD0 mmesh");
-        const auto info = gbfr::load_minfo(minfo);
-        g_skeleton = gbfr::load_skeleton(skeleton_path);
-        const auto mesh = gbfr::load_mmesh(mesh_path, info);
-        const auto material_json=minfo.parent_path()/L"vars/0.mmat.json";
+        const auto key=resolve_model_preview_key(selected);
+        if(!force&&g_loaded_model&&*g_loaded_model==key&&g_preview->has_model()) {g_preview_mode=PreviewMode::model;return true;}
+        const auto info = gbfr::load_minfo(key.minfo);
+        const auto skeleton=gbfr::load_skeleton(key.skeleton);
+        const auto mesh = gbfr::load_mmesh(key.mesh, info);
+        const auto material_json=key.minfo.parent_path()/L"vars/0.mmat.json";
         if(!std::filesystem::is_regular_file(material_json)) throw std::runtime_error("找不到 vars/0.mmat.json");
         const auto materials=gbfr::load_mmat_json(material_json);
         std::vector<std::filesystem::path> material_albedos(materials.entries.size());
@@ -242,7 +267,8 @@ void load_selected_preview() {
             if(!material_albedos[i].empty()) ++resolved_albedos;
         }
         for(const auto& chunk:mesh.chunks) if(chunk.material>=materials.entries.size()) throw std::runtime_error("minfo MaterialID 超出 0.mmat 条目范围");
-        if (!g_preview->load(mesh, g_skeleton, material_albedos)) throw std::runtime_error("GPU 预览资源创建失败");
+        if (!g_preview->load(mesh, skeleton, material_albedos)) throw std::runtime_error("GPU 预览资源创建失败");
+        g_skeleton=skeleton;g_loaded_model=key;g_loaded_texture.clear();g_preview_mode=PreviewMode::model;
         g_preview->frame(g_camera);
         g_clh_files.clear(); g_clp_files.clear(); g_selected_collision=-1; g_selected_bone=-1; g_selected_clh=0;
         for(const auto& asset:g_workspace->assets()) if(asset.kind==gbfr::AssetKind::cloth&&asset.available) {
@@ -250,7 +276,47 @@ void load_selected_preview() {
         }
         update_collision_debug();
         gbfr::Log::write(gbfr::LogLevel::info, "预览已加载：" + std::to_string(mesh.vertices.size()) + " 顶点，" + std::to_string(mesh.indices.size()/3) + " 三角形，" + std::to_string(mesh.chunks.size()) + " 材质分段，0.mmat 基础色 " + std::to_string(resolved_albedos) + "/" + std::to_string(materials.entries.size()));
-    } catch (const std::exception& error) { gbfr::Log::write(gbfr::LogLevel::error, std::string("预览加载失败：") + error.what()); }
+        return true;
+    } catch (const std::exception& error) { gbfr::Log::write(gbfr::LogLevel::error, std::string("预览加载失败：") + error.what());return false; }
+}
+
+void preview_asset(std::size_t index) {
+    if(!g_workspace||index>=g_workspace->assets().size()||!g_preview)return;
+    const auto& asset=g_workspace->assets()[index];
+    if(asset.kind==gbfr::AssetKind::model){load_model_preview(index);return;}
+    if(asset.kind==gbfr::AssetKind::texture||asset.kind==gbfr::AssetKind::new_texture){
+        if(!asset.available||asset.input.extension()!=L".dds"){g_preview_mode=PreviewMode::none;return;}
+        if(g_loaded_texture==asset.input&&g_preview->texture_image()){g_preview_mode=PreviewMode::texture;return;}
+        if(g_preview->load_texture_preview(asset.input)){g_loaded_texture=asset.input;g_preview_mode=PreviewMode::texture;gbfr::Log::write(gbfr::LogLevel::info,"DDS 预览已加载："+utf8(asset.input.filename().wstring()));}
+        else {g_preview_mode=PreviewMode::none;gbfr::Log::write(gbfr::LogLevel::error,"DDS 预览加载失败："+utf8(asset.input.wstring()));}
+        return;
+    }
+    g_preview_mode=PreviewMode::none;
+}
+
+bool asset_matches_function(const gbfr::WorkspaceAsset& asset,AssetFunction function) {
+    switch(function){
+    case AssetFunction::all:return true;
+    case AssetFunction::model:return asset.kind==gbfr::AssetKind::model;
+    case AssetFunction::texture:return asset.kind==gbfr::AssetKind::texture||asset.kind==gbfr::AssetKind::new_texture;
+    case AssetFunction::material:return asset.kind==gbfr::AssetKind::material;
+    case AssetFunction::cloth:return asset.kind==gbfr::AssetKind::cloth;
+    }
+    return false;
+}
+
+bool contains_ascii_case_insensitive(std::string value,std::string query) {
+    const auto lower=[](unsigned char c){return static_cast<char>(std::tolower(c));};
+    std::transform(value.begin(),value.end(),value.begin(),lower);std::transform(query.begin(),query.end(),query.begin(),lower);
+    return value.find(query)!=std::string::npos;
+}
+
+bool asset_matches_search(const gbfr::WorkspaceAsset& asset) {
+    if(!g_asset_search[0])return true;
+    const std::string query=g_asset_search.data();
+    return contains_ascii_case_insensitive(utf8(asset.input.filename().wstring()),query)||
+           contains_ascii_case_insensitive(utf8(asset.output.wstring()),query)||
+           contains_ascii_case_insensitive(asset.subtype,query);
 }
 
 gbfr::Vec3 collision_point(int id,const gbfr::Vec4& offset) {
@@ -326,6 +392,7 @@ void build_start_dock_layout(ImGuiID dockspace) {
 void return_to_start() {
     if(!g_imgui_ini.empty()) ImGui::SaveIniSettingsToDisk(g_imgui_ini.c_str());
     g_workspace.reset(); g_selected_asset.reset(); g_skeleton.bones.clear(); g_clh_files.clear(); g_clp_files.clear();
+    g_preview_mode=PreviewMode::none;g_loaded_model.reset();g_loaded_texture.clear();
     g_imgui_ini.clear(); ImGui::GetIO().IniFilename=nullptr; g_start_layout_built=false;
     if(g_preview) g_preview->clear();
 }
@@ -403,6 +470,17 @@ void draw_editor_shell() {
     } else {
         ImGui::Text("%s | 候选 %zu | 已修改 %zu | 缺失 %zu", g_workspace->character_id().c_str(),
                 g_workspace->assets().size(), g_workspace->changed_count(), g_workspace->missing_count());
+        const struct {AssetFunction function;const char* label;} filters[]={
+            {AssetFunction::all,"全部"},{AssetFunction::model,"模型"},{AssetFunction::texture,"贴图"},
+            {AssetFunction::material,"mmat"},{AssetFunction::cloth,"cloth"}};
+        for(std::size_t i=0;i<std::size(filters);++i){
+            const auto count=std::count_if(g_workspace->assets().begin(),g_workspace->assets().end(),[&](const auto& asset){return asset_matches_function(asset,filters[i].function);});
+            const auto label=std::string(filters[i].label)+" ("+std::to_string(count)+")##asset_function_"+std::to_string(i);
+            if(ImGui::RadioButton(label.c_str(),g_asset_function==filters[i].function))g_asset_function=filters[i].function;
+            if(i+1<std::size(filters))ImGui::SameLine();
+        }
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        ImGui::InputTextWithHint("##asset_search","按文件名、子类或输出路径过滤",g_asset_search.data(),g_asset_search.size());
         if (ImGui::BeginTable("assets", 5, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable)) {
         ImGui::TableSetupScrollFreeze(0, 1);
         ImGui::TableSetupColumn("状态", ImGuiTableColumnFlags_WidthFixed, 80);
@@ -414,10 +492,11 @@ void draw_editor_shell() {
         for (std::size_t index = 0; index < g_workspace->assets().size(); ++index) {
             const auto& asset = g_workspace->assets()[index];
             if (g_changed_only && !asset.changed) continue;
+            if (!asset_matches_function(asset,g_asset_function)||!asset_matches_search(asset)) continue;
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
             const std::string id = (asset.changed ? "已修改##" : asset.available ? "未修改##" : "缺失##") + std::to_string(index);
-            if (ImGui::Selectable(id.c_str(), g_selected_asset == index, ImGuiSelectableFlags_SpanAllColumns)) g_selected_asset = index;
+            if (ImGui::Selectable(id.c_str(), g_selected_asset == index, ImGuiSelectableFlags_SpanAllColumns)) {g_selected_asset = index;preview_asset(index);}
             ImGui::TableNextColumn(); ImGui::TextUnformatted(gbfr::asset_kind_name(asset.kind));
             ImGui::TableNextColumn(); ImGui::TextUnformatted(asset.subtype.c_str());
             ImGui::TableNextColumn(); ImGui::TextUnformatted(utf8(asset.input.filename().wstring()).c_str());
@@ -430,12 +509,16 @@ void draw_editor_shell() {
     ImGui::End();
 
     ImGui::Begin("Viewport");
-    ImGui::Checkbox("网格", &g_show_mesh); ImGui::SameLine();
-    ImGui::Checkbox("线框", &g_wireframe); ImGui::SameLine();
-    ImGui::Checkbox("骨架", &g_show_skeleton); ImGui::SameLine();
-    if (g_preview && g_preview->has_model() && ImGui::Button("取景")) g_preview->frame(g_camera);
+    if(g_preview_mode==PreviewMode::model){
+        ImGui::Checkbox("网格", &g_show_mesh); ImGui::SameLine();
+        ImGui::Checkbox("线框", &g_wireframe); ImGui::SameLine();
+        ImGui::Checkbox("骨架", &g_show_skeleton); ImGui::SameLine();
+        if (g_preview && g_preview->has_model() && ImGui::Button("取景")) g_preview->frame(g_camera);
+    }else if(g_preview_mode==PreviewMode::texture&&g_preview&&g_preview->texture_image()){
+        ImGui::Text("%s  |  %u x %u",utf8(g_loaded_texture.filename().wstring()).c_str(),g_preview->texture_width(),g_preview->texture_height());
+    }
     ImVec2 available = ImGui::GetContentRegionAvail();
-    if (g_preview && available.x > 1 && available.y > 1) {
+    if (g_preview&&g_preview_mode==PreviewMode::model&&available.x > 1 && available.y > 1) {
         g_preview->resize(static_cast<unsigned>(available.x), static_cast<unsigned>(available.y));
         g_preview->render(g_camera, g_show_mesh, g_wireframe, g_show_skeleton);
         const ImVec2 image_origin=ImGui::GetCursorScreenPos();
@@ -451,6 +534,13 @@ void draw_editor_shell() {
                 if(picked>=0){g_selected_bone=picked;g_all_bones=false;update_collision_debug();}
             }
         }
+    }else if(g_preview&&g_preview_mode==PreviewMode::texture&&g_preview->texture_image()&&available.x>1&&available.y>1){
+        const float width=static_cast<float>(g_preview->texture_width()),height=static_cast<float>(g_preview->texture_height());
+        const float scale=std::min(available.x/width,available.y/height);const ImVec2 image_size{width*scale,height*scale};
+        const ImVec2 cursor=ImGui::GetCursorPos();ImGui::SetCursorPos({cursor.x+(available.x-image_size.x)*.5f,cursor.y+(available.y-image_size.y)*.5f});
+        ImGui::Image(reinterpret_cast<ImTextureID>(g_preview->texture_image()),image_size);
+    }else{
+        ImGui::TextUnformatted("当前对象没有可用预览");
     }
     ImGui::End();
 
@@ -461,7 +551,7 @@ void draw_editor_shell() {
         ImGui::TextWrapped("%s", utf8(asset.input.wstring()).c_str());
         ImGui::Separator();
         if (asset.kind == gbfr::AssetKind::model) {
-            if (ImGui::Button("加载预览")) load_selected_preview();
+            if (ImGui::Button("重新加载预览")) load_model_preview(*g_selected_asset,true);
             ImGui::SameLine();
             if (ImGui::Button("写入 build")) run_selected_model_action(false);
             ImGui::SameLine();

@@ -88,10 +88,19 @@ bool PreviewRenderer::load(const MeshAsset& mesh,const SkeletonAsset& skeleton,c
     return true;
 }
 
+bool PreviewRenderer::load_texture_preview(const fs::path& dds) {
+    ComPtr<ID3D11ShaderResourceView> texture;
+    unsigned width{},height{};
+    if(!load_dds(dds,texture,&width,&height)) return false;
+    texture_preview_srv_=std::move(texture);texture_width_=width;texture_height_=height;
+    return true;
+}
+
 void PreviewRenderer::clear() {
     index_count_=0; line_vertex_count_=0; collision_vertex_count_=0;
     vertices_.Reset(); indices_.Reset(); lines_.Reset(); collision_lines_.Reset();
     draw_ranges_.clear(); material_albedos_.clear();
+    texture_preview_srv_.Reset();texture_width_=0;texture_height_=0;
 }
 
 void PreviewRenderer::set_collision_lines(const std::vector<Vec3>& points) {
@@ -101,17 +110,24 @@ void PreviewRenderer::set_collision_lines(const std::vector<Vec3>& points) {
     if(!lines.empty()) create_buffer(device_,lines,D3D11_BIND_VERTEX_BUFFER,collision_lines_);
 }
 
-bool PreviewRenderer::load_dds(const fs::path& path,ComPtr<ID3D11ShaderResourceView>& output) {
+bool PreviewRenderer::load_dds(const fs::path& path,ComPtr<ID3D11ShaderResourceView>& output,unsigned* output_width,unsigned* output_height) {
     std::ifstream stream(path,std::ios::binary|std::ios::ate); if(!stream) return false; const auto file_size=stream.tellg(); if(file_size<148) return false;
     std::vector<std::byte> bytes(static_cast<std::size_t>(file_size));stream.seekg(0);stream.read(reinterpret_cast<char*>(bytes.data()),file_size);
     auto u32=[&](std::size_t p){std::uint32_t v{};std::memcpy(&v,bytes.data()+p,4);return v;};
     if(std::memcmp(bytes.data(),"DDS ",4)!=0||std::memcmp(bytes.data()+84,"DX10",4)!=0) return false;
     const UINT height=u32(12),width=u32(16),mips=std::max(1u,u32(28)); const auto format=static_cast<DXGI_FORMAT>(u32(128));
-    if(format!=DXGI_FORMAT_BC7_UNORM&&format!=DXGI_FORMAT_BC7_UNORM_SRGB&&format!=DXGI_FORMAT_BC5_UNORM&&format!=DXGI_FORMAT_BC5_SNORM) return false;
+    UINT block_bytes{};
+    switch(format){
+    case DXGI_FORMAT_BC1_UNORM:case DXGI_FORMAT_BC1_UNORM_SRGB:case DXGI_FORMAT_BC4_UNORM:case DXGI_FORMAT_BC4_SNORM:block_bytes=8;break;
+    case DXGI_FORMAT_BC2_UNORM:case DXGI_FORMAT_BC2_UNORM_SRGB:case DXGI_FORMAT_BC3_UNORM:case DXGI_FORMAT_BC3_UNORM_SRGB:
+    case DXGI_FORMAT_BC5_UNORM:case DXGI_FORMAT_BC5_SNORM:case DXGI_FORMAT_BC7_UNORM:case DXGI_FORMAT_BC7_UNORM_SRGB:block_bytes=16;break;
+    default:return false;
+    }
     D3D11_TEXTURE2D_DESC desc{};desc.Width=width;desc.Height=height;desc.MipLevels=mips;desc.ArraySize=1;desc.Format=format;desc.SampleDesc.Count=1;desc.BindFlags=D3D11_BIND_SHADER_RESOURCE;
     std::vector<D3D11_SUBRESOURCE_DATA> levels;levels.reserve(mips);std::size_t offset=148;UINT w=width,h=height;
-    for(UINT i=0;i<mips;++i){const UINT row=std::max(1u,(w+3)/4)*16;const UINT size=row*std::max(1u,(h+3)/4);if(offset+size>bytes.size())return false;levels.push_back({bytes.data()+offset,row,size});offset+=size;w=std::max(1u,w/2);h=std::max(1u,h/2);}
-    ComPtr<ID3D11Texture2D> texture;if(FAILED(device_->CreateTexture2D(&desc,levels.data(),&texture)))return false;return SUCCEEDED(device_->CreateShaderResourceView(texture.Get(),nullptr,&output));
+    for(UINT i=0;i<mips;++i){const UINT row=std::max(1u,(w+3)/4)*block_bytes;const UINT size=row*std::max(1u,(h+3)/4);if(offset+size>bytes.size())return false;levels.push_back({bytes.data()+offset,row,size});offset+=size;w=std::max(1u,w/2);h=std::max(1u,h/2);}
+    ComPtr<ID3D11Texture2D> texture;if(FAILED(device_->CreateTexture2D(&desc,levels.data(),&texture))||FAILED(device_->CreateShaderResourceView(texture.Get(),nullptr,&output)))return false;
+    if(output_width)*output_width=width;if(output_height)*output_height=height;return true;
 }
 
 void PreviewRenderer::frame(OrbitCamera& camera) const { camera.target={(bounds_min_.x+bounds_max_.x)*.5f,(bounds_min_.y+bounds_max_.y)*.5f,(bounds_min_.z+bounds_max_.z)*.5f};const float dx=bounds_max_.x-bounds_min_.x,dy=bounds_max_.y-bounds_min_.y,dz=bounds_max_.z-bounds_min_.z;camera.distance=std::max(0.2f,std::sqrt(dx*dx+dy*dy+dz*dz)*0.85f); }

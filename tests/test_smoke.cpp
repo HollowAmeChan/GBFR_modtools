@@ -3,7 +3,9 @@
 #include <gbfr/formats/model.hpp>
 #include <gbfr/formats/material.hpp>
 #include <gbfr/formats/cloth.hpp>
+#include <gbfr/render/preview_renderer.hpp>
 #include <nlohmann/json.hpp>
+#include <wrl/client.h>
 
 #include <filesystem>
 #include <fstream>
@@ -65,6 +67,11 @@ int main() {
         if(materials.entries.size()!=11||materials.entries[0].albedo_name!="pl1400_body01_lod0_albd")return 11;
         for(const auto& entry:materials.entries)if(gbfr::is_color_variant_texture(entry.albedo_name))return 12;
         for(const auto& chunk:mesh.chunks)if(chunk.material>=materials.entries.size()||chunk.offset+chunk.count>mesh.indices.size())return 13;
+        Microsoft::WRL::ComPtr<ID3D11Device> device;Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
+        if(FAILED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_WARP,nullptr,0,nullptr,0,D3D11_SDK_VERSION,&device,nullptr,&context)))return 15;
+        gbfr::PreviewRenderer preview;
+        const auto dds=integration.parent_path()/L"unpack/data/granite/2k/pl1400_body01_lod0_albd.dds";
+        if(!preview.initialize(device.Get(),context.Get())||!preview.load_texture_preview(dds)||!preview.texture_image()||!preview.texture_width()||!preview.texture_height())return 16;
         const auto cloth_root=integration.parent_path()/L"unpack/data/pl/pl1400/cloth";
         const auto clh_path=cloth_root/L"pl1400_0_0_clh.bxm.xml",clp_path=cloth_root/L"pl1400_0_0_clp.bxm.xml";
         const auto clh=gbfr::load_clh(clh_path);const auto clp=gbfr::load_clp(clp_path);
