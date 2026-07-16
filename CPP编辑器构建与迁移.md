@@ -13,7 +13,7 @@ build.bat run
 build.bat clean
 ```
 
-双击或无参数运行 `build.bat` 时，脚本会增量构建 `RelWithDebInfo` 并直接启动编辑器。编辑器不会默认处理某个工作区，进入后先选择 `unpack` 中的 `.minfo`。构建失败时控制台会保留并等待按键。`build.bat RelWithDebInfo` 只构建不启动，其他带参数调用也不会暂停，适合终端和自动化调用。
+双击或无参数运行 `build.bat` 时，脚本会增量构建 `RelWithDebInfo` 并直接启动编辑器。编辑器不会默认处理某个工作区，而是显示“新建工作区”和“编辑现有工作区”两个入口。构建失败时控制台会保留并等待按键。`build.bat RelWithDebInfo` 只构建不启动，其他带参数调用也不会暂停，适合终端和自动化调用。
 
 输出位于 `out/bin/<配置>/GBFRModtools.exe`。依赖固定版本并缓存到 `.deps/`，不写入 `_lib/`。
 
@@ -30,13 +30,18 @@ VS 自带 CMake 3.31.6 在当前中文源码路径进入 `project()` 时会以 `
 
 ## 使用
 
-程序接受 `manifest.md`、`workspace.json` 或工作区目录：
+无参数启动程序即可进入开始页；也可从命令行传入 `workspace.json` 直接进入编辑模式：
 
 ```bat
 out\bin\RelWithDebInfo\GBFRModtools.exe
 ```
 
-程序启动后先选择 `unpack/data/model/.../*.minfo`。编辑器会从该文件向上查找 `workspace.json`，定位同名 skeleton 和 LOD0 mmesh，然后加载预览。也可以使用“打开工作区”进入只管理资源的模式。程序兼容 Version 1，保持 `source -> unpack -> build` 语义。
+程序启动页提供两行功能：
+
+- “新建工作区”：选择游戏原始 `data/model/.../*.minfo`，后台调用 `explore_char.ps1`，重建仓库内的 `explore_output`。此操作会完整替换旧 `explore_output`，界面会先确认；成功后自动打开新工作区。
+- “编辑现有工作区”：选择已有的 `workspace.json`，直接进入资源、模型、骨架与 cloth 编辑模式。
+
+程序兼容 Version 1，保持 `source -> unpack -> build` 语义。进入编辑模式后仍可通过“开始页”返回这两个入口。
 
 - 资源列表按基线 SHA-256 显示缺失和修改状态。
 - `.minfo/.skeleton/.mmesh` 可原生恢复、原样写入 build，并加载 D3D11 预览。

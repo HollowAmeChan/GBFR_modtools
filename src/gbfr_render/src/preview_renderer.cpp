@@ -75,6 +75,11 @@ bool PreviewRenderer::load(const MeshAsset& mesh,const SkeletonAsset& skeleton,c
     albedo_srv_.Reset(); if(!dds.empty()) load_dds(dds); return true;
 }
 
+void PreviewRenderer::clear() {
+    index_count_=0; line_vertex_count_=0; collision_vertex_count_=0;
+    vertices_.Reset(); indices_.Reset(); lines_.Reset(); collision_lines_.Reset(); albedo_srv_.Reset();
+}
+
 void PreviewRenderer::set_collision_lines(const std::vector<Vec3>& points) {
     std::vector<GpuVertex> lines; lines.reserve(points.size());
     for (const auto& p : points) lines.push_back({{p.x,p.y,p.z},{0,1,0},{0,0}});

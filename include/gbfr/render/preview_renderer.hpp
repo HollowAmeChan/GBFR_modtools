@@ -11,6 +11,7 @@ class PreviewRenderer {
 public:
     bool initialize(ID3D11Device* device, ID3D11DeviceContext* context);
     bool load(const MeshAsset& mesh, const SkeletonAsset& skeleton, const std::filesystem::path& dds = {});
+    void clear();
     void set_collision_lines(const std::vector<Vec3>& points);
     void resize(unsigned width, unsigned height);
     void render(const OrbitCamera& camera, bool show_mesh, bool wireframe, bool show_skeleton);
