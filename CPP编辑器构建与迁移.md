@@ -13,7 +13,7 @@ build.bat run
 build.bat clean
 ```
 
-双击或无参数运行 `build.bat` 时，脚本会构建 `RelWithDebInfo`，显示成功或失败结果并等待按键关闭。带参数运行时不会暂停，适合终端和自动化调用。
+双击或无参数运行 `build.bat` 时，脚本会增量构建 `RelWithDebInfo` 并直接启动编辑器；存在 `explore_output/manifest.md` 时会自动打开该工作区。构建失败时控制台会保留并等待按键。`build.bat RelWithDebInfo` 只构建不启动，其他带参数调用也不会暂停，适合终端和自动化调用。
 
 输出位于 `out/bin/<配置>/GBFRModtools.exe`。依赖固定版本并缓存到 `.deps/`，不写入 `_lib/`。
 

@@ -2,15 +2,13 @@
 setlocal EnableExtensions EnableDelayedExpansion
 
 if "%~1"=="" (
-  call "%~f0" RelWithDebInfo
+  call "%~f0" run
   set "RESULT=!errorlevel!"
-  echo.
-  if "!RESULT!"=="0" (
-    echo [OK] Build completed. Press any key to close this window.
-  ) else (
+  if not "!RESULT!"=="0" (
+    echo.
     echo [ERROR] Build failed with exit code !RESULT!. Press any key to close this window.
+    pause >nul
   )
-  pause >nul
   exit /b !RESULT!
 )
 
@@ -104,7 +102,12 @@ if /i "%ACTION%"=="test" (
 if /i "%ACTION%"=="run" (
   popd
   subst %BUILD_DRIVE% /d
-  start "" "%ROOT%out\bin\%CONFIG%\GBFRModtools.exe" "%ROOT%explore_output\manifest.md"
+  if exist "%ROOT%explore_output\manifest.md" (
+    start "" "%ROOT%out\bin\%CONFIG%\GBFRModtools.exe" "%ROOT%explore_output\manifest.md"
+  ) else (
+    start "" "%ROOT%out\bin\%CONFIG%\GBFRModtools.exe"
+  )
+  echo [OK] Editor launched.
   exit /b 0
 )
 
