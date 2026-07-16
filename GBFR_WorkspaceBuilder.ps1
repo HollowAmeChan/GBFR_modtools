@@ -794,6 +794,8 @@ $script:mmatOperation = $null
 $script:mmatOperationKey = ""
 $script:clothOperation = $null
 $script:clothOperationKey = ""
+$script:clothBoneMap = @{}
+$script:clothSkeletonPath = ""
 function Add-Log([string]$Message) {
     $log.AppendText($Message + "`r`n")
     $log.SelectionStart = $log.TextLength
@@ -878,6 +880,38 @@ function Add-ClothHeaderRow([string]$Name, [object]$Value) {
     [void]$clothHeaderGrid.Rows.Add($Name, [string]$Value)
 }
 
+function Update-ClothBoneMap {
+    $script:clothBoneMap = @{}
+    $script:clothSkeletonPath = ""
+    if ($null -eq $script:context) { return }
+
+    $characterId = [string]$script:context.Workspace.CharacterId
+    $skeletonPath = Join-Path $script:context.Root "source\data\model\pl\$characterId\$characterId.skeleton"
+    if (-not (Test-Path -LiteralPath $skeletonPath -PathType Leaf)) { return }
+
+    foreach ($bone in @(Get-GbfrSkeletonBones $skeletonPath)) {
+        if ($null -ne $bone.ClothId) {
+            $script:clothBoneMap[[int]$bone.ClothId] = $bone
+        }
+    }
+    $script:clothSkeletonPath = $skeletonPath
+}
+
+function Get-ClothBoneName([object]$Value) {
+    $id = [int]$Value
+    if ($id -eq 4095) { return "-" }
+    if ($script:clothBoneMap.ContainsKey($id)) {
+        return [string]$script:clothBoneMap[$id].Name
+    }
+    return $B.cloth_bone_missing
+}
+
+function Get-ClothBoneLink([object]$Value) {
+    $id = [int]$Value
+    if ($id -eq 4095) { return "-" }
+    return "$id  $(Get-ClothBoneName $id)"
+}
+
 function Refresh-ClothEditor {
     $clothHeaderGrid.Rows.Clear()
     $clothGrid.Rows.Clear()
@@ -909,6 +943,11 @@ function Refresh-ClothEditor {
         }
         Add-ClothHeaderRow $B.quick_file_name ([IO.Path]::GetFileName($path))
         Add-ClothHeaderRow $B.quick_type $category
+        if ($script:clothSkeletonPath) {
+            Add-ClothHeaderRow $B.cloth_skeleton ([IO.Path]::GetFileName($script:clothSkeletonPath))
+        } else {
+            Add-ClothHeaderRow $B.cloth_skeleton $B.cloth_skeleton_missing
+        }
 
         switch ($category) {
             "clp" {
@@ -923,16 +962,22 @@ function Refresh-ClothEditor {
                 $sideLinks = @($nodes | Where-Object { [int]$_.noSide -ne 4095 }).Count
                 $lblClothSummary.Text = "$($B.cloth_nodes) $($nodes.Count) | $($B.cloth_roots) $roots | $($B.cloth_side_links) $sideLinks"
                 Set-ClothGridColumns @(
-                    @{ Name="No"; Header="no"; Width=65 }, @{ Name="Up"; Header="noUp"; Width=65 },
-                    @{ Name="Down"; Header="noDown"; Width=70 }, @{ Name="Side"; Header="noSide"; Width=70 },
-                    @{ Name="Poly"; Header="noPoly"; Width=70 }, @{ Name="Fix"; Header="noFix"; Width=65 },
+                    @{ Name="No"; Header="no"; Width=60 }, @{ Name="Bone"; Header=$B.col_bone; Width=70 },
+                    @{ Name="Up"; Header="noUp / bone"; Width=110 },
+                    @{ Name="Down"; Header="noDown / bone"; Width=115 },
+                    @{ Name="Side"; Header="noSide / bone"; Width=115 },
+                    @{ Name="Poly"; Header="noPoly / bone"; Width=115 },
+                    @{ Name="Fix"; Header="noFix / bone"; Width=110 },
                     @{ Name="Rot"; Header="rotLimit"; Width=85 }, @{ Name="Friction"; Header="friction"; Width=80 },
                     @{ Name="Weight"; Header="weight"; Width=75 }, @{ Name="Thick"; Header="thick"; Width=75 },
                     @{ Name="Wind"; Header="windForceArea"; Width=105 }, @{ Name="Offset"; Header="offset"; Width=180; Fill=$true }
                 )
                 foreach ($node in $nodes) {
                     [void]$clothGrid.Rows.Add(
-                        $node.no, $node.noUp, $node.noDown, $node.noSide, $node.noPoly, $node.noFix,
+                        $node.no, (Get-ClothBoneName $node.no),
+                        (Get-ClothBoneLink $node.noUp), (Get-ClothBoneLink $node.noDown),
+                        (Get-ClothBoneLink $node.noSide), (Get-ClothBoneLink $node.noPoly),
+                        (Get-ClothBoneLink $node.noFix),
                         $node.rotLimit, $node.friction, $node.weight_, $node.thick_, $node.windForceArea_, $node.offset
                     )
                 }
@@ -940,17 +985,24 @@ function Refresh-ClothEditor {
             "clh" {
                 $collisions = @($xml.CLOTH_AT.ClothCollision_LIST.ClothCollision)
                 Add-ClothHeaderRow "CLOTH_AT_NUM" $xml.CLOTH_AT.CLOTH_AT_NUM
-                $lblClothSummary.Text = "$($B.cloth_collisions) $($collisions.Count)"
+                $endpointCount = $collisions.Count * 2
+                $resolvedEndpoints = @($collisions | ForEach-Object { @([int]$_.p1, [int]$_.p2) } |
+                    Where-Object { $script:clothBoneMap.ContainsKey($_) }).Count
+                $lblClothSummary.Text = "$($B.cloth_collisions) $($collisions.Count) | $($B.cloth_bone_endpoints) $resolvedEndpoints/$endpointCount"
                 Set-ClothGridColumns @(
-                    @{ Name="Id"; Header="id"; Width=55 }, @{ Name="P1"; Header="p1"; Width=65 },
-                    @{ Name="P2"; Header="p2"; Width=65 }, @{ Name="Capsule"; Header="capsule"; Width=70 },
+                    @{ Name="Id"; Header="id"; Width=55 }, @{ Name="P1"; Header="p1"; Width=60 },
+                    @{ Name="P1Bone"; Header=$B.col_p1_bone; Width=80 },
+                    @{ Name="P2"; Header="p2"; Width=60 },
+                    @{ Name="P2Bone"; Header=$B.col_p2_bone; Width=80 },
+                    @{ Name="Capsule"; Header="capsule"; Width=70 },
                     @{ Name="Radius"; Header="radius"; Width=75 }, @{ Name="Weight"; Header="weight"; Width=75 },
                     @{ Name="Offset1"; Header="offset1"; Width=180 }, @{ Name="Offset2"; Header="offset2"; Width=180; Fill=$true },
                     @{ Name="Battle"; Header="battle off"; Width=80 }, @{ Name="Idle"; Header="idle off"; Width=70 }
                 )
                 foreach ($collision in $collisions) {
                     [void]$clothGrid.Rows.Add(
-                        $collision.id_, $collision.p1, $collision.p2, $collision.capsule,
+                        $collision.id_, $collision.p1, (Get-ClothBoneName $collision.p1),
+                        $collision.p2, (Get-ClothBoneName $collision.p2), $collision.capsule,
                         $collision.radius, $collision.weight, $collision.offset1, $collision.offset2,
                         $collision.notUseInBattle, $collision.notUseInIdle
                     )
@@ -1049,6 +1101,7 @@ function Load-Manifest([string]$Path, [switch]$PreserveSelection) {
         }
 
         $script:context = Get-WorkspaceOperations $Path
+        Update-ClothBoneMap
         $txtManifest.Text = [IO.Path]::GetFullPath($Path)
         $grid.SuspendLayout()
         $grid.Rows.Clear()
@@ -1299,15 +1352,38 @@ if ($UiSmokeTest) {
     if ($mmatRows.Count -gt 0) { Open-MmatEditor $mmatRows[0].Tag }
     $mmatTabSelected = $tabs.SelectedTab -eq $pageMmat
     $clothViews = [System.Collections.Generic.List[string]]::new()
+    $clothBoneViews = [System.Collections.Generic.List[string]]::new()
     foreach ($category in @("clp", "clh", "sequence", "reset")) {
         $categoryRow = $clothRows | Where-Object { [string]$_.Tag.ClothCategory -eq $category } | Select-Object -First 1
         if ($null -eq $categoryRow) { continue }
         Open-ClothEditor $categoryRow.Tag
         if ($clothGrid.Rows.Count -eq 0) { throw "Cloth $category view contains no rows" }
         $clothViews.Add("${category}:$($clothGrid.Rows.Count)")
+        if ($category -eq "clp") {
+            if (-not $clothGrid.Columns.Contains("Bone")) { throw "CLP view has no bone name column" }
+            $resolved = @($clothGrid.Rows | Where-Object {
+                [string]$_.Cells["Bone"].Value -match '^_[0-9a-fA-F]+$'
+            }).Count
+            if ($resolved -ne $clothGrid.Rows.Count) {
+                throw "CLP bone names resolved $resolved/$($clothGrid.Rows.Count)"
+            }
+            $clothBoneViews.Add("clp:$resolved/$($clothGrid.Rows.Count)")
+        } elseif ($category -eq "clh") {
+            if (-not $clothGrid.Columns.Contains("P1Bone") -or -not $clothGrid.Columns.Contains("P2Bone")) {
+                throw "CLH view has no endpoint bone name columns"
+            }
+            $resolved = @($clothGrid.Rows | Where-Object {
+                [string]$_.Cells["P1Bone"].Value -match '^_[0-9a-fA-F]+$' -and
+                [string]$_.Cells["P2Bone"].Value -match '^_[0-9a-fA-F]+$'
+            }).Count
+            if ($resolved -ne $clothGrid.Rows.Count) {
+                throw "CLH endpoint bone names resolved $resolved/$($clothGrid.Rows.Count)"
+            }
+            $clothBoneViews.Add("clh:$resolved/$($clothGrid.Rows.Count)")
+        }
     }
     $clothTabSelected = if ($clothRows.Count -gt 0) { $tabs.SelectedTab -eq $pageCloth } else { $true }
-    Write-Host "UI smoke: layout=$layoutOk, actionColumns=$actionColumnsVisible, page=$($pageBuild.ClientSize.Width)x$($pageBuild.ClientSize.Height), grid=$($grid.Width)x$($grid.Height), rows=$($grid.Rows.Count), restore=$($restoreButtons.Count), bulkRestore=$($btnRestore.Text -eq $B.restore_selected), mmatEdit=$($mmatEditButtons.Count), clothEdit=$($clothEditButtons.Count), mmatEntries=$($mmatGrid.Rows.Count), mmatTab=$mmatTabSelected, clothTab=$clothTabSelected, clothViews=$($clothViews -join ',')"
+    Write-Host "UI smoke: layout=$layoutOk, actionColumns=$actionColumnsVisible, page=$($pageBuild.ClientSize.Width)x$($pageBuild.ClientSize.Height), grid=$($grid.Width)x$($grid.Height), rows=$($grid.Rows.Count), restore=$($restoreButtons.Count), bulkRestore=$($btnRestore.Text -eq $B.restore_selected), mmatEdit=$($mmatEditButtons.Count), clothEdit=$($clothEditButtons.Count), mmatEntries=$($mmatGrid.Rows.Count), mmatTab=$mmatTabSelected, clothTab=$clothTabSelected, clothViews=$($clothViews -join ','), clothBones=$($clothBoneViews -join ',')"
     $form.Close()
     exit 0
 }

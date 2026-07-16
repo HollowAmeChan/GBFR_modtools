@@ -144,6 +144,10 @@ data/pl/<角色>/<角色>_<动作>_<变体>_seq_edit_cloth.bxm
 
 `_clh` 解码后的根节点是 `CLOTH_AT`，其中每个 `ClothCollision` 有独立的 `id_`、`p1/p2`、偏移、半径、权重和 capsule 链接。碰撞 ID 可能不连续，动作文件必须按真实 `id_` 引用，不能用列表行号替代。
 
+CLP 的 `no/noUp/noDown/noSide/noPoly/noFix` 与 CLH 的 `p1/p2` 使用的是**骨骼名编码**，不是 `.skeleton` 的骨骼数组下标，也不是 FlatBuffers 中的 `BoneId`。数值按十六进制转换后就是 Blender 插件导入的原始骨骼名：例如 `3141 = 0xC45` 对应 `_c45`，`545 = 0x221` 对应 `_221`。因此每个碰撞体确实通过 `p1/p2` 引用了主体骨架；但 `p1 == p2` 或 `p1 != p2` 本身不能直接判断碰撞形状，还要结合 `offset1/offset2` 与 `capsule` 字段。编辑器只使用 `source/data/model/pl/<角色>/<角色>.skeleton` 验证并显示名称，不混用会出现重名的 fp/wp 骨架；未命中的引用会明确显示“未在主体骨架中找到”。
+
+当前 `pl1400` 样本中，CLP 的 175 个不同骨骼引用与 CLH 的 38 个不同端点引用都能在 `pl1400.skeleton` 中找到。骨骼名 `_xxx` 是游戏原始标识；Blender 插件中的“Translate Bones”只会把一部分通用人体骨骼另行翻译为 `Hips/Chest/Head` 等便于阅读的别名，cloth 专用骨骼通常仍保留 `_c45` 这类名字。
+
 动作覆盖文件的 `Seq/ClothTrack` 记录以 `FileId` 指向同编号基础组，以 `CollisionId0..N` 指向该组 `_clh` 中的碰撞体，并在 `StartTime` 应用 `ScaleRate`、`FadeInFrame`、`FloorAdditiveOffset` 等覆盖。`StartTime` 基本位于 60 FPS 帧网格上。实际数据中 `ScaleRate` 可出现 `0`、`2.6`、`97`、`100`，编辑器不能把它限制在 `0..1`。
 
 `SeqFlag=0` 的记录主要携带碰撞与 Scale 覆盖；当前样本中 `SeqFlag=1/3` 没有碰撞引用，主要改变地面附加偏移。两个 Flag 的精确运行时位含义仍需游戏内验证。`RESET_MOT_LIST` 则列出需要重置布料状态的动作切换。

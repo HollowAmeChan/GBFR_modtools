@@ -18,6 +18,93 @@ function Resolve-WorkspaceFile([string]$WorkspaceRoot, [string]$RelativePath) {
     return $full
 }
 
+function Get-FlatBufferUInt16([byte[]]$Bytes, [int]$Offset) {
+    if ($Offset -lt 0 -or ($Offset + 2) -gt $Bytes.Length) {
+        throw "FlatBuffer uint16 is outside the file at offset $Offset"
+    }
+    return [BitConverter]::ToUInt16($Bytes, $Offset)
+}
+
+function Get-FlatBufferUInt32([byte[]]$Bytes, [int]$Offset) {
+    if ($Offset -lt 0 -or ($Offset + 4) -gt $Bytes.Length) {
+        throw "FlatBuffer uint32 is outside the file at offset $Offset"
+    }
+    return [BitConverter]::ToUInt32($Bytes, $Offset)
+}
+
+function Get-FlatBufferInt32([byte[]]$Bytes, [int]$Offset) {
+    if ($Offset -lt 0 -or ($Offset + 4) -gt $Bytes.Length) {
+        throw "FlatBuffer int32 is outside the file at offset $Offset"
+    }
+    return [BitConverter]::ToInt32($Bytes, $Offset)
+}
+
+function Get-FlatBufferFieldPosition(
+    [byte[]]$Bytes,
+    [int]$TableOffset,
+    [int]$FieldIndex
+) {
+    $vtableOffset = $TableOffset - (Get-FlatBufferInt32 $Bytes $TableOffset)
+    $vtableLength = Get-FlatBufferUInt16 $Bytes $vtableOffset
+    $fieldEntry = $vtableOffset + 4 + $FieldIndex * 2
+    if (($fieldEntry + 2) -gt ($vtableOffset + $vtableLength)) { return -1 }
+
+    $fieldOffset = Get-FlatBufferUInt16 $Bytes $fieldEntry
+    if ($fieldOffset -eq 0) { return -1 }
+    $fieldPosition = $TableOffset + $fieldOffset
+    if ($fieldPosition -lt 0 -or $fieldPosition -ge $Bytes.Length) {
+        throw "FlatBuffer field $FieldIndex is outside the file"
+    }
+    return $fieldPosition
+}
+
+function Get-GbfrSkeletonBones([string]$SkeletonPath) {
+    if (-not (Test-Path -LiteralPath $SkeletonPath -PathType Leaf)) {
+        throw "Skeleton not found: $SkeletonPath"
+    }
+
+    $bytes = [IO.File]::ReadAllBytes($SkeletonPath)
+    if ($bytes.Length -lt 16) { throw "Skeleton is too small: $SkeletonPath" }
+
+    $rootTable = [int](Get-FlatBufferUInt32 $bytes 0)
+    $bodyField = Get-FlatBufferFieldPosition $bytes $rootTable 1
+    if ($bodyField -lt 0) { throw "Skeleton has no bone vector: $SkeletonPath" }
+    $bodyVector = $bodyField + [int](Get-FlatBufferUInt32 $bytes $bodyField)
+    $boneCount = [int](Get-FlatBufferUInt32 $bytes $bodyVector)
+    if ($boneCount -le 0 -or $boneCount -gt 65535) {
+        throw "Invalid skeleton bone count $boneCount`: $SkeletonPath"
+    }
+
+    $bones = [System.Collections.Generic.List[PSCustomObject]]::new()
+    for ($index = 0; $index -lt $boneCount; $index++) {
+        $entryOffset = $bodyVector + 4 + $index * 4
+        $boneTable = $entryOffset + [int](Get-FlatBufferUInt32 $bytes $entryOffset)
+        $nameField = Get-FlatBufferFieldPosition $bytes $boneTable 2
+        if ($nameField -lt 0) { throw "Skeleton bone $index has no name: $SkeletonPath" }
+        $nameOffset = $nameField + [int](Get-FlatBufferUInt32 $bytes $nameField)
+        $nameLength = [int](Get-FlatBufferUInt32 $bytes $nameOffset)
+        if (($nameOffset + 4 + $nameLength) -gt $bytes.Length) {
+            throw "Skeleton bone $index name is outside the file: $SkeletonPath"
+        }
+        $name = [Text.Encoding]::UTF8.GetString($bytes, $nameOffset + 4, $nameLength)
+
+        $parentField = Get-FlatBufferFieldPosition $bytes $boneTable 1
+        $parentIndex = if ($parentField -ge 0) { [int](Get-FlatBufferUInt16 $bytes $parentField) } else { 0 }
+        $clothId = $null
+        if ($name -match '^_([0-9a-fA-F]+)$') {
+            $clothId = [Convert]::ToInt32($Matches[1], 16)
+        }
+        $bones.Add([PSCustomObject]@{
+            Index = $index
+            Name = $name
+            ClothId = $clothId
+            ParentIndex = $parentIndex
+        })
+    }
+
+    return @($bones)
+}
+
 function Assert-Wtb([byte[]]$Bytes, [string]$Path) {
     if ($Bytes.Length -lt 32 -or
         $Bytes[0] -ne 0x57 -or $Bytes[1] -ne 0x54 -or
