@@ -1,5 +1,6 @@
 add_library(gbfr_core STATIC
   src/log.cpp
+  src/workspace.cpp
 )
 target_include_directories(gbfr_core PUBLIC "${CMAKE_SOURCE_DIR}/include")
 target_compile_definitions(gbfr_core PUBLIC UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)

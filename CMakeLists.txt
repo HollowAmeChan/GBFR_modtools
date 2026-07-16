@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.28)
 project(GBFRModtools VERSION 0.1.0 LANGUAGES CXX)
 
+add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:/utf-8>")
+
 option(GBFR_BUILD_TESTS "Build GBFR tests" ON)
 option(GBFR_ENABLE_ASSIMP "Build the optional Assimp exchange adapter" OFF)
 

@@ -1,4 +1,5 @@
 add_executable(gbfr_tests test_smoke.cpp)
 target_link_libraries(gbfr_tests PRIVATE gbfr_core gbfr_formats)
 target_compile_options(gbfr_tests PRIVATE /W4 /permissive- /Zc:__cplusplus)
+target_compile_definitions(gbfr_tests PRIVATE GBFR_SOURCE_DIR=L"${CMAKE_SOURCE_DIR}")
 add_test(NAME gbfr_smoke COMMAND gbfr_tests)
