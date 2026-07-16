@@ -13,17 +13,25 @@ using namespace DirectX;
 namespace fs = std::filesystem;
 namespace {
 struct GpuVertex { float position[3], normal[3], uv[2]; };
-struct Constants { XMFLOAT4X4 view_projection; XMFLOAT4 color; XMFLOAT4 light; unsigned textured; unsigned lighting; float padding[2]; };
+struct Constants { XMFLOAT4X4 view_projection; XMFLOAT4 color; XMFLOAT4 light; unsigned textured; unsigned eye_material; unsigned lighting; float padding; };
 
 const char* shader_source = R"(
-cbuffer Scene : register(b0) { float4x4 viewProjection; float4 color; float4 light; uint textured; uint lighting; };
+cbuffer Scene : register(b0) { float4x4 viewProjection; float4 color; float4 light; uint textured; uint eyeMaterial; uint lighting; };
 struct VSIn { float3 position:POSITION; float3 normal:NORMAL; float2 uv:TEXCOORD0; };
 struct VSOut { float4 position:SV_POSITION; float3 normal:NORMAL; float2 uv:TEXCOORD0; };
 VSOut VSMain(VSIn v) { VSOut o; o.position=mul(float4(v.position,1),viewProjection); o.normal=v.normal; o.uv=v.uv; return o; }
-Texture2D albedo:register(t0); SamplerState linearSampler:register(s0);
+Texture2D primaryTexture:register(t0); Texture2D irisTexture:register(t1); Texture2D highlightTexture:register(t2); SamplerState linearSampler:register(s0);
 float4 PSMain(VSOut i):SV_TARGET {
     float2 uv=float2(i.uv.x,1.0-i.uv.y);
-    float3 base=textured?albedo.Sample(linearSampler,uv).rgb:color.rgb;
+    float4 primary=textured?primaryTexture.Sample(linearSampler,uv):color;
+    float3 base=primary.rgb;
+    if(eyeMaterial) {
+        float4 iris=irisTexture.Sample(linearSampler,uv);
+        float4 highlight=highlightTexture.Sample(linearSampler,uv);
+        base=lerp(float3(.94,.92,.90),primary.rgb,primary.a);
+        base=lerp(base,iris.rgb,iris.a);
+        base=lerp(base,highlight.rgb,highlight.a);
+    }
     if(!lighting) return float4(base,color.a);
     float halfLambert=dot(normalize(i.normal),normalize(light.xyz))*.5+.5;
     float shade=halfLambert>.72?1.04:(halfLambert>.43?.86:.68);
@@ -74,7 +82,7 @@ bool PreviewRenderer::create_targets() {
 
 void PreviewRenderer::resize(unsigned width,unsigned height) { width=std::max(1u,width); height=std::max(1u,height); if(width==width_&&height==height_) return; width_=width;height_=height;create_targets(); }
 
-bool PreviewRenderer::load(const MeshAsset& mesh,const SkeletonAsset& skeleton,const std::vector<fs::path>& material_albedos) {
+bool PreviewRenderer::load(const MeshAsset& mesh,const SkeletonAsset& skeleton,const std::vector<PreviewMaterialTextures>& materials) {
     clear();
     std::vector<GpuVertex> vertices; vertices.reserve(mesh.vertices.size());
     bounds_min_={std::numeric_limits<float>::max(),std::numeric_limits<float>::max(),std::numeric_limits<float>::max()}; bounds_max_={-bounds_min_.x,-bounds_min_.y,-bounds_min_.z};
@@ -89,9 +97,15 @@ bool PreviewRenderer::load(const MeshAsset& mesh,const SkeletonAsset& skeleton,c
     }
     if(draw_ranges_.empty()) draw_ranges_.push_back({0,index_count_,0});
 
-    material_albedos_.resize(material_albedos.size());
-    for(std::size_t i=0;i<material_albedos.size();++i)
-        if(!material_albedos[i].empty()) load_dds(material_albedos[i],material_albedos_[i]);
+    materials_.resize(materials.size());
+    for(std::size_t i=0;i<materials.size();++i) {
+        auto& gpu=materials_[i];const auto& source=materials[i];
+        if(!source.albedo.empty()&&!load_dds(source.albedo,gpu.primary)) return false;
+        if(!source.eye_conjunctiva.empty()&&!source.eye_iris.empty()&&!source.eye_highlight.empty()) {
+            gpu.eye=load_dds(source.eye_conjunctiva,gpu.primary)&&load_dds(source.eye_iris,gpu.iris)&&load_dds(source.eye_highlight,gpu.highlight);
+            if(!gpu.eye) return false;
+        }
+    }
 
     std::vector<GpuVertex> lines;
     for(std::size_t i=0;i<skeleton.bones.size();++i) { const auto& b=skeleton.bones[i]; if(b.parent==0xffff||b.parent>=skeleton.bones.size()) continue; const auto& p=skeleton.bones[b.parent].world_position; lines.push_back({{p.x,p.y,p.z},{0,1,0},{0,0}});lines.push_back({{b.world_position.x,b.world_position.y,b.world_position.z},{0,1,0},{0,0}}); }
@@ -114,7 +128,7 @@ bool PreviewRenderer::load_texture_preview(const fs::path& dds) {
 void PreviewRenderer::clear() {
     index_count_=0; line_vertex_count_=0; bone_point_vertex_count_=0; collision_vertex_count_=0;
     vertices_.Reset(); indices_.Reset(); lines_.Reset(); bone_points_.Reset(); collision_lines_.Reset();
-    draw_ranges_.clear(); material_albedos_.clear();
+    draw_ranges_.clear(); materials_.clear();
     texture_preview_srv_.Reset();texture_width_=0;texture_height_=0;
 }
 
@@ -169,14 +183,18 @@ void PreviewRenderer::render(const OrbitCamera& camera,bool show_mesh,PreviewSha
     if(show_mesh&&index_count_){
         context_->OMSetDepthStencilState(nullptr,0);
         const bool wireframe=shading==PreviewShadingMode::wireframe;context_->RSSetState(wireframe?wire_.Get():solid_.Get());context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);context_->IASetVertexBuffers(0,1,vertices_.GetAddressOf(),&stride,&offset);context_->IASetIndexBuffer(indices_.Get(),DXGI_FORMAT_R32_UINT,0);
-        for(const auto& draw:draw_ranges_){ID3D11ShaderResourceView* albedo=!wireframe&&draw.material<material_albedos_.size()?material_albedos_[draw.material].Get():nullptr;constants.textured=albedo?1u:0u;upload_constants();context_->PSSetShaderResources(0,1,&albedo);context_->DrawIndexed(draw.index_count,draw.first_index,0);}
+        for(const auto& draw:draw_ranges_){
+            GpuMaterialTextures* material=!wireframe&&draw.material<materials_.size()?&materials_[draw.material]:nullptr;
+            ID3D11ShaderResourceView* textures[3]={material?material->primary.Get():nullptr,material?material->iris.Get():nullptr,material?material->highlight.Get():nullptr};
+            constants.textured=textures[0]?1u:0u;constants.eye_material=material&&material->eye?1u:0u;upload_constants();context_->PSSetShaderResources(0,3,textures);context_->DrawIndexed(draw.index_count,draw.first_index,0);
+        }
     }
     context_->OMSetDepthStencilState(overlay_depth_.Get(),0);
-    constants.lighting=0;
+    constants.lighting=0;constants.eye_material=0;
     if(show_skeleton&&line_vertex_count_){constants.color={1,.55f,.08f,1};constants.textured=0;upload_constants();context_->RSSetState(solid_.Get());context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST);context_->IASetVertexBuffers(0,1,lines_.GetAddressOf(),&stride,&offset);context_->Draw(line_vertex_count_,0);}
     if(show_skeleton&&bone_point_vertex_count_){constants.color={1,.88f,.24f,1};constants.textured=0;upload_constants();context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST);context_->IASetVertexBuffers(0,1,bone_points_.GetAddressOf(),&stride,&offset);context_->Draw(bone_point_vertex_count_,0);}
     if(collision_vertex_count_){constants.color={.05f,.9f,.85f,1};constants.textured=0;upload_constants();context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST);context_->IASetVertexBuffers(0,1,collision_lines_.GetAddressOf(),&stride,&offset);context_->Draw(collision_vertex_count_,0);}
     context_->OMSetDepthStencilState(nullptr,0);
-    ID3D11ShaderResourceView* none=nullptr;context_->PSSetShaderResources(0,1,&none);
+    ID3D11ShaderResourceView* none[3]={};context_->PSSetShaderResources(0,3,none);
 }
 }

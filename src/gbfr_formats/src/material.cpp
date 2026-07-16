@@ -33,11 +33,16 @@ MaterialAsset load_mmat_json(const std::filesystem::path& path) {
         const auto textures = source_entry.find("A2");
         if (textures != source_entry.end() && textures->is_array()) {
             for (const auto& texture : *textures) {
-                if (texture.value("ID", 0u) != albedo_texture_slot_id) continue;
                 const auto name = texture.value("Name", std::string{});
                 if (name.empty() || is_color_variant_texture(name)) continue;
-                entry.albedo_name = name;
-                break;
+                switch(texture.value("ID", 0u)) {
+                case albedo_texture_slot_id: entry.albedo_name=name;break;
+                case eye_highlight_texture_slot_id: entry.eye_highlight_name=name;break;
+                case eye_mask_texture_slot_id: entry.eye_mask_name=name;break;
+                case eye_iris_texture_slot_id: entry.eye_iris_name=name;break;
+                case eye_conjunctiva_texture_slot_id: entry.eye_conjunctiva_name=name;break;
+                default:break;
+                }
             }
         }
         result.entries.push_back(std::move(entry));

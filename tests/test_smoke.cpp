@@ -72,13 +72,36 @@ int main() {
         gbfr::PreviewRenderer preview;
         const auto dds=integration.parent_path()/L"unpack/data/granite/2k/pl1400_body01_lod0_albd.dds";
         if(!preview.initialize(device.Get(),context.Get())||!preview.load_texture_preview(dds)||!preview.texture_image()||!preview.texture_width()||!preview.texture_height())return 16;
-        std::vector<fs::path> preview_materials(materials.entries.size(),dds);
+        std::vector<gbfr::PreviewMaterialTextures> preview_materials(materials.entries.size());for(auto& material:preview_materials)material.albedo=dds;
         gbfr::OrbitCamera camera;
         if(!preview.load(mesh,skeleton,preview_materials))return 17;
         preview.resize(320,320);preview.frame(camera);
         for(const auto mode:{gbfr::PreviewShadingMode::unlit,gbfr::PreviewShadingMode::lit,gbfr::PreviewShadingMode::wireframe})preview.render(camera,true,mode,true);
         context->Flush();
         if(FAILED(device->GetDeviceRemovedReason()))return 18;
+        const auto fp_root=integration.parent_path()/L"unpack/data/model/fp/fp1400";
+        const auto fp_minfo=gbfr::load_minfo(fp_root/L"fp1400.minfo");
+        const auto fp_skeleton=gbfr::load_skeleton(fp_root/L"fp1400.skeleton");
+        const auto fp_mesh=gbfr::load_mmesh(integration.parent_path()/L"unpack/data/model_streaming/lod0/fp1400.mmesh",fp_minfo);
+        const auto fp_materials=gbfr::load_mmat_json(fp_root/L"vars/0.mmat.json");
+        if(fp_materials.entries.size()!=7||
+           fp_materials.entries[0].eye_conjunctiva_name!="fp1400_l_eye_lod0_conj"||
+           fp_materials.entries[0].eye_iris_name!="fp1400_l_eye_lod0_iris"||
+           fp_materials.entries[0].eye_highlight_name!="fp1400_l_eye_lod0_eyeh"||
+           fp_materials.entries[1].eye_conjunctiva_name!="fp1400_r_eye_lod0_conj"||
+           fp_materials.entries[1].eye_iris_name!="fp1400_r_eye_lod0_iris"||
+           fp_materials.entries[1].eye_highlight_name!="fp1400_r_eye_lod0_eyeh")return 19;
+        std::vector<gbfr::PreviewMaterialTextures> fp_preview_materials(fp_materials.entries.size());
+        const auto granite_4k=integration.parent_path()/L"unpack/data/granite/4k";
+        for(std::size_t i=0;i<2;++i) {
+            const auto& entry=fp_materials.entries[i];auto& material=fp_preview_materials[i];
+            material.eye_conjunctiva=granite_4k/fs::path(entry.eye_conjunctiva_name+".dds");
+            material.eye_iris=granite_4k/fs::path(entry.eye_iris_name+".dds");
+            material.eye_highlight=granite_4k/fs::path(entry.eye_highlight_name+".dds");
+        }
+        if(!preview.load(fp_mesh,fp_skeleton,fp_preview_materials))return 20;
+        preview.frame(camera);preview.render(camera,true,gbfr::PreviewShadingMode::lit,true);context->Flush();
+        if(FAILED(device->GetDeviceRemovedReason()))return 21;
         const auto cloth_root=integration.parent_path()/L"unpack/data/pl/pl1400/cloth";
         const auto clh_path=cloth_root/L"pl1400_0_0_clh.bxm.xml",clp_path=cloth_root/L"pl1400_0_0_clp.bxm.xml";
         const auto clh=gbfr::load_clh(clh_path);const auto clp=gbfr::load_clp(clp_path);

@@ -385,7 +385,7 @@ function Get-GraniteTextureReferences {
 
                 $names = if ($entry.PSObject.Properties.Name -contains "A2") {
                     @($entry.A2 | Where-Object {
-                        $null -ne $_ -and $_.Name -match "_(albd|msk1|msk2|nrml)$"
+                        $null -ne $_ -and $_.Name -match "_(albd|msk1|msk2|nrml|conj|iris|eyeh)$"
                     } | ForEach-Object { [string]$_.Name })
                 } else { @() }
 
@@ -485,7 +485,7 @@ function Expand-GraniteTextures {
                     try {
                         $toolOutput = @(& $graniteExe extract -t $gtsPath -f $reference.Hash -o $tempDir -l -1 2>&1)
                         $tgaFiles = @(Get-ChildItem -LiteralPath $tempDir -Filter "*.tga" -File -ErrorAction SilentlyContinue | Where-Object {
-                            $_.BaseName -match "_(albd|msk1|msk2|nrml)$"
+                            $_.BaseName -match "_(albd|msk1|msk2|nrml|conj|iris|eyeh)$"
                         })
                         if ($tgaFiles.Count -eq 0) {
                             $message = ($toolOutput | Select-Object -Last 1) -join " "
@@ -501,9 +501,12 @@ function Expand-GraniteTextures {
                         New-Item -ItemType Directory -Force -Path $ddsDir | Out-Null
                         $groupFiles = [System.Collections.Generic.List[string]]::new()
                         foreach ($tga in $tgaFiles) {
-                            $slot = [regex]::Match($tga.BaseName, "_(albd|msk1|msk2|nrml)$").Groups[1].Value
+                            $slot = [regex]::Match($tga.BaseName, "_(albd|msk1|msk2|nrml|conj|iris|eyeh)$").Groups[1].Value
                             $format = switch ($slot) {
                                 "albd" { "BC7_UNORM_SRGB" }
+                                "conj" { "BC7_UNORM_SRGB" }
+                                "iris" { "BC7_UNORM_SRGB" }
+                                "eyeh" { "BC7_UNORM_SRGB" }
                                 "nrml" { "BC5_UNORM" }
                                 default { "BC7_UNORM" }
                             }

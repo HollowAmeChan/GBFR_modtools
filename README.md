@@ -51,7 +51,7 @@ explore_output/
 
 - 按游戏的 `data/...` 路径复制找到的资源。
 - 将 `data/texture/{2k,4k}/*.texture` 解码为 DDS。
-- 根据 mmat 的 `A4` 哈希，从 `data/granite/{2k,4k}/gts` 提取 `albd/msk1/msk2/nrml` 并转换为 DDS。
+- 根据 mmat 的 `A4` 哈希，从 `data/granite/{2k,4k}/gts` 提取 `albd/msk1/msk2/nrml` 以及眼球的 `conj/iris/eyeh` 分层贴图，并转换为 DDS。
 - 将 `data/model/**/vars/*.mmat` 解码为 `*.mmat.json`。
 - 将角色 cloth 基础组、碰撞体、动作覆盖和重置表解码为 `*.bxm.xml`。
 - 将 pl/fp/wp 的 `.minfo`、`.skeleton` 与 LOD0 `.mmesh` 原样复制到 `unpack`，登记为可恢复、可构建的模型文件。
@@ -60,10 +60,24 @@ explore_output/
 Granite DDS 输出到 `unpack/data/granite/{2k,4k}/`，格式为：
 
 - `albd`：BC7 sRGB，DX10 头。
+- `conj`、`iris`、`eyeh`：BC7 sRGB，DX10 头。
 - `msk1`、`msk2`：BC7 线性，DX10 头。
 - `nrml`：BC5 UNORM 线性，DX10 头。
 
 转换时会生成完整 mip 链。某些 A4 哈希在当前游戏数据中没有对应 GTP，探索器会把它们记入 `workspace.json` 的 `GraniteMissing`，其余贴图继续处理。
+
+### 眼球与瞳孔贴图
+
+眼球材质不是普通的单张 `albd`。以 `fp1400` 的默认材质为例，左右眼各自通过 mmat 的 `A2` 名称和 `A4` 流式哈希引用多层贴图。编辑器预览会按 alpha 合成 `conj + iris + eyeh` 三个颜色层，`msk1` 作为独立的线性遮罩保留：
+
+- `*_conj`：眼白、结膜和眼球底色。
+- `*_iris`：虹膜与瞳孔；修改瞳孔形状、大小或眼睛颜色时主要编辑这一层。
+- `*_eyeh`：眼球高光和反光形状。
+- `*_msk1`：眼球使用的线性遮罩，不是基础色；左右眼可能共享同一张 `msk1`。
+
+制作眼睛贴图时，应保留 `conj/iris/eyeh` 的透明通道，因为分层合成依赖 alpha。颜色层使用 BC7 sRGB，`msk1` 使用 BC7 线性；不要把 `msk1` 当作缺失的 albedo，也不要只用一张普通 albedo 覆盖整只眼睛。DirectX DDS 在编辑器预览时会统一翻转 V 方向，制作内容时不需要额外手工倒置图像。
+
+如果要删除眼球材质条目的 `A4`、改用 `data/texture` 下的普通 `.texture`，需要同时构建该材质 `A2` 实际引用的 `conj/iris/eyeh/msk1` 文件；只封回 `iris` 而把其余层留在 Granite 中，不能保证清除 A4 后仍能得到完整眼球效果。默认配色只处理 `vars/0.mmat.json`；其他配色仍需在对应编号的 mmat 中分别处理。
 
 正式网格统一从 `data/model_streaming/lod*/` 收集。为了让 Blender 导入器工作，用户有时会把 LOD0 `.mmesh` 手动复制到 `.minfo` 同目录；探索器会在报告中标记这种辅助副本，但不会将它复制到 `source`，避免与正式流式网格重复。
 
@@ -218,6 +232,6 @@ GBFR_modtools/
 - 自动解码和封回 `data/texture` 下的 WTB `.texture`。
 - 自动解码和编码角色 `vars/*.mmat`。
 - 自动解码和封回角色 cloth 基础组、碰撞体、动作覆盖与重置表 BXM。
-- 自动从 Granite GTS/GTP 提取可用的 `albd/msk1/msk2/nrml`，并转换为对应格式的 DDS。
+- 自动从 Granite GTS/GTP 提取可用的 `albd/msk1/msk2/nrml/conj/iris/eyeh`，并转换为对应格式的 DDS。
 - 为没有普通贴图原件的 Granite DDS 选择性新建 WTB `.texture`，不修改 GTS/GTP。
 - WTB 构建以 `source` 原件为模板，按槽位替换 DDS，并保留未编辑槽位。

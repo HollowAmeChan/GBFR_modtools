@@ -8,12 +8,19 @@
 namespace gbfr {
 struct OrbitCamera { float yaw{0.0f}, pitch{0.12f}, distance{4.0f}; Vec3 target{0,1,0}; };
 enum class PreviewShadingMode { unlit, lit, wireframe };
+struct PreviewMaterialTextures {
+    std::filesystem::path albedo;
+    std::filesystem::path eye_conjunctiva;
+    std::filesystem::path eye_iris;
+    std::filesystem::path eye_highlight;
+    std::filesystem::path eye_mask;
+};
 
 class PreviewRenderer {
 public:
     bool initialize(ID3D11Device* device, ID3D11DeviceContext* context);
     bool load(const MeshAsset& mesh, const SkeletonAsset& skeleton,
-              const std::vector<std::filesystem::path>& material_albedos = {});
+              const std::vector<PreviewMaterialTextures>& materials = {});
     bool load_texture_preview(const std::filesystem::path& dds);
     void clear();
     void set_collision_lines(const std::vector<Vec3>& points);
@@ -34,6 +41,12 @@ private:
         unsigned first_index{};
         unsigned index_count{};
         std::uint8_t material{};
+    };
+    struct GpuMaterialTextures {
+        Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> primary;
+        Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> iris;
+        Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> highlight;
+        bool eye{};
     };
     bool load_dds(const std::filesystem::path& path,
                   Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>& output,
@@ -57,6 +70,6 @@ private:
     Microsoft::WRL::ComPtr<ID3D11RasterizerState> solid_, wire_;
     Microsoft::WRL::ComPtr<ID3D11DepthStencilState> overlay_depth_;
     std::vector<DrawRange> draw_ranges_;
-    std::vector<Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>> material_albedos_;
+    std::vector<GpuMaterialTextures> materials_;
 };
 }

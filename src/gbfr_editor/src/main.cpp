@@ -260,14 +260,19 @@ bool load_model_preview(std::size_t index,bool force) {
         const auto material_json=key.minfo.parent_path()/L"vars/0.mmat.json";
         if(!std::filesystem::is_regular_file(material_json)) throw std::runtime_error("找不到 vars/0.mmat.json");
         const auto materials=gbfr::load_mmat_json(material_json);
-        std::vector<std::filesystem::path> material_albedos(materials.entries.size());
-        std::size_t resolved_albedos{};
+        std::vector<gbfr::PreviewMaterialTextures> preview_materials(materials.entries.size());
+        std::size_t resolved_materials{};
         for(std::size_t i=0;i<materials.entries.size();++i) {
-            material_albedos[i]=resolve_base_albedo(g_workspace->root(),materials.entries[i].albedo_name);
-            if(!material_albedos[i].empty()) ++resolved_albedos;
+            const auto& entry=materials.entries[i];auto& preview=preview_materials[i];
+            preview.albedo=resolve_base_albedo(g_workspace->root(),entry.albedo_name);
+            preview.eye_conjunctiva=resolve_base_albedo(g_workspace->root(),entry.eye_conjunctiva_name);
+            preview.eye_iris=resolve_base_albedo(g_workspace->root(),entry.eye_iris_name);
+            preview.eye_highlight=resolve_base_albedo(g_workspace->root(),entry.eye_highlight_name);
+            preview.eye_mask=resolve_base_albedo(g_workspace->root(),entry.eye_mask_name);
+            if(!preview.albedo.empty()||(!preview.eye_conjunctiva.empty()&&!preview.eye_iris.empty()&&!preview.eye_highlight.empty()))++resolved_materials;
         }
         for(const auto& chunk:mesh.chunks) if(chunk.material>=materials.entries.size()) throw std::runtime_error("minfo MaterialID 超出 0.mmat 条目范围");
-        if (!g_preview->load(mesh, skeleton, material_albedos)) throw std::runtime_error("GPU 预览资源创建失败");
+        if (!g_preview->load(mesh, skeleton, preview_materials)) throw std::runtime_error("GPU 预览资源创建失败");
         g_skeleton=skeleton;g_loaded_model=key;g_loaded_texture.clear();g_preview_mode=PreviewMode::model;
         g_preview->frame(g_camera);
         g_clh_files.clear(); g_clp_files.clear(); g_selected_collision=-1; g_selected_bone=-1; g_selected_clh=0;
@@ -275,7 +280,7 @@ bool load_model_preview(std::size_t index,bool force) {
             try { if(asset.subtype=="clh") g_clh_files.push_back({asset.input,gbfr::load_clh(asset.input)}); else if(asset.subtype=="clp") g_clp_files.push_back({asset.input,gbfr::load_clp(asset.input)}); } catch(const std::exception& error) { gbfr::Log::write(gbfr::LogLevel::warning,std::string("cloth 跳过：")+error.what()); }
         }
         update_collision_debug();
-        gbfr::Log::write(gbfr::LogLevel::info, "预览已加载：" + std::to_string(mesh.vertices.size()) + " 顶点，" + std::to_string(mesh.indices.size()/3) + " 三角形，" + std::to_string(mesh.chunks.size()) + " 材质分段，0.mmat 基础色 " + std::to_string(resolved_albedos) + "/" + std::to_string(materials.entries.size()));
+        gbfr::Log::write(gbfr::LogLevel::info, "预览已加载：" + std::to_string(mesh.vertices.size()) + " 顶点，" + std::to_string(mesh.indices.size()/3) + " 三角形，" + std::to_string(mesh.chunks.size()) + " 材质分段，0.mmat 可见材质 " + std::to_string(resolved_materials) + "/" + std::to_string(materials.entries.size()));
         return true;
     } catch (const std::exception& error) { gbfr::Log::write(gbfr::LogLevel::error, std::string("预览加载失败：") + error.what());return false; }
 }
