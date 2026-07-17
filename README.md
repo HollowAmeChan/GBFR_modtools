@@ -55,6 +55,7 @@ explore_output/
 - 将 `data/model/**/vars/*.mmat` 解码为 `*.mmat.json`。
 - 将角色 cloth 基础组、碰撞体、动作覆盖和重置表解码为 `*.bxm.xml`。
 - 将身体 `.mot` 复制到 `source/data/pl/<角色>/`，并将同数字 ID 的表情骨骼 `.mot` 复制到 `source/data/fp/<面部>/`，供 C++ 预览器按需解码；动画不会复制到可编辑的 `unpack`，也不会进入 Mod 构建列表。
+- 解析 pl/fp/wp 模型同目录的 `.sop`，在 `manifest.md` 中生成逐骨、逐操作的动画约束表，并把包含原始属性的结构化结果写入 `workspace.json/SkeletonConstraints`。报告分别标注“已探明、部分探明、未探明”和“预览器是否实现”，不会把作用推断当成完整公式。
 - 将 pl/fp/wp 的 `.minfo`、`.skeleton` 与 LOD0 `.mmesh` 原样复制到 `unpack`，登记为可恢复、可构建的模型文件。
 - 记录中间态 SHA-256，用于识别真实修改。
 
@@ -78,7 +79,15 @@ Granite DDS 输出到 `unpack/data/granite/{2k,4k}/`，格式为：
 
 制作眼睛贴图时，应保留 `conj/iris/eyeh` 的透明通道，因为分层合成依赖 alpha。颜色层使用 BC7 sRGB，`msk1` 使用 BC7 线性；不要把 `msk1` 当作缺失的 albedo，也不要只用一张普通 albedo 覆盖整只眼睛。DirectX DDS 在编辑器预览时会统一翻转 V 方向，制作内容时不需要额外手工倒置图像。
 
-面部 mmat 中 `A7=5` 的材质条目是眉毛、睫毛等透明覆盖层。实际覆盖范围来自对应 `face_msk2` 的蓝色通道，不是 `face_albd` 的 alpha：蓝通道白色区域保留，黑色区域透明。预览器先绘制不透明面部，再以不写深度、带深度偏移的 alpha blend 绘制覆盖层，避免它与脸部表面重合时随视角闪烁。制作眉毛或睫毛时，应同步检查 `msk2.B`，并保持该遮罩为线性数据。
+面部透明不能只看 `A7`。mmat 的 `A7` 实际是 `shader_sub_type`，真正的 alpha 开关位于 `A1` 参数 `0x53F49792`。以 `fp1400` 为例，主面部 subtype 7 与承载牙齿、舌头的未遮罩 subtype 5 都在不透明 pass 中按 `face_albd.A` 裁切并写深度；眉毛、睫毛覆盖层才使用 `face_albd.A * face_msk2.B`，以 `0.2` 阈值去掉 BC7 低灰噪点，并在不写深度、带深度偏移的透明 pass 中绘制。制作眉毛或睫毛时，应同时检查 albedo alpha 与 msk2 蓝通道，并保持 msk2 为线性数据。视口的“透明覆盖”只控制已确认的 `msk2.B` 覆盖层，不会关闭主面部或口腔实体必须执行的 albedo alpha 裁切。
+
+| 面部材质路径 | mmat 判定 | Coverage | 深度与光栅状态 | 用途 |
+| --- | --- | --- | --- | --- |
+| 主面部 clip | `A1/0x53F49792 != 0`，非透明覆盖层 | `albd.A` | 不透明 pass，写深度，背面剔除 | 裁掉面部 atlas 中不属于皮肤表面的区域 |
+| 口腔实体 clip | alpha 开启、subtype 5，但不属于 `msk2.B` 覆盖槽 | `albd.A` | 不透明 pass，写深度，背面剔除 | 牙齿、舌头等必须按真实几何深度互相遮挡的口腔内容 |
+| 遮罩覆盖 | alpha 开启、subtype 5，常量缓冲指向面部覆盖槽 | `albd.A * msk2.B` | alpha blend，不写深度，双面并带深度偏移 | 眉毛、睫毛等贴在脸表面的共面覆盖 |
+
+当前渲染顺序固定为主面部与口腔实体 clip、遮罩覆盖，最后才绘制骨架和碰撞调试线。这里把“裁切”和“混合”分开处理：主面部即使关闭“透明覆盖”也必须继续执行 alpha clip；否则 albedo atlas 的深色无效区域会在眉毛两端显示为黑色三角。口腔实体也必须写深度；把它当成普通透明层会让牙齿、舌头和口腔壁按提交顺序互相覆盖。遮罩覆盖则不能写深度，否则眉毛等共面层会与脸部发生闪烁或随视角消失。
 
 如果要删除眼球材质条目的 `A4`、改用 `data/texture` 下的普通 `.texture`，需要同时构建该材质 `A2` 实际引用的 `conj/iris/eyeh/msk1` 文件；只封回 `iris` 而把其余层留在 Granite 中，不能保证清除 A4 后仍能得到完整眼球效果。默认配色只处理 `vars/0.mmat.json`；其他配色仍需在对应编号的 mmat 中分别处理。
 
@@ -235,6 +244,8 @@ GBFR_modtools/
     nier_cli_mgrr_1.3.0/      从 DDS 新建 WTB texture
     MMat_ModelMaterial.fbs    mmat FlatBuffers schema
     workspace_lib.ps1         WTB 与 mmat 共享读写逻辑
+    sop_report.ps1            SOP 约束报告二进制解析器
+    sop_operations_zh.json    SOP 操作名称、作用与探明/实现状态目录
     explore_strings_zh.json   探索器中文文案
     builder_strings_zh.json   构建器中文文案
     humanoid_bone_names.json Blender 插件 humanoid 骨骼首选名称映射

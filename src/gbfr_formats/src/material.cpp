@@ -30,6 +30,15 @@ MaterialAsset load_mmat_json(const std::filesystem::path& path) {
     result.entries.reserve(entries->size());
     for (const auto& source_entry : *entries) {
         MaterialEntry entry;
+        bool alpha_enabled{};
+        const auto parameters = source_entry.find("A1");
+        if (parameters != source_entry.end() && parameters->is_array()) {
+            for (const auto& parameter : *parameters) {
+                const auto id = parameter.value("ID", 0u);
+                const bool enabled = parameter.value("ID2", 0u) != 0u;
+                if (id == enable_alpha_shader_parameter_id) alpha_enabled = enabled;
+            }
+        }
         const auto textures = source_entry.find("A2");
         if (textures != source_entry.end() && textures->is_array()) {
             for (const auto& texture : *textures) {
@@ -46,9 +55,22 @@ MaterialAsset load_mmat_json(const std::filesystem::path& path) {
                 }
             }
         }
-        // Face overlay materials (eyebrows/eyelashes) use render group 5;
-        // their coverage comes from the face msk2 texture's blue channel.
-        entry.alpha_blended = !entry.albedo_name.empty() && source_entry.value("A7", 0u) == 5u;
+        // A7 is shader_sub_type, not a generic render group. Alpha-enabled face
+        // entries are either depth-writing clips or the masked surface overlay.
+        const bool subtype5 = alpha_enabled && !entry.albedo_name.empty() && source_entry.value("A7", 0u) == 5u;
+        const auto constant_buffers = source_entry.find("A3");
+        if (subtype5 && constant_buffers != source_entry.end() && constant_buffers->is_array()) {
+            // Face overlay slot 6 is the eyebrow/eyelash layer. Other subtype-5
+            // layers (notably the mouth interior) use albedo alpha without msk2.B.
+            for (const auto& index : *constant_buffers) {
+                if (index.is_number_unsigned() && index.get<std::uint32_t>() == 6u) {
+                    entry.alpha_masked = !entry.alpha_mask_name.empty();
+                    break;
+                }
+            }
+        }
+        entry.alpha_blended = entry.alpha_masked;
+        entry.alpha_clipped = alpha_enabled && !entry.albedo_name.empty() && !entry.alpha_blended;
         result.entries.push_back(std::move(entry));
     }
     return result;

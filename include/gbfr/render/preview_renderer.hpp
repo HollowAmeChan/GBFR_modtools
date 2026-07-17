@@ -17,6 +17,7 @@ struct PreviewMaterialTextures {
     std::filesystem::path eye_highlight;
     std::filesystem::path eye_mask;
     std::filesystem::path alpha_mask;
+    bool alpha_clipped{};
     bool alpha_blended{};
 };
 
@@ -64,6 +65,7 @@ private:
         Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> alpha_mask;
         bool eye{};
         bool alpha_masked{};
+        bool alpha_clipped{};
         bool alpha_blended{};
     };
     bool load_dds(const std::filesystem::path& path,

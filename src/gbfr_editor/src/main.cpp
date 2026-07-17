@@ -6,6 +6,7 @@
 #include <gbfr/formats/animation.hpp>
 #include <gbfr/render/d3d11_context.hpp>
 #include <gbfr/render/preview_renderer.hpp>
+#include "sop_inspector.hpp"
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -57,6 +58,7 @@ bool g_show_mesh = true;
 gbfr::PreviewShadingMode g_preview_shading = gbfr::PreviewShadingMode::lit;
 bool g_show_skeleton = true;
 bool g_show_collisions = true;
+bool g_show_alpha_overlays = true;
 std::vector<std::filesystem::path> g_motion_files;
 std::optional<gbfr::AnimationClip> g_motion;
 std::array<char,128> g_motion_search{};
@@ -71,6 +73,7 @@ struct ClpFile { std::filesystem::path path; gbfr::ClpAsset data; };
 std::vector<ClhFile> g_clh_files;
 std::vector<ClpFile> g_clp_files;
 std::unordered_map<std::string,std::string> g_bone_names;
+gbfr::editor::SopInspector g_sop_inspector;
 int g_selected_clh = 0;
 int g_selected_bone = -1;
 int g_selected_collision = -1;
@@ -139,7 +142,7 @@ bool load_workspace(const std::filesystem::path& path) {
         g_selected_asset.reset();
         g_asset_function=AssetFunction::all;g_asset_search.fill('\0');
         g_preview_mode=PreviewMode::none;g_loaded_model.reset();g_loaded_texture.clear();
-        g_skeleton.bones.clear(); g_clh_files.clear(); g_clp_files.clear();
+        g_skeleton.bones.clear(); g_clh_files.clear(); g_clp_files.clear();g_sop_inspector.clear();
         if(g_preview) g_preview->clear();
         const auto settings_directory=g_workspace->root()/L".gbfr";
         std::filesystem::create_directories(settings_directory);
@@ -330,12 +333,22 @@ bool load_model_preview(std::size_t index,bool force) {
             preview.eye_iris=resolve_base_albedo(g_workspace->root(),entry.eye_iris_name);
             preview.eye_highlight=resolve_base_albedo(g_workspace->root(),entry.eye_highlight_name);
             preview.eye_mask=resolve_base_albedo(g_workspace->root(),entry.eye_mask_name);
-            if(entry.alpha_blended)preview.alpha_mask=resolve_base_albedo(g_workspace->root(),entry.alpha_mask_name);
+            if(entry.alpha_masked)preview.alpha_mask=resolve_base_albedo(g_workspace->root(),entry.alpha_mask_name);
+            preview.alpha_clipped=entry.alpha_clipped;
             preview.alpha_blended=entry.alpha_blended;
             if(!preview.albedo.empty()||(!preview.eye_conjunctiva.empty()&&!preview.eye_iris.empty()&&!preview.eye_highlight.empty()))++resolved_materials;
         }
-        for(const auto& chunk:mesh.chunks) if(chunk.material>=materials.entries.size()) throw std::runtime_error("minfo MaterialID 超出 0.mmat 条目范围");
+        for(const auto& chunk:mesh.chunks) {
+            if(chunk.material>=materials.entries.size()) throw std::runtime_error("minfo MaterialID 超出 0.mmat 条目范围");
+            const auto submesh=chunk.submesh<info.submesh_names.size()?info.submesh_names[chunk.submesh]:std::string{"?"};
+            gbfr::Log::write(gbfr::LogLevel::info,
+                "LOD0 分段：submesh="+submesh+
+                " material="+std::to_string(chunk.material)+
+                " indices="+std::to_string(chunk.count)+
+                " alpha="+(materials.entries[chunk.material].alpha_masked?"masked-overlay":materials.entries[chunk.material].alpha_blended?"blend":materials.entries[chunk.material].alpha_clipped?"clip":"none"));
+        }
         if (!g_preview->load(mesh, skeleton, preview_materials, sop)) throw std::runtime_error("GPU 预览资源创建失败");
+        g_sop_inspector.set_asset(sop,sop_path);
         g_skeleton=skeleton;g_loaded_model=key;g_loaded_texture.clear();g_preview_mode=PreviewMode::model;
         discover_motions(key);
         g_preview->frame(g_camera);
@@ -380,6 +393,19 @@ bool contains_ascii_case_insensitive(std::string value,std::string query) {
     const auto lower=[](unsigned char c){return static_cast<char>(std::tolower(c));};
     std::transform(value.begin(),value.end(),value.begin(),lower);std::transform(query.begin(),query.end(),query.begin(),lower);
     return value.find(query)!=std::string::npos;
+}
+
+int compare_ascii_case_insensitive(std::string left,std::string right) {
+    const auto lower=[](unsigned char value){return static_cast<char>(std::tolower(value));};
+    std::transform(left.begin(),left.end(),left.begin(),lower);std::transform(right.begin(),right.end(),right.begin(),lower);
+    if(left<right)return -1;if(right<left)return 1;return 0;
+}
+
+int compare_natural_path(const std::filesystem::path& left,const std::filesystem::path& right) {
+    const auto& a=left.native();const auto& b=right.native();
+    if(gbfr::natural_less_case_insensitive(a,b))return -1;
+    if(gbfr::natural_less_case_insensitive(b,a))return 1;
+    return 0;
 }
 
 bool asset_matches_search(const gbfr::WorkspaceAsset& asset) {
@@ -495,7 +521,7 @@ void draw_motion_controls() {
 
 void return_to_start() {
     if(!g_imgui_ini.empty()) ImGui::SaveIniSettingsToDisk(g_imgui_ini.c_str());
-    g_workspace.reset(); g_selected_asset.reset(); g_skeleton.bones.clear(); g_clh_files.clear(); g_clp_files.clear();
+    g_workspace.reset(); g_selected_asset.reset(); g_skeleton.bones.clear(); g_clh_files.clear(); g_clp_files.clear();g_sop_inspector.clear();
     g_preview_mode=PreviewMode::none;g_loaded_model.reset();g_loaded_texture.clear();clear_motion_state();
     g_imgui_ini.clear(); ImGui::GetIO().IniFilename=nullptr; g_start_layout_built=false;
     if(g_preview) g_preview->clear();
@@ -585,18 +611,34 @@ void draw_editor_shell() {
         }
         ImGui::SetNextItemWidth(-FLT_MIN);
         ImGui::InputTextWithHint("##asset_search","按文件名、子类或输出路径过滤",g_asset_search.data(),g_asset_search.size());
-        if (ImGui::BeginTable("assets", 5, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable)) {
+        std::vector<std::size_t> visible_assets;
+        for(std::size_t index=0;index<g_workspace->assets().size();++index){const auto& asset=g_workspace->assets()[index];if(g_changed_only&&!asset.changed)continue;if(!asset_matches_function(asset,g_asset_function)||!asset_matches_search(asset))continue;visible_assets.push_back(index);}
+        const auto table_flags=ImGuiTableFlags_RowBg|ImGuiTableFlags_BordersInnerV|ImGuiTableFlags_ScrollY|ImGuiTableFlags_Resizable|ImGuiTableFlags_Sortable|ImGuiTableFlags_SortMulti|ImGuiTableFlags_SortTristate;
+        if (ImGui::BeginTable("assets", 5, table_flags)) {
         ImGui::TableSetupScrollFreeze(0, 1);
-        ImGui::TableSetupColumn("状态", ImGuiTableColumnFlags_WidthFixed, 80);
-        ImGui::TableSetupColumn("类型", ImGuiTableColumnFlags_WidthFixed, 90);
-        ImGui::TableSetupColumn("子类", ImGuiTableColumnFlags_WidthFixed, 80);
-        ImGui::TableSetupColumn("输入", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("build", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("状态", ImGuiTableColumnFlags_WidthFixed, 80,0);
+        ImGui::TableSetupColumn("类型", ImGuiTableColumnFlags_WidthFixed, 90,1);
+        ImGui::TableSetupColumn("子类", ImGuiTableColumnFlags_WidthFixed, 80,2);
+        ImGui::TableSetupColumn("输入", ImGuiTableColumnFlags_WidthStretch|ImGuiTableColumnFlags_DefaultSort,0,3);
+        ImGui::TableSetupColumn("build", ImGuiTableColumnFlags_WidthStretch,0,4);
         ImGui::TableHeadersRow();
-        for (std::size_t index = 0; index < g_workspace->assets().size(); ++index) {
+        if(auto* specs=ImGui::TableGetSortSpecs();specs&&specs->SpecsCount>0){
+            std::stable_sort(visible_assets.begin(),visible_assets.end(),[&](std::size_t left_index,std::size_t right_index){
+                const auto& left=g_workspace->assets()[left_index];const auto& right=g_workspace->assets()[right_index];
+                for(int spec_index=0;spec_index<specs->SpecsCount;++spec_index){const auto& spec=specs->Specs[spec_index];int order{};switch(spec.ColumnUserID){
+                    case 0:{const int a=left.changed?0:left.available?1:2,b=right.changed?0:right.available?1:2;order=a<b?-1:a>b?1:0;break;}
+                    case 1:order=compare_ascii_case_insensitive(gbfr::asset_kind_name(left.kind),gbfr::asset_kind_name(right.kind));break;
+                    case 2:order=compare_ascii_case_insensitive(left.subtype,right.subtype);break;
+                    case 3:order=compare_natural_path(left.input.filename(),right.input.filename());break;
+                    case 4:order=compare_natural_path(left.output,right.output);break;
+                    default:break;}
+                    if(order!=0)return spec.SortDirection==ImGuiSortDirection_Ascending?order<0:order>0;
+                }return left_index<right_index;
+            });
+            specs->SpecsDirty=false;
+        }
+        for (const auto index:visible_assets) {
             const auto& asset = g_workspace->assets()[index];
-            if (g_changed_only && !asset.changed) continue;
-            if (!asset_matches_function(asset,g_asset_function)||!asset_matches_search(asset)) continue;
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
             const std::string id = (asset.changed ? "已修改##" : asset.available ? "未修改##" : "缺失##") + std::to_string(index);
@@ -619,6 +661,7 @@ void draw_editor_shell() {
         if(ImGui::Combo("显示模式",&mode,modes,3))g_preview_shading=static_cast<gbfr::PreviewShadingMode>(mode);ImGui::SameLine();
         ImGui::Checkbox("骨架", &g_show_skeleton); ImGui::SameLine();
         if(ImGui::Checkbox("碰撞体", &g_show_collisions)&&g_show_collisions)update_collision_debug(); ImGui::SameLine();
+        ImGui::Checkbox("透明覆盖",&g_show_alpha_overlays);ImGui::SameLine();
         if (g_preview && g_preview->has_model() && ImGui::Button("取景")) g_preview->frame(g_camera);
         if(!g_motion_files.empty())draw_motion_controls();
     }else if(g_preview_mode==PreviewMode::texture&&g_preview&&g_preview->texture_image()){
@@ -627,7 +670,7 @@ void draw_editor_shell() {
     ImVec2 available = ImGui::GetContentRegionAvail();
     if (g_preview&&g_preview_mode==PreviewMode::model&&available.x > 1 && available.y > 1) {
         g_preview->resize(static_cast<unsigned>(available.x), static_cast<unsigned>(available.y));
-        g_preview->render(g_camera, g_show_mesh, g_preview_shading, g_show_skeleton, g_show_collisions, true);
+        g_preview->render(g_camera, g_show_mesh, g_preview_shading, g_show_skeleton, g_show_collisions, g_show_alpha_overlays);
         const ImVec2 image_origin=ImGui::GetCursorScreenPos();
         ImGui::Image(reinterpret_cast<ImTextureID>(g_preview->image()), available);
         if (ImGui::IsItemHovered()) {
@@ -691,6 +734,12 @@ void draw_editor_shell() {
         for(const auto& bone:g_skeleton.bones){const int id=cloth_bone_id(bone.name);const auto label=bone_display(bone.name)+"##bone"+std::to_string(id);if(ImGui::Selectable(label.c_str(),g_selected_bone==id)){g_selected_bone=id;g_all_bones=false;update_collision_debug();}}
         ImGui::EndChild();ImGui::SameLine();
         ImGui::BeginChild("cloth",ImVec2(0,0));
+        if(ImGui::BeginTabBar("skeleton_details")){
+        if(ImGui::BeginTabItem("SOP 约束")){
+            g_sop_inspector.draw(g_skeleton,g_bone_names,g_selected_bone);
+            ImGui::EndTabItem();
+        }
+        if(ImGui::BeginTabItem("Cloth 物理")){
         if(!g_clh_files.empty()){
             g_selected_clh=std::clamp(g_selected_clh,0,static_cast<int>(g_clh_files.size()-1));
             const auto current=utf8(g_clh_files[g_selected_clh].path.filename().wstring());
@@ -702,6 +751,10 @@ void draw_editor_shell() {
         } else ImGui::TextUnformatted("工作区没有可用 CLH XML。");
         if(!g_clp_files.empty()&&ImGui::CollapsingHeader("CLP 节点",ImGuiTreeNodeFlags_DefaultOpen)){
             if(ImGui::BeginTable("clp_nodes",8,ImGuiTableFlags_RowBg|ImGuiTableFlags_BordersInnerV|ImGuiTableFlags_ScrollY,ImVec2(0,180))){const char* columns[]={"文件","骨骼","Up","Down","旋转限制","摩擦","重量","厚度"};for(const char* column:columns)ImGui::TableSetupColumn(column);ImGui::TableHeadersRow();for(const auto& file:g_clp_files)for(const auto& node:file.data.nodes){if(!g_all_bones&&g_selected_bone>=0&&node.bone!=g_selected_bone)continue;ImGui::TableNextRow();ImGui::TableNextColumn();ImGui::TextUnformatted(utf8(file.path.filename().wstring()).c_str());ImGui::TableNextColumn();ImGui::Text("%d",node.bone);ImGui::TableNextColumn();ImGui::Text("%d",node.up);ImGui::TableNextColumn();ImGui::Text("%d",node.down);ImGui::TableNextColumn();ImGui::Text("%.3f",node.rotation_limit);ImGui::TableNextColumn();ImGui::Text("%.3f",node.friction);ImGui::TableNextColumn();ImGui::Text("%.3f",node.weight);ImGui::TableNextColumn();ImGui::Text("%.3f",node.thickness);}ImGui::EndTable();}
+        }
+        ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
         }
         ImGui::EndChild();
     }
@@ -737,6 +790,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     if (!preview.initialize(d3d.device(), d3d.context(), preview_shader_file())) return 2;
     g_preview = &preview;
     load_bone_names();
+    if(!g_sop_inspector.load_catalog(tool_root()/L"_lib/sop_operations_zh.json"))gbfr::Log::write(gbfr::LogLevel::warning,"SOP 操作目录加载失败，约束检查器将显示未知类型");
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();

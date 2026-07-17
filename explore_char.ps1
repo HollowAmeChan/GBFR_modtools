@@ -15,10 +15,13 @@ $texconvExe = Join-Path $libRoot "texconv.exe"
 $gbfrDataToolsExe = Join-Path $libRoot "GBFRDataTools.exe"
 $schemaFbs = Join-Path $libRoot "MMat_ModelMaterial.fbs"
 . (Join-Path $libRoot "workspace_lib.ps1")
+. (Join-Path $libRoot "sop_report.ps1")
 
 # Load Chinese strings from JSON at runtime (no parse-time encoding issues)
 $stringsFile = Join-Path $libRoot "explore_strings_zh.json"
 $S = ConvertFrom-Json ([IO.File]::ReadAllText($stringsFile, [Text.Encoding]::UTF8))
+$sopCatalog = Import-SopOperationCatalog (Join-Path $libRoot "sop_operations_zh.json")
+$sopBoneNames = Import-SopBoneNames (Join-Path $libRoot "humanoid_bone_names.json")
 
 # Section headers via codepoints
 $H_MODEL   = -join ([char]0x6A21,[char]0x578B,[char]0x5C42)
@@ -164,7 +167,63 @@ $workspaceJson = Join-Path $outDir "workspace.json"
 $copyRoot  = $sourceRoot
 $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 $lines     = [System.Collections.Generic.List[string]]::new()
+$sopReports = [System.Collections.Generic.List[PSCustomObject]]::new()
 function L([string]$s = "") { $lines.Add($s) }
+
+function Format-MarkdownCell([object]$value) {
+    return ([string]$value).Replace("|", "\|").Replace("`r", " ").Replace("`n", " ")
+}
+
+function Add-SopConstraintReport([string]$path, [string]$modelId) {
+    try {
+        $report = Read-SopConstraintReport $path $sopCatalog
+        $relativeDataPath = [IO.Path]::GetFullPath($path).Substring($dataRootPrefix.Length)
+        $sourceRelative = ConvertTo-WorkspacePath (Join-Path "source\data" $relativeDataPath)
+        $sopReports.Add([PSCustomObject]@{
+            ModelId = $modelId
+            Source = $sourceRelative
+            File = $report.File
+            Version = $report.Version
+            OperationCount = $report.OperationCount
+            ConfirmedCount = $report.ConfirmedCount
+            PartialCount = $report.PartialCount
+            UnknownCount = $report.UnknownCount
+            RuntimeSupportedCount = $report.RuntimeSupportedCount
+            Operations = @($report.Operations)
+        })
+
+        L ""
+        L "#### $($S.sop_report_title): ``$($report.File)``"
+        L ""
+        L "$($S.sop_report_intro)"
+        L ""
+        L "| $($S.col_field) | $($S.col_value) |"
+        L "|---|---|"
+        L "| **$($S.col_count)** | $($report.OperationCount) |"
+        L "| **$($S.sop_summary_confirmed)** | $($report.ConfirmedCount) |"
+        L "| **$($S.sop_summary_partial)** | $($report.PartialCount) |"
+        L "| **$($S.sop_summary_unknown)** | $($report.UnknownCount) |"
+        L "| **$($S.sop_summary_runtime)** | $($report.RuntimeSupportedCount) |"
+        L ""
+        L "> $($S.sop_report_status_note)"
+        L ""
+        L "| $($S.sop_col_index) | $($S.sop_col_target) | $($S.sop_col_source) | $($S.sop_col_operation) | $($S.sop_col_purpose) | $($S.sop_col_discovery) | $($S.sop_col_runtime) | $($S.sop_col_properties) |"
+        L "|---:|---|---|---|---|---|---|---:|"
+        foreach ($operation in @($report.Operations | Sort-Object TargetBone, Index)) {
+            $target = Format-SopBoneDisplay $operation.TargetBone $sopBoneNames
+            $source = Format-SopBoneDisplay $operation.SourceBone $sopBoneNames
+            $name = if ($operation.Discovery -eq "unknown") { $S.sop_unknown_name } else { $operation.Name }
+            $purpose = if ($operation.Discovery -eq "unknown") { $S.sop_unknown_purpose } else { $operation.Purpose }
+            $discovery = if ($operation.Discovery -eq "unknown") { $S.sop_unknown_discovery } else { $operation.DiscoveryLabel }
+            $runtime = if ($operation.Discovery -eq "unknown") { $S.sop_unknown_runtime } else { $operation.RuntimeLabel }
+            L "| $($operation.Index) | ``$(Format-MarkdownCell $target)`` | ``$(Format-MarkdownCell $source)`` | $(Format-MarkdownCell $name) ``$($operation.TypeHash)`` | $(Format-MarkdownCell $purpose) | $(Format-MarkdownCell $discovery) | $(Format-MarkdownCell $runtime) | $($operation.PropertyCount) |"
+        }
+    } catch {
+        L ""
+        L "> **$($S.sop_parse_failed)**: ``$([IO.Path]::GetFileName($path))`` -- $(Format-MarkdownCell $_.Exception.Message)"
+        Write-Host "  [warn] SOP parse failed: $([IO.Path]::GetFileName($path))" -ForegroundColor DarkYellow
+    }
+}
 
 # Collect only files that the explorer actually discovers. They are copied
 # after scanning so the output can preserve paths starting at data/.
@@ -357,6 +416,7 @@ function Initialize-WorkspaceArtifacts {
         Materials = @($materials)
         ClothFiles = @($clothFiles)
         ModelFiles = @($modelFiles)
+        SkeletonConstraints = @($sopReports)
         DecodeErrors = @($errors)
     }
     $json = $workspace | ConvertTo-Json -Depth 8
@@ -626,6 +686,10 @@ function Scan-ModelDir([string]$dp, [string]$dc, [string]$sectionLabel) {
             $d      = if ($DESC.ContainsKey($extKey)) { $DESC[$extKey] } else { $ext }
             L "| ``$dc$ext`` | $sz | $d |"
         }
+    }
+    $sopPath = Join-Path $dir "$dc.sop"
+    if (Test-Path -LiteralPath $sopPath -PathType Leaf) {
+        Add-SopConstraintReport $sopPath $dc
     }
 
     $varsDir = Join-Path $dir "vars"
@@ -1020,6 +1084,8 @@ L "| **$($S.decoded_granite)** | $($graniteResult.FileCount) |"
 L "| **$($S.decoded_materials)** | $($artifactResult.MaterialCount) |"
 L "| **$($S.decoded_cloth)** | $($artifactResult.ClothCount) |"
 L "| **$($S.workspace_model_files)** | $($artifactResult.ModelCount) |"
+L "| **$($S.sop_constraint_files)** | $($sopReports.Count) |"
+L "| **$($S.sop_constraint_operations)** | $(($sopReports | Measure-Object OperationCount -Sum).Sum) |"
 L "| **$($S.decode_failed)** | $($artifactResult.ErrorCount + $graniteResult.ErrorCount) |"
 if ($copyResult.Failed.Count -gt 0) {
     L "| **$($S.copy_failed)** | $($copyResult.Failed.Count) |"

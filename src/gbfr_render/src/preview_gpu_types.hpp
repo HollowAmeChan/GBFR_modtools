@@ -17,9 +17,8 @@ struct SceneConstants {
     DirectX::XMFLOAT4 color;
     DirectX::XMFLOAT4 light;
     unsigned textured, eye_material, lighting, alpha_blended;
-    unsigned alpha_masked, skinning_enabled;
+    unsigned alpha_masked, alpha_clipped, skinning_enabled;
     float alpha_threshold;
-    unsigned padding;
 };
 
 struct BoneConstants {

@@ -45,9 +45,9 @@ bool PreviewRenderer::initialize(ID3D11Device* device,ID3D11DeviceContext* conte
     if(FAILED(device_->CreateBuffer(&cb,nullptr,&bones_)))return false;
     D3D11_SAMPLER_DESC sd{}; sd.Filter=D3D11_FILTER_MIN_MAG_MIP_LINEAR; sd.AddressU=sd.AddressV=sd.AddressW=D3D11_TEXTURE_ADDRESS_WRAP; sd.MaxLOD=D3D11_FLOAT32_MAX;
     device_->CreateSamplerState(&sd,&sampler_);
-    D3D11_RASTERIZER_DESC rd{}; rd.CullMode=D3D11_CULL_NONE; rd.FillMode=D3D11_FILL_SOLID; rd.DepthClipEnable=TRUE;
+    D3D11_RASTERIZER_DESC rd{}; rd.CullMode=D3D11_CULL_BACK; rd.FillMode=D3D11_FILL_SOLID; rd.DepthClipEnable=TRUE;
     if(FAILED(device_->CreateRasterizerState(&rd,&solid_)))return false;
-    rd.FillMode=D3D11_FILL_WIREFRAME;if(FAILED(device_->CreateRasterizerState(&rd,&wire_)))return false;
+    rd.CullMode=D3D11_CULL_NONE;rd.FillMode=D3D11_FILL_WIREFRAME;if(FAILED(device_->CreateRasterizerState(&rd,&wire_)))return false;
     rd.FillMode=D3D11_FILL_SOLID;rd.DepthBias=-10000;rd.SlopeScaledDepthBias=-2.0f;
     if(FAILED(device_->CreateRasterizerState(&rd,&alpha_overlay_raster_)))return false;
     D3D11_DEPTH_STENCIL_DESC depth{};depth.DepthEnable=FALSE;depth.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ZERO;depth.DepthFunc=D3D11_COMPARISON_ALWAYS;
@@ -103,6 +103,7 @@ bool PreviewRenderer::load(const MeshAsset& mesh,const SkeletonAsset& skeleton,c
     materials_.resize(materials.size());
     for(std::size_t i=0;i<materials.size();++i) {
         auto& gpu=materials_[i];const auto& source=materials[i];
+        gpu.alpha_clipped=source.alpha_clipped;
         gpu.alpha_blended=source.alpha_blended;
         if(!source.albedo.empty()&&!load_dds(source.albedo,gpu.primary)) return false;
         if(!source.alpha_mask.empty()){gpu.alpha_masked=load_dds(source.alpha_mask,gpu.alpha_mask);if(!gpu.alpha_masked)return false;}
@@ -182,7 +183,7 @@ void PreviewRenderer::render(const OrbitCamera& camera,bool show_mesh,PreviewSha
     D3D11_VIEWPORT viewport{0,0,static_cast<float>(width_),static_cast<float>(height_),0,1};context_->RSSetViewports(1,&viewport);
     const float cp=std::cos(camera.pitch),sp=std::sin(camera.pitch),cy=std::cos(camera.yaw),sy=std::sin(camera.yaw);XMVECTOR target=XMVectorSet(camera.target.x,camera.target.y,camera.target.z,1);XMVECTOR eye=target+XMVectorSet(camera.distance*cp*sy,camera.distance*sp,camera.distance*cp*cy,0);
     const auto vp=XMMatrixLookAtLH(eye,target,XMVectorSet(0,1,0,0))*XMMatrixPerspectiveFovLH(XM_PIDIV4,static_cast<float>(width_)/height_,std::max(.001f,camera.distance*.001f),std::max(100.f,camera.distance*20));
-    SceneConstants constants{};XMStoreFloat4x4(&constants.view_projection,XMMatrixTranspose(vp));constants.color={.72f,.76f,.82f,1};constants.light={-.28f,.82f,.48f,0};constants.lighting=shading==PreviewShadingMode::lit?1u:0u;constants.alpha_threshold=.02f;
+    SceneConstants constants{};XMStoreFloat4x4(&constants.view_projection,XMMatrixTranspose(vp));constants.color={.72f,.76f,.82f,1};constants.light={-.28f,.82f,.48f,0};constants.lighting=shading==PreviewShadingMode::lit?1u:0u;constants.alpha_threshold=.2f;
     D3D11_MAPPED_SUBRESOURCE mapped{};
     auto upload_constants=[&](){if(SUCCEEDED(context_->Map(constants_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped))){std::memcpy(mapped.pData,&constants,sizeof(constants));context_->Unmap(constants_.Get(),0);}};
     UINT stride=sizeof(GpuVertex),offset=0;context_->IASetInputLayout(input_layout_.Get());context_->VSSetShader(vertex_shader_.Get(),nullptr,0);context_->PSSetShader(pixel_shader_.Get(),nullptr,0);context_->VSSetConstantBuffers(0,1,constants_.GetAddressOf());context_->VSSetConstantBuffers(1,1,bones_.GetAddressOf());context_->PSSetConstantBuffers(0,1,constants_.GetAddressOf());context_->PSSetSamplers(0,1,sampler_.GetAddressOf());
@@ -193,23 +194,29 @@ void PreviewRenderer::render(const OrbitCamera& camera,bool show_mesh,PreviewSha
             for(const auto& draw:draw_ranges_){
                 GpuMaterialTextures* material=!wireframe&&draw.material<materials_.size()?&materials_[draw.material]:nullptr;
                 const bool alpha=material&&material->alpha_blended;
-                if(pass<2&&alpha!=(pass==1))continue;
+                const bool masked=material&&material->alpha_masked;
+                if(pass==0&&alpha)continue;
+                if(pass==1&&(!alpha||masked))continue;
+                if(pass==2&&(!alpha||!masked))continue;
                 ID3D11ShaderResourceView* textures[4]={material?material->primary.Get():nullptr,material?material->iris.Get():nullptr,material?material->highlight.Get():nullptr,material?material->alpha_mask.Get():nullptr};
-                constants.textured=textures[0]?1u:0u;constants.eye_material=material&&material->eye?1u:0u;constants.alpha_blended=alpha?1u:0u;constants.alpha_masked=material&&material->alpha_masked?1u:0u;upload_constants();context_->PSSetShaderResources(0,4,textures);context_->DrawIndexed(draw.index_count,draw.first_index,0);
+                constants.textured=textures[0]?1u:0u;constants.eye_material=material&&material->eye?1u:0u;constants.alpha_blended=alpha?1u:0u;constants.alpha_masked=material&&material->alpha_masked?1u:0u;constants.alpha_clipped=material&&material->alpha_clipped?1u:0u;upload_constants();context_->PSSetShaderResources(0,4,textures);context_->DrawIndexed(draw.index_count,draw.first_index,0);
             }
         };
         const float blend_factor[4]{};
         context_->OMSetBlendState(nullptr,blend_factor,0xffffffffu);context_->OMSetDepthStencilState(nullptr,0);
-        if(wireframe)draw_pass(2);
+        if(wireframe)draw_pass(3);
         else{
             draw_pass(0);
-            if(show_alpha_overlays){context_->RSSetState(alpha_overlay_raster_.Get());context_->OMSetBlendState(alpha_blend_.Get(),blend_factor,0xffffffffu);context_->OMSetDepthStencilState(alpha_depth_.Get(),0);draw_pass(1);}
+            if(show_alpha_overlays){
+                context_->OMSetBlendState(alpha_blend_.Get(),blend_factor,0xffffffffu);
+                context_->OMSetDepthStencilState(alpha_depth_.Get(),0);context_->RSSetState(alpha_overlay_raster_.Get());draw_pass(2);
+            }
             context_->RSSetState(solid_.Get());
             context_->OMSetBlendState(nullptr,blend_factor,0xffffffffu);
         }
     }
     context_->OMSetDepthStencilState(overlay_depth_.Get(),0);
-    constants.lighting=0;constants.eye_material=0;constants.alpha_blended=0;constants.alpha_masked=0;constants.skinning_enabled=0;
+    constants.lighting=0;constants.eye_material=0;constants.alpha_blended=0;constants.alpha_masked=0;constants.alpha_clipped=0;constants.skinning_enabled=0;
     if(show_skeleton&&line_vertex_count_){constants.color={1,.55f,.08f,1};constants.textured=0;upload_constants();context_->RSSetState(solid_.Get());context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST);context_->IASetVertexBuffers(0,1,lines_.GetAddressOf(),&stride,&offset);context_->Draw(line_vertex_count_,0);}
     if(show_skeleton&&bone_point_vertex_count_){constants.color={1,.88f,.24f,1};constants.textured=0;upload_constants();context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST);context_->IASetVertexBuffers(0,1,bone_points_.GetAddressOf(),&stride,&offset);context_->Draw(bone_point_vertex_count_,0);}
     if(show_collisions&&collision_vertex_count_){constants.color={.05f,.9f,.85f,1};constants.textured=0;upload_constants();context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST);context_->IASetVertexBuffers(0,1,collision_lines_.GetAddressOf(),&stride,&offset);context_->Draw(collision_vertex_count_,0);}

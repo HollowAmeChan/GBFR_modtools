@@ -70,12 +70,16 @@ int main() {
         const auto skeleton = gbfr::load_skeleton(model_root / L"pl1400.skeleton");
         const auto sop_path=integration.parent_path()/L"source/data/model/pl/pl1400/pl1400.sop";
         const auto sop=gbfr::load_sop(sop_path);
+        nlohmann::json sop_catalog;
+        {std::ifstream input(fs::path(GBFR_SOURCE_DIR)/L"_lib/sop_operations_zh.json");if(!input)return 59;input>>sop_catalog;}
         const auto mesh = gbfr::load_mmesh(integration.parent_path() / L"unpack/data/model_streaming/lod0/pl1400.mmesh", minfo);
         if (mesh.vertices.size() != minfo.vertex_count || mesh.indices.size() != minfo.index_count || skeleton.bones.empty()) return 7;
         if(sop.version!=gbfr::sop_version_20200309||sop.operations.size()!=101)return 52;
         const auto swing_twist_count=std::count_if(sop.operations.begin(),sop.operations.end(),[](const auto& operation){return operation.type_hash==gbfr::sop_swing_twist_operation;});
         const auto twist_count=std::count_if(sop.operations.begin(),sop.operations.end(),[](const auto& operation){return operation.type_hash==gbfr::sop_twist_operation;});
         if(swing_twist_count!=16||twist_count!=22)return 53;
+        if(sop_catalog.value("SchemaVersion",0)!=1||!sop_catalog.contains("Operations")||sop_catalog["Operations"].size()!=7)return 60;
+        for(const auto& operation:sop.operations){const auto operation_hash="0x"+[] (std::uint32_t value){char text[9]{};constexpr char digits[]="0123456789ABCDEF";for(int i=0;i<8;++i)text[7-i]=digits[(value>>(i*4))&0xfu];return std::string(text,8);}(operation.type_hash);if(std::none_of(sop_catalog["Operations"].begin(),sop_catalog["Operations"].end(),[&](const auto& item){return item.value("Hash",std::string{})==operation_hash;}))return 61;}
         const auto& first_sop=sop.operations.front();
         if(first_sop.target_bone!=0xA12u||first_sop.source_bone!=0x12u||first_sop.type_hash!=gbfr::sop_swing_twist_operation||
            !first_sop.find(gbfr::sop_axis_y_property)||!first_sop.find(gbfr::sop_twist_rate_property)||!first_sop.find(gbfr::sop_swing_rate_property))return 54;
@@ -114,10 +118,12 @@ int main() {
            fp_materials.entries[1].eye_highlight_name!="fp1400_r_eye_lod0_eyeh"||
            fp_materials.entries[3].alpha_mask_name!="fp1400_face_lod0_msk2"||
            fp_materials.entries[4].alpha_mask_name!="fp1400_face_lod0_msk2"||
-           fp_materials.entries[2].alpha_blended||!fp_materials.entries[3].alpha_blended||!fp_materials.entries[4].alpha_blended)return 19;
+           !fp_materials.entries[2].alpha_clipped||fp_materials.entries[2].alpha_blended||
+           !fp_materials.entries[3].alpha_clipped||fp_materials.entries[3].alpha_blended||fp_materials.entries[3].alpha_masked||
+           fp_materials.entries[4].alpha_clipped||!fp_materials.entries[4].alpha_blended||!fp_materials.entries[4].alpha_masked)return 19;
         std::vector<gbfr::PreviewMaterialTextures> fp_preview_materials(fp_materials.entries.size());
         const auto granite_4k=integration.parent_path()/L"unpack/data/granite/4k";
-        for(std::size_t i=0;i<fp_preview_materials.size();++i){fp_preview_materials[i].alpha_blended=fp_materials.entries[i].alpha_blended;if(fp_materials.entries[i].alpha_blended&&!fp_materials.entries[i].alpha_mask_name.empty())fp_preview_materials[i].alpha_mask=granite_4k/fs::path(fp_materials.entries[i].alpha_mask_name+".dds");}
+        for(std::size_t i=0;i<fp_preview_materials.size();++i){fp_preview_materials[i].alpha_clipped=fp_materials.entries[i].alpha_clipped;fp_preview_materials[i].alpha_blended=fp_materials.entries[i].alpha_blended;if(fp_materials.entries[i].alpha_blended&&!fp_materials.entries[i].alpha_mask_name.empty())fp_preview_materials[i].alpha_mask=granite_4k/fs::path(fp_materials.entries[i].alpha_mask_name+".dds");}
         for(std::size_t i=0;i<2;++i) {
             const auto& entry=fp_materials.entries[i];auto& material=fp_preview_materials[i];
             material.eye_conjunctiva=granite_4k/fs::path(entry.eye_conjunctiva_name+".dds");

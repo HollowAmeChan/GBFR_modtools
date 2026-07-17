@@ -1,0 +1,75 @@
+{
+  "SchemaVersion": 1,
+  "Operations": [
+    {
+      "Hash": "0xB1FFF4E6",
+      "Name": "Swing/Twist 分配",
+      "Category": "Deform",
+      "Discovery": "core_confirmed",
+      "DiscoveryLabel": "基础公式已探明",
+      "Runtime": "implemented_guarded",
+      "RuntimeLabel": "兼容性自检后执行",
+      "Purpose": "把来源骨的 swing 与 twist 按独立倍率分配给平行 deform 骨；带额外 corrective 属性的变体仍需继续分析。"
+    },
+    {
+      "Hash": "0x61D80537",
+      "Name": "Twist 提取",
+      "Category": "Deform",
+      "Discovery": "confirmed",
+      "DiscoveryLabel": "已探明",
+      "Runtime": "implemented_guarded",
+      "RuntimeLabel": "兼容性自检后执行",
+      "Purpose": "提取来源骨沿指定轴的 twist，按倍率和局部 offset 驱动分配骨或 counter-twist 骨。"
+    },
+    {
+      "Hash": "0x426305E9",
+      "Name": "单方向姿态修正",
+      "Category": "Corrective",
+      "Discovery": "partial",
+      "DiscoveryLabel": "部分探明",
+      "Runtime": "not_implemented",
+      "RuntimeLabel": "预览器未实现",
+      "Purpose": "根据来源骨的单方向旋转驱动关节附近 corrective；已识别方向、角度范围和强度类参数，完整公式未确认。"
+    },
+    {
+      "Hash": "0x448815BE",
+      "Name": "限幅旋转重映射",
+      "Category": "Corrective",
+      "Discovery": "partial",
+      "DiscoveryLabel": "部分探明",
+      "Runtime": "not_implemented",
+      "RuntimeLabel": "预览器未实现",
+      "Purpose": "把来源旋转在上下限区间内重映射到 corrective 骨；边界含 -179..179 等角度值，轴与组合规则未完全确认。"
+    },
+    {
+      "Hash": "0x6BE3DB64",
+      "Name": "多轴/分段 Corrective",
+      "Category": "Corrective",
+      "Discovery": "partial",
+      "DiscoveryLabel": "部分探明",
+      "Runtime": "not_implemented",
+      "RuntimeLabel": "预览器未实现",
+      "Purpose": "在同一 target 上与其他操作叠加的多轴或分段姿态修正；参数用途和累积公式尚未完整确认。"
+    },
+    {
+      "Hash": "0xA0530081",
+      "Name": "多参数关节修正",
+      "Category": "Corrective",
+      "Discovery": "partial",
+      "DiscoveryLabel": "部分探明",
+      "Runtime": "not_implemented",
+      "RuntimeLabel": "预览器未实现",
+      "Purpose": "用于肘、膝、肩胯附近的多参数姿态修正；已确认其 corrective 角色，输入到输出的数学关系未探明。"
+    },
+    {
+      "Hash": "0x419A6851",
+      "Name": "头颈 Corrective",
+      "Category": "Corrective",
+      "Discovery": "partial",
+      "DiscoveryLabel": "部分探明",
+      "Runtime": "not_implemented",
+      "RuntimeLabel": "预览器未实现",
+      "Purpose": "主要驱动头颈周围的 corrective 骨；作用区域已确认，具体轴、权重与组合公式仍未探明。"
+    }
+  ]
+}

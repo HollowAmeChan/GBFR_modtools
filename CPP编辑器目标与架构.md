@@ -302,7 +302,7 @@ Blender 插件最终对 armature 绕 X 轴旋转 `+90°`，用于把游戏 Y-up 
 1. 优先寻找与 submesh/material 对应的 `albd` DDS。
 2. albd 按 sRGB 采样。
 3. 找到 `nrml` 时增加切线空间法线；找不到则使用顶点法线。
-4. 普通 `msk1/msk2` 仍只作为调试数据；面部 `A7=5` 透明覆盖材质明确使用 `msk2.B` 作为眉毛/睫毛覆盖率。
+4. 普通 `msk1/msk2` 仍只作为调试数据；面部 alpha 由 `A1/0x53F49792` 启用，只有识别为眉毛/睫毛覆盖层的 subtype 5 材质使用 `msk2.B`。其余 subtype 5 作为承载牙齿、舌头的 alpha-clip 实体绘制。
 5. 无贴图时使用按 material index 区分的稳定调试颜色。
 6. 使用单方向光、环境光、网格线框切换和双面调试开关。
 
@@ -315,7 +315,7 @@ Blender 插件最终对 armature 绕 X 轴旋转 `+90°`，用于把游戏 Y-up 
 - CPU 解码 `.mot` 并计算骨骼层级、局部/世界姿态与 inverse-bind 组合矩阵。
 - 最多 512 个转置后的蒙皮矩阵通过 `b1` 常量缓冲上传；顶点位置和法线在 vertex shader 中按四骨权重蒙皮。
 - `b0` 保存视图投影、材质颜色、光照模式和透明阈值；`t0-t3` 保存基础色及附加颜色层/遮罩。
-- opaque pass 开启深度写入；`A7=5` alpha-overlay pass 关闭深度写入、采样 `msk2.B`、执行 alpha clip，并施加稳定的深度偏移；骨架和碰撞 debug pass 关闭深度测试以保持前置显示。
+- opaque pass 开启深度写入，并对启用 alpha 的主面部和口腔实体执行 `albedo.A` clip；masked-overlay pass 关闭深度写入，以 `albedo.A * msk2.B` 作为 coverage、按 `0.2` 阈值裁切并施加稳定深度偏移；骨架和碰撞 debug pass 关闭深度测试以保持前置显示。
 - 网格顶点缓冲为不可变 GPU 资源。切换动画只更新骨骼常量缓冲和调试骨架，不复制或重建整份网格。
 
 512 根骨骼对应 32 KiB 常量数据，低于 D3D11 单常量缓冲限制；超过该上限的模型必须明确拒绝加载，不能静默截断。

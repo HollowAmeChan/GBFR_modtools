@@ -43,11 +43,12 @@ out\bin\RelWithDebInfo\GBFRModtools.exe
 
 程序兼容 Version 1，保持 `source -> unpack -> build` 语义。进入编辑模式后仍可通过“开始页”返回这两个入口。
 
-- 资源列表按输入文件名稳定排序，并按基线 SHA-256 显示缺失和修改状态。
+- 资源列表默认按输入文件名自然排序；点击任意列头可切换升降序，按 Shift 可组合多列排序。排序只改变显示顺序，不改变工作区资产身份。
 - `.minfo/.skeleton/.mmesh` 可原生恢复、原样写入 build，并加载 D3D11 预览。
 - 预览支持轨道旋转、平移、缩放、取景、线框、骨架和 BC7/BC5 DX10 DDS。
 - 加载 `pl` 模型后发现身体 `.mot`，加载 `fp` 模型后发现表情骨骼 `.mot`；支持名称排序/筛选、播放/暂停、循环、速度和时间轴预览，也可无损恢复静止姿态。
-- 面部预览识别 mmat `A7=5` 的眉毛/睫毛覆盖材质，读取 `msk2` 蓝通道作为覆盖率，并在不透明面部之后以独立透明 pass 绘制。
+- 骨架面板的 `SOP 约束` 页按 source/target 骨、操作类型和探明状态筛选；每条操作显示用途、预览支持情况，并保留原始 hashed properties 供后续逆向。当前只执行通过 rest-pose 自检的核心 swing/twist 类型。
+- 面部预览从 mmat `A1/0x53F49792` 识别 alpha 功能，再按 `A7` shader subtype 与常量缓冲用途区分主面部/口腔实体 alpha clip 和眉毛/睫毛 `msk2.B` 覆盖层；`A7` 本身不是透明总开关。口腔 subtype 5 必须写深度，不能按普通透明层绘制。
 - 点击视口骨骼或骨骼列表会过滤关联 CLH；支持单 CLH/全部 CLH、当前骨骼/全部骨骼模式。
 - CLH 可编辑半径、权重和两个 offset，保存到 `unpack` 后仍由现有 cloth 构建链编码 BXM。
 
@@ -76,7 +77,7 @@ out\bin\RelWithDebInfo\GBFRModtools.exe
 - 有本地 `explore_output` 时，从 workspace 各资源数组计算预期候选总数，并断言 C++ 与 PowerShell 工作区一致。2026-07-16 使用新版 GBFRDataTools 重解包后，当前 pl1400 基线为 319 个候选。
 - pl1400 LOD0 的 minfo、skeleton 和 mmesh 集成解析。
 - pl1400 的 524 个 `.mot`、248401 条轨道与压缩类型 0-8 全量解析；验证已知曲线采样、静止姿态无损还原、动画骨骼矩阵变化、GPU 蒙皮和 D3D11 WARP 渲染。
-- fp1400 的 80 个表情骨骼 `.mot` 全量解析；验证 `a000` 会改变 GPU 姿态矩阵并能精确恢复静止姿态，同时验证面部透明材质分类。
+- fp1400 的 80 个表情骨骼 `.mot` 全量解析；验证 `a000` 会改变 GPU 姿态矩阵并能精确恢复静止姿态，同时验证面部主表面 clip/口腔实体 clip/masked-overlay 三类用途。
 - 在多个水平观察角度比较启用/关闭透明覆盖 pass 的渲染目标像素哈希，确保眉毛/睫毛不会因与脸部深度重合而随视角消失。
 - pl1400 `0_0` CLH 8 条碰撞、CLP 60 个节点解析，以及临时 CLH 副本写回。
 - 损坏 FlatBuffer 的越界拒绝。

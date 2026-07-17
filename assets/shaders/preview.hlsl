@@ -10,9 +10,9 @@ cbuffer Scene : register(b0)
     uint lighting;
     uint alphaBlended;
     uint alphaMasked;
+    uint alphaClipped;
     uint skinningEnabled;
     float alphaThreshold;
-    uint scenePadding;
 };
 
 cbuffer Bones : register(b1)
@@ -86,10 +86,10 @@ float4 PSMain(VSOut input) : SV_TARGET
         base = lerp(base, highlight.rgb, highlight.a);
     }
 
-    float coverage = alphaMasked
-        ? alphaMaskTexture.Sample(linearSampler, uv).b
-        : primary.a;
-    if (alphaBlended)
+    float coverage = primary.a;
+    if (alphaMasked)
+        coverage *= alphaMaskTexture.Sample(linearSampler, uv).b;
+    if (alphaBlended || alphaClipped)
         clip(coverage - alphaThreshold);
 
     float outputAlpha = alphaBlended ? coverage : color.a;
