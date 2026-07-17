@@ -164,25 +164,31 @@ int main() {
         const auto cloth_root=integration.parent_path()/L"unpack/data/pl/pl1400/cloth";
         const auto clh_path=cloth_root/L"pl1400_0_0_clh.bxm.xml",clp_path=cloth_root/L"pl1400_0_0_clp.bxm.xml";
         const auto clh=gbfr::load_clh(clh_path);const auto clp=gbfr::load_clp(clp_path);
-        if(clh.collisions.size()!=8||clp.nodes.size()!=60)return 9;
+        if(clh.collisions.size()!=8||clp.nodes.size()!=60||clp.id!=0||clp.collision_flags!=18)return 9;
         if(clh.collisions[0].capsule!=-1||clh.collisions[1].capsule!=clh.collisions[0].id||clh.collisions[2].capsule!=clh.collisions[1].id||clh.collisions[3].capsule!=clh.collisions[2].id)return 62;
         if(std::any_of(clh.collisions.begin(),clh.collisions.end(),[](const auto& collision){return collision.p1!=collision.p2||collision.weight!=0.0f;}))return 63;
         const auto clp_grid=gbfr::load_clp(cloth_root/L"pl1400_0_2_clp.bxm.xml");
         const auto cross_link=std::find_if(clp_grid.nodes.begin(),clp_grid.nodes.end(),[](const auto& node){return node.side!=4095;});
         if(cross_link==clp_grid.nodes.end()||cross_link->side!=cross_link->poly)return 64;
+        constexpr std::array expected_collision_masks{18,97,4,2,1,8,128,0};
         std::size_t collision_count{},blended_attachment_count{},capsule_count{},longitudinal_count{},side_count{},poly_count{};
+        std::array<std::vector<int>,8> cloth_bones;
         for(int group=0;group<8;++group){
             const auto suffix=std::to_wstring(group);
             const auto group_clh=gbfr::load_clh(cloth_root/(L"pl1400_0_"+suffix+L"_clh.bxm.xml"));
             const auto group_clp=gbfr::load_clp(cloth_root/(L"pl1400_0_"+suffix+L"_clp.bxm.xml"));
+            if(group_clp.id!=group||group_clp.collision_flags!=expected_collision_masks[static_cast<std::size_t>(group)])return 72;
             collision_count+=group_clh.collisions.size();
             for(const auto& item:group_clh.collisions){
                 if(item.p1!=item.p2){if(item.weight==0.0f)return 67;++blended_attachment_count;}
                 if(item.capsule>=0){if(std::none_of(group_clh.collisions.begin(),group_clh.collisions.end(),[&](const auto& target){return target.id==item.capsule;}))return 68;++capsule_count;}
             }
-            for(const auto& node:group_clp.nodes){if(node.down!=4095)++longitudinal_count;if(node.side!=4095)++side_count;if(node.poly!=4095)++poly_count;}
+            for(const auto& node:group_clp.nodes){cloth_bones[static_cast<std::size_t>(group)].push_back(node.bone);if(node.down!=4095)++longitudinal_count;if(node.side!=4095)++side_count;if(node.poly!=4095)++poly_count;}
         }
         if(collision_count!=112||blended_attachment_count!=21||capsule_count!=46||longitudinal_count!=141||side_count!=52||poly_count!=52)return 69;
+        const auto clh7=gbfr::load_clh(cloth_root/L"pl1400_0_7_clh.bxm.xml");
+        const auto references_group2=[&](int bone){const auto& group=cloth_bones[2];return std::find(group.begin(),group.end(),bone)!=group.end();};
+        if(std::count_if(clh7.collisions.begin(),clh7.collisions.end(),[&](const auto& item){return references_group2(item.p1)||references_group2(item.p2);})<10)return 73;
         const auto editable=test_temp/L"gbfr_clh_test.xml";fs::copy_file(clh_path,editable,fs::copy_options::overwrite_existing);auto collision=clh.collisions.front();collision.radius=.123f;gbfr::save_clh_collision(editable,collision);if(std::abs(gbfr::load_clh(editable).collisions.front().radius-.123f)>.0001f)return 10;fs::remove(editable);
         const auto motion_root=integration.parent_path()/L"source/data/pl/pl1400";
         const auto idle=gbfr::load_mot(motion_root/L"pl1400_0000.mot");

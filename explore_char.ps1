@@ -951,6 +951,7 @@ L ""
             L ""
             L "> **$($S.cloth_groups)**: ``_clp`` x $clpCnt ,  ``_clh`` x $clhCnt"
             L "> $($S.cloth_convert)"
+            L "> $($S.cloth_group_model)"
             L "> $($S.cloth_collision_model)"
             L "> $($S.cloth_topology_model)"
         } else {

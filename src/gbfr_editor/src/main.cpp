@@ -69,16 +69,17 @@ float g_motion_speed = 1.0f;
 float g_applied_motion_frame = -1.0f;
 bool g_motion_playing = false;
 bool g_motion_loop = true;
-struct ClhFile { std::filesystem::path path; gbfr::ClhAsset data; };
+struct ClhFile { std::filesystem::path path; gbfr::ClhAsset data; int group_id{-1}; };
 struct ClpFile { std::filesystem::path path; gbfr::ClpAsset data; };
 std::vector<ClhFile> g_clh_files;
 std::vector<ClpFile> g_clp_files;
 std::unordered_map<std::string,std::string> g_bone_names;
 gbfr::editor::SopInspector g_sop_inspector;
 int g_selected_clh = 0;
+int g_selected_clp = 0;
 int g_selected_bone = -1;
 int g_selected_collision = -1;
-bool g_all_clh_files = false;
+bool g_all_clp_groups = false;
 bool g_all_bones = false;
 bool g_reset_layout = true;
 bool g_start_layout_built = false;
@@ -105,6 +106,12 @@ std::filesystem::path preview_shader_file() {
 
 int cloth_bone_id(const std::string& name) {
     if(name.size()<2||name[0]!='_') return -1; int value{}; const auto result=std::from_chars(name.data()+1,name.data()+name.size(),value,16); return result.ec==std::errc{}&&result.ptr==name.data()+name.size()?value:-1;
+}
+
+int cloth_file_group_id(const std::filesystem::path& path) {
+    const auto name=path.filename().wstring();const auto marker=name.rfind(L"_0_");if(marker==std::wstring::npos)return -1;
+    const auto end=name.find(L"_cl",marker+3);if(end==std::wstring::npos)return -1;
+    int value{};for(std::size_t i=marker+3;i<end;++i){if(name[i]<L'0'||name[i]>L'9')return -1;value=value*10+(name[i]-L'0');}return value;
 }
 
 std::string bone_display(const std::string& name) {
@@ -353,12 +360,15 @@ bool load_model_preview(std::size_t index,bool force) {
         g_skeleton=skeleton;g_loaded_model=key;g_loaded_texture.clear();g_preview_mode=PreviewMode::model;
         discover_motions(key);
         g_preview->frame(g_camera);
-        g_clh_files.clear(); g_clp_files.clear(); g_selected_collision=-1; g_selected_bone=-1; g_selected_clh=0;
+        g_clh_files.clear(); g_clp_files.clear(); g_selected_collision=-1; g_selected_bone=-1; g_selected_clh=0;g_selected_clp=0;g_all_clp_groups=false;
         const auto model_id=key.minfo.stem().wstring();
         const auto cloth_prefix=model_id+L"_";
         for(const auto& asset:g_workspace->assets()) if(asset.kind==gbfr::AssetKind::cloth&&asset.available&&asset.input.filename().wstring().starts_with(cloth_prefix)) {
-            try { if(asset.subtype=="clh") g_clh_files.push_back({asset.input,gbfr::load_clh(asset.input)}); else if(asset.subtype=="clp") g_clp_files.push_back({asset.input,gbfr::load_clp(asset.input)}); } catch(const std::exception& error) { gbfr::Log::write(gbfr::LogLevel::warning,std::string("cloth 跳过：")+error.what()); }
+            try { if(asset.subtype=="clh") g_clh_files.push_back({asset.input,gbfr::load_clh(asset.input),cloth_file_group_id(asset.input)}); else if(asset.subtype=="clp") g_clp_files.push_back({asset.input,gbfr::load_clp(asset.input)}); } catch(const std::exception& error) { gbfr::Log::write(gbfr::LogLevel::warning,std::string("cloth 跳过：")+error.what()); }
         }
+        std::sort(g_clh_files.begin(),g_clh_files.end(),[](const auto& left,const auto& right){return left.group_id<right.group_id;});
+        std::sort(g_clp_files.begin(),g_clp_files.end(),[](const auto& left,const auto& right){return left.data.id<right.data.id;});
+        if(!g_clp_files.empty()){const int mask=g_clp_files.front().data.collision_flags;const auto found=std::find_if(g_clh_files.begin(),g_clh_files.end(),[&](const auto& file){return file.group_id>=0&&file.group_id<31&&(mask&(1<<file.group_id));});if(found!=g_clh_files.end())g_selected_clh=static_cast<int>(std::distance(g_clh_files.begin(),found));}
         update_collision_debug();
         gbfr::Log::write(gbfr::LogLevel::info, "预览已加载：" + std::to_string(mesh.vertices.size()) + " 顶点，" + std::to_string(mesh.indices.size()/3) + " 三角形，" + std::to_string(mesh.chunks.size()) + " 材质分段，SOP " + std::to_string(sop.operations.size()) + " 操作，0.mmat 可见材质 " + std::to_string(resolved_materials) + "/" + std::to_string(materials.entries.size()));
         return true;
@@ -452,19 +462,25 @@ void append_capsule(std::vector<gbfr::Vec3>& lines,gbfr::Vec3 a,float radius_a,g
     }
 }
 
-std::wstring cloth_group_key(const std::filesystem::path& path) {
-    auto name=path.filename().wstring();
-    for(const std::wstring suffix:{L"_clh.bxm.xml",L"_clp.bxm.xml"})if(name.ends_with(suffix)){name.resize(name.size()-suffix.size());break;}
-    return name;
+bool solver_group_visible(std::size_t index) {
+    return g_all_clp_groups||(g_selected_clp>=0&&static_cast<std::size_t>(g_selected_clp)==index);
+}
+
+int active_collision_mask() {
+    int mask{};for(std::size_t i=0;i<g_clp_files.size();++i)if(solver_group_visible(i))mask|=g_clp_files[i].data.collision_flags;return mask;
+}
+
+std::string collision_layer_list(int mask) {
+    std::string result;for(int layer=0;layer<31;++layer)if(mask&(1<<layer)){if(!result.empty())result+=", ";result+=std::to_string(layer);}return result.empty()?"无":result;
 }
 
 void update_collision_debug() {
     if(!g_preview)return;
     std::vector<gbfr::Vec3> collision_lines,longitudinal_lines,lateral_lines,polygon_lines;
-    std::vector<std::wstring> visible_groups;
+    const int collision_mask=active_collision_mask();
     for(std::size_t file_index=0;file_index<g_clh_files.size();++file_index){
-        if(!g_all_clh_files&&static_cast<int>(file_index)!=g_selected_clh)continue;
-        const auto& collisions=g_clh_files[file_index].data.collisions;visible_groups.push_back(cloth_group_key(g_clh_files[file_index].path));
+        const auto& file=g_clh_files[file_index];if(file.group_id<0||file.group_id>=31||!(collision_mask&(1<<file.group_id)))continue;
+        const auto& collisions=file.data.collisions;
         struct Endpoint{gbfr::Vec3 center{};float radius{};const gbfr::ClothCollision* source{};};
         std::unordered_map<int,Endpoint> endpoints;
         for(const auto& collision:collisions){
@@ -484,9 +500,8 @@ void update_collision_debug() {
             }
         }
     }
-    const auto group_visible=[&](const std::filesystem::path& path){if(g_all_clh_files)return true;const auto key=cloth_group_key(path);return std::find(visible_groups.begin(),visible_groups.end(),key)!=visible_groups.end();};
-    for(const auto& file:g_clp_files){
-        if(!group_visible(file.path))continue;
+    for(std::size_t file_index=0;file_index<g_clp_files.size();++file_index){
+        if(!solver_group_visible(file_index))continue;const auto& file=g_clp_files[file_index];
         std::unordered_map<int,gbfr::Vec3> positions;
         for(const auto& node:file.data.nodes)if(const auto point=bone_point(node.bone))positions.emplace(node.bone,*point);
         const auto append_edge=[&](std::vector<gbfr::Vec3>& lines,const gbfr::ClothNode& node,int target){
@@ -809,11 +824,21 @@ void draw_editor_shell() {
             ImGui::EndTabItem();
         }
         if(ImGui::BeginTabItem("Cloth 物理")){
+        if(!g_clp_files.empty()){
+            g_selected_clp=std::clamp(g_selected_clp,0,static_cast<int>(g_clp_files.size()-1));
+            const auto& selected_group=g_clp_files[g_selected_clp].data;
+            const auto current="CLP "+std::to_string(selected_group.id)+" | 节点 "+std::to_string(selected_group.nodes.size());
+            if(ImGui::BeginCombo("求解组",current.c_str())){for(int i=0;i<static_cast<int>(g_clp_files.size());++i){const auto& group=g_clp_files[i].data;const auto label="CLP "+std::to_string(group.id)+" | 节点 "+std::to_string(group.nodes.size())+" | CLH "+collision_layer_list(group.collision_flags);if(ImGui::Selectable(label.c_str(),i==g_selected_clp)){g_selected_clp=i;g_all_clp_groups=false;g_selected_collision=-1;const int mask=group.collision_flags;const auto found=std::find_if(g_clh_files.begin(),g_clh_files.end(),[&](const auto& file){return file.group_id>=0&&file.group_id<31&&(mask&(1<<file.group_id));});if(found!=g_clh_files.end())g_selected_clh=static_cast<int>(std::distance(g_clh_files.begin(),found));update_collision_debug();}}ImGui::EndCombo();}
+            if(ImGui::Checkbox("全部求解组",&g_all_clp_groups))update_collision_debug();ImGui::SameLine();if(ImGui::Checkbox("全部骨骼",&g_all_bones))update_collision_debug();
+            const int mask=active_collision_mask();ImGui::Text("useCollisionFlags: %d | 使用 CLH: %s",mask,collision_layer_list(mask).c_str());
+        } else ImGui::TextUnformatted("工作区没有可用 CLP XML。");
         if(!g_clh_files.empty()){
+            ImGui::SeparatorText("CLH 碰撞层");
             g_selected_clh=std::clamp(g_selected_clh,0,static_cast<int>(g_clh_files.size()-1));
-            const auto current=utf8(g_clh_files[g_selected_clh].path.filename().wstring());
-            if(ImGui::BeginCombo("CLH 文件",current.c_str())){for(int i=0;i<static_cast<int>(g_clh_files.size());++i){const auto name=utf8(g_clh_files[i].path.filename().wstring());if(ImGui::Selectable(name.c_str(),i==g_selected_clh)){g_selected_clh=i;g_selected_collision=-1;update_collision_debug();}}ImGui::EndCombo();}
-            if(ImGui::Checkbox("全部 CLH",&g_all_clh_files))update_collision_debug();ImGui::SameLine();if(ImGui::Checkbox("全部骨骼",&g_all_bones))update_collision_debug();ImGui::SameLine();ImGui::Text("CLP %zu",g_clp_files.size());
+            const int preview_mask=active_collision_mask();const auto& current_layer=g_clh_files[g_selected_clh];
+            const auto current="CLH "+std::to_string(current_layer.group_id)+" | "+std::to_string(current_layer.data.collisions.size())+" 端点";
+            if(ImGui::BeginCombo("编辑层",current.c_str())){for(int i=0;i<static_cast<int>(g_clh_files.size());++i){const auto& layer=g_clh_files[i];const bool active=layer.group_id>=0&&layer.group_id<31&&(preview_mask&(1<<layer.group_id));const auto label="CLH "+std::to_string(layer.group_id)+" | "+std::to_string(layer.data.collisions.size())+" 端点"+(active?" | 当前使用":"");if(ImGui::Selectable(label.c_str(),i==g_selected_clh)){g_selected_clh=i;g_selected_collision=-1;}}ImGui::EndCombo();}
+            const auto& active_layer=g_clh_files[g_selected_clh];const bool layer_active=active_layer.group_id>=0&&active_layer.group_id<31&&(preview_mask&(1<<active_layer.group_id));ImGui::SameLine();ImGui::TextUnformatted(layer_active?"当前求解组使用":"当前求解组未使用");
             auto& collisions=g_clh_files[g_selected_clh].data.collisions;
             const auto capsule_count=std::count_if(collisions.begin(),collisions.end(),[](const auto& collision){return collision.capsule>=0;});
             const auto invalid_capsules=std::count_if(collisions.begin(),collisions.end(),[&](const auto& collision){return collision.capsule>=0&&std::none_of(collisions.begin(),collisions.end(),[&](const auto& other){return other.id==collision.capsule;});});
@@ -823,7 +848,7 @@ void draw_editor_shell() {
         } else ImGui::TextUnformatted("工作区没有可用 CLH XML。");
         if(!g_clp_files.empty()&&ImGui::CollapsingHeader("CLP 节点",ImGuiTreeNodeFlags_DefaultOpen)){
             ImGui::TextColored(ImVec4(.3f,1.f,.22f,1),"Down 纵向");ImGui::SameLine();ImGui::TextColored(ImVec4(1.f,.25f,.8f,1),"Side 横向");ImGui::SameLine();ImGui::TextColored(ImVec4(1.f,.72f,.1f,1),"Poly 独立关系");
-            if(ImGui::BeginTable("clp_nodes",10,ImGuiTableFlags_RowBg|ImGuiTableFlags_BordersInnerV|ImGuiTableFlags_ScrollY,ImVec2(0,180))){const char* columns[]={"文件","骨骼","Up","Down","Side","Poly","旋转限制","摩擦","重量","厚度"};for(const char* column:columns)ImGui::TableSetupColumn(column);ImGui::TableHeadersRow();for(const auto& file:g_clp_files)for(const auto& node:file.data.nodes){if(!g_all_bones&&g_selected_bone>=0&&node.bone!=g_selected_bone&&node.up!=g_selected_bone&&node.down!=g_selected_bone&&node.side!=g_selected_bone&&node.poly!=g_selected_bone)continue;ImGui::TableNextRow();ImGui::TableNextColumn();ImGui::TextUnformatted(utf8(file.path.filename().wstring()).c_str());ImGui::TableNextColumn();ImGui::Text("%d",node.bone);ImGui::TableNextColumn();ImGui::Text("%d",node.up);ImGui::TableNextColumn();ImGui::Text("%d",node.down);ImGui::TableNextColumn();ImGui::Text("%d",node.side);ImGui::TableNextColumn();ImGui::Text("%d",node.poly);ImGui::TableNextColumn();ImGui::Text("%.3f",node.rotation_limit);ImGui::TableNextColumn();ImGui::Text("%.3f",node.friction);ImGui::TableNextColumn();ImGui::Text("%.3f",node.weight);ImGui::TableNextColumn();ImGui::Text("%.3f",node.thickness);}ImGui::EndTable();}
+            if(ImGui::BeginTable("clp_nodes",10,ImGuiTableFlags_RowBg|ImGuiTableFlags_BordersInnerV|ImGuiTableFlags_ScrollY,ImVec2(0,180))){const char* columns[]={"组","骨骼","Up","Down","Side","Poly","旋转限制","摩擦","重量","厚度"};for(const char* column:columns)ImGui::TableSetupColumn(column);ImGui::TableHeadersRow();for(std::size_t file_index=0;file_index<g_clp_files.size();++file_index){if(!solver_group_visible(file_index))continue;const auto& file=g_clp_files[file_index];for(const auto& node:file.data.nodes){if(!g_all_bones&&g_selected_bone>=0&&node.bone!=g_selected_bone&&node.up!=g_selected_bone&&node.down!=g_selected_bone&&node.side!=g_selected_bone&&node.poly!=g_selected_bone)continue;ImGui::TableNextRow();ImGui::TableNextColumn();ImGui::Text("%d",file.data.id);ImGui::TableNextColumn();ImGui::Text("%d",node.bone);ImGui::TableNextColumn();ImGui::Text("%d",node.up);ImGui::TableNextColumn();ImGui::Text("%d",node.down);ImGui::TableNextColumn();ImGui::Text("%d",node.side);ImGui::TableNextColumn();ImGui::Text("%d",node.poly);ImGui::TableNextColumn();ImGui::Text("%.3f",node.rotation_limit);ImGui::TableNextColumn();ImGui::Text("%.3f",node.friction);ImGui::TableNextColumn();ImGui::Text("%.3f",node.weight);ImGui::TableNextColumn();ImGui::Text("%.3f",node.thickness);}}ImGui::EndTable();}
         }
         ImGui::EndTabItem();
         }

@@ -23,6 +23,7 @@ ClhAsset load_clh(const std::filesystem::path& path) {
 
 ClpAsset load_clp(const std::filesystem::path& path) {
     auto doc=read_xml(path);const auto root=doc.child("CLOTH");if(!root)throw std::runtime_error("CLP root CLOTH missing");ClpAsset result;
+    const auto header=root.child("CLOTH_HEADER");if(!header)throw std::runtime_error("CLP CLOTH_HEADER missing");result.id=integer(header,"id_",-1);result.collision_flags=integer(header,"useCollisionFlags_");
     for(const auto node:root.child("CLOTH_WK_LIST").children("CLOTH_WK")){ClothNode c;c.bone=integer(node,"no");c.up=integer(node,"noUp",4095);c.down=integer(node,"noDown",4095);c.side=integer(node,"noSide",4095);c.poly=integer(node,"noPoly",4095);c.fix=integer(node,"noFix",4095);c.rotation_limit=number(node,"rotLimit");c.friction=number(node,"friction");c.offset=vec4(node.child("offset").text().as_string());c.weight=number(node,"weight_");c.thickness=number(node,"thick_");c.wind_area=number(node,"windForceArea_");result.nodes.push_back(c);}return result;
 }
 
