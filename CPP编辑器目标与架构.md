@@ -32,6 +32,7 @@
 
 - 不复刻 GBFR 完整 Shader。
 - 不复刻游戏动画状态机、切片混合、IK、面部专用通道或动画驱动的 cloth；单个 `.mot` 骨骼切片已经可以按 60 FPS 预览。
+- 身体 deform/corrective 骨是基础蒙皮的一部分，不属于可省略的动画状态机功能；预览器必须在 `.mot` 后执行模型 `.sop`。格式与求值顺序见 [SOP骨骼后处理与Deform骨.md](SOP骨骼后处理与Deform骨.md)。
 - 不在程序内修改网格、刷权重或编辑骨架静止姿态。
 - 不导出 `.mmesh/.minfo/.skeleton`；模型编辑仍由 Blender 插件完成。
 - 不实现跨平台渲染后端。

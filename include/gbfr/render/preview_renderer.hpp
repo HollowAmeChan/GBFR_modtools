@@ -1,6 +1,7 @@
 #pragma once
 #include <gbfr/formats/animation.hpp>
 #include <gbfr/formats/model.hpp>
+#include <gbfr/formats/sop.hpp>
 #include <d3d11.h>
 #include <wrl/client.h>
 #include <filesystem>
@@ -26,7 +27,8 @@ public:
     bool initialize(ID3D11Device* device, ID3D11DeviceContext* context,
                     const std::filesystem::path& shader_file);
     bool load(const MeshAsset& mesh, const SkeletonAsset& skeleton,
-              const std::vector<PreviewMaterialTextures>& materials = {});
+              const std::vector<PreviewMaterialTextures>& materials = {},
+              const SopAsset& sop = {});
     bool load_texture_preview(const std::filesystem::path& dds);
     void clear();
     bool apply_animation(const AnimationClip* clip, float frame);
@@ -45,6 +47,7 @@ public:
     bool has_model() const noexcept { return index_count_ != 0; }
     const std::vector<Vec3>& bone_positions() const noexcept { return animated_bone_positions_; }
     std::size_t visible_bone_count() const noexcept { return visible_bone_count_; }
+    std::size_t applied_sop_operation_count() const noexcept { return applied_sop_operation_count_; }
     std::uint64_t pose_hash() const noexcept { return pose_hash_; }
     std::uint64_t render_target_hash() const;
 private:
@@ -88,9 +91,11 @@ private:
     std::vector<DrawRange> draw_ranges_;
     std::vector<GpuMaterialTextures> materials_;
     SkeletonAsset skeleton_;
+    SopAsset sop_;
     std::vector<Vec3> animated_bone_positions_;
     std::vector<bool> visible_bones_;
     std::size_t visible_bone_count_{};
+    std::size_t applied_sop_operation_count_{};
     std::uint64_t pose_hash_{};
     float bone_marker_size_{.001f};
 };

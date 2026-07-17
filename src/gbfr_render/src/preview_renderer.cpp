@@ -71,10 +71,10 @@ bool PreviewRenderer::create_targets() {
 
 void PreviewRenderer::resize(unsigned width,unsigned height) { width=std::max(1u,width); height=std::max(1u,height); if(width==width_&&height==height_) return; width_=width;height_=height;create_targets(); }
 
-bool PreviewRenderer::load(const MeshAsset& mesh,const SkeletonAsset& skeleton,const std::vector<PreviewMaterialTextures>& materials) {
+bool PreviewRenderer::load(const MeshAsset& mesh,const SkeletonAsset& skeleton,const std::vector<PreviewMaterialTextures>& materials,const SopAsset& sop) {
     clear();
     if(skeleton.bones.empty()||skeleton.bones.size()>max_skin_bones)return false;
-    skeleton_=skeleton;
+    skeleton_=skeleton;sop_=sop;
     visible_bones_.assign(skeleton.bones.size(),false);
     for(const auto& vertex:mesh.vertices)for(std::size_t influence=0;influence<vertex.weights.size();++influence){
         if(vertex.weights[influence]<=0.0f||vertex.joints[influence]>=skeleton.bones.size())continue;
@@ -134,7 +134,7 @@ void PreviewRenderer::clear() {
     index_count_=0; line_vertex_count_=0; bone_point_vertex_count_=0; collision_vertex_count_=0;
     vertices_.Reset(); indices_.Reset(); lines_.Reset(); bone_points_.Reset(); collision_lines_.Reset();
     draw_ranges_.clear(); materials_.clear();
-    skeleton_={};animated_bone_positions_.clear();visible_bones_.clear();visible_bone_count_=0;pose_hash_=0;
+    skeleton_={};sop_={};animated_bone_positions_.clear();visible_bones_.clear();visible_bone_count_=0;applied_sop_operation_count_=0;pose_hash_=0;
     texture_preview_srv_.Reset();texture_width_=0;texture_height_=0;
 }
 

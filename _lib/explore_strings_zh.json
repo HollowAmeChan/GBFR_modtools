@@ -27,7 +27,7 @@
   "desc_minfo": "模型结构入口 — 描述 mesh 分段、材质槽、骨架绑定",
   "desc_mmesh": "流式网格",
   "desc_skeleton": "骨架定义 — 骨骼名称、层级、绑定姿势 (T-Pose)",
-  "desc_sop": "形态/遮挡/物理附加数据 (Shape/Occlusion/Physics)",
+  "desc_sop": "骨骼后处理与 Deform/Corrective 操作表",
   "desc_mot": "骨骼动画关键帧数据",
   "desc_bxm": "BXM 二进制 XML（GBFRDataTools bxm-to-xml / xml-to-bxm）",
   "desc_lst": "资源清单列表",

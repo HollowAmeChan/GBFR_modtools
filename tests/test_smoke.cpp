@@ -4,6 +4,7 @@
 #include <gbfr/formats/material.hpp>
 #include <gbfr/formats/cloth.hpp>
 #include <gbfr/formats/animation.hpp>
+#include <gbfr/formats/sop.hpp>
 #include <gbfr/render/preview_renderer.hpp>
 #include <nlohmann/json.hpp>
 #include <wrl/client.h>
@@ -67,8 +68,17 @@ int main() {
         const auto model_root = integration.parent_path() / L"unpack/data/model/pl/pl1400";
         const auto minfo = gbfr::load_minfo(model_root / L"pl1400.minfo");
         const auto skeleton = gbfr::load_skeleton(model_root / L"pl1400.skeleton");
+        const auto sop_path=integration.parent_path()/L"source/data/model/pl/pl1400/pl1400.sop";
+        const auto sop=gbfr::load_sop(sop_path);
         const auto mesh = gbfr::load_mmesh(integration.parent_path() / L"unpack/data/model_streaming/lod0/pl1400.mmesh", minfo);
         if (mesh.vertices.size() != minfo.vertex_count || mesh.indices.size() != minfo.index_count || skeleton.bones.empty()) return 7;
+        if(sop.version!=gbfr::sop_version_20200309||sop.operations.size()!=101)return 52;
+        const auto swing_twist_count=std::count_if(sop.operations.begin(),sop.operations.end(),[](const auto& operation){return operation.type_hash==gbfr::sop_swing_twist_operation;});
+        const auto twist_count=std::count_if(sop.operations.begin(),sop.operations.end(),[](const auto& operation){return operation.type_hash==gbfr::sop_twist_operation;});
+        if(swing_twist_count!=16||twist_count!=22)return 53;
+        const auto& first_sop=sop.operations.front();
+        if(first_sop.target_bone!=0xA12u||first_sop.source_bone!=0x12u||first_sop.type_hash!=gbfr::sop_swing_twist_operation||
+           !first_sop.find(gbfr::sop_axis_y_property)||!first_sop.find(gbfr::sop_twist_rate_property)||!first_sop.find(gbfr::sop_swing_rate_property))return 54;
         if(skeleton.bones[0].parent!=0xffff||skeleton.bones[1].parent!=0||std::abs(skeleton.bones[1].world_position.y-.82156992f)>1e-6f)return 43;
         const auto materials=gbfr::load_mmat_json(model_root/L"vars/0.mmat.json");
         if(materials.entries.size()!=11||materials.entries[0].albedo_name!="pl1400_body01_lod0_albd")return 11;
@@ -82,7 +92,7 @@ int main() {
         if(!preview.initialize(device.Get(),context.Get(),shader_file)||!preview.load_texture_preview(dds)||!preview.texture_image()||!preview.texture_width()||!preview.texture_height())return 16;
         std::vector<gbfr::PreviewMaterialTextures> preview_materials(materials.entries.size());for(auto& material:preview_materials)material.albedo=dds;
         gbfr::OrbitCamera camera;
-        if(!preview.load(mesh,skeleton,preview_materials))return 17;
+        if(!preview.load(mesh,skeleton,preview_materials,sop))return 17;
         preview.resize(320,320);preview.frame(camera);
         preview.set_collision_lines({{0.0f,0.0f,0.0f},{0.0f,1.0f,0.0f}});
         for(const auto mode:{gbfr::PreviewShadingMode::unlit,gbfr::PreviewShadingMode::lit,gbfr::PreviewShadingMode::wireframe})preview.render(camera,true,mode,true,true);
@@ -153,10 +163,14 @@ int main() {
         if(idle.version!=0x20200619u||idle.frame_count!=86||idle.tracks.size()!=219||idle.name!="pl1400_0000")return 22;
         const auto first_motion_track=std::find_if(idle.tracks.begin(),idle.tracks.end(),[](const auto& track){return track.bone_id==0&&track.property==0;});
         if(first_motion_track==idle.tracks.end()||first_motion_track->compression!=1||std::abs(first_motion_track->sample(1.0f)-(-.000534661114f))>1e-7f)return 23;
-        if(!preview.load(mesh,skeleton,preview_materials))return 27;
+        if(!preview.load(mesh,skeleton,preview_materials,sop))return 27;
         const auto rest_bones=preview.bone_positions();
         for(std::size_t i=0;i<rest_bones.size();++i){const auto& actual=rest_bones[i];const auto& expected=skeleton.bones[i].world_position;if(std::abs(actual.x-expected.x)+std::abs(actual.y-expected.y)+std::abs(actual.z-expected.z)>1e-4f)return 31;}
         if(!preview.apply_animation(&idle,42.0f)||preview.bone_positions().size()!=skeleton.bones.size())return 30;
+        if(preview.applied_sop_operation_count()<30)return 55;
+        const auto sop_pose_hash=preview.pose_hash();
+        if(!preview.load(mesh,skeleton,preview_materials)||!preview.apply_animation(&idle,42.0f)||preview.applied_sop_operation_count()!=0||preview.pose_hash()==sop_pose_hash)return 57;
+        if(!preview.load(mesh,skeleton,preview_materials,sop)||!preview.apply_animation(&idle,42.0f)||preview.pose_hash()!=sop_pose_hash)return 58;
         bool pose_changed=false;for(std::size_t i=0;i<rest_bones.size();++i){const auto& a=rest_bones[i];const auto& b=preview.bone_positions()[i];if(std::abs(a.x-b.x)+std::abs(a.y-b.y)+std::abs(a.z-b.z)>1e-5f){pose_changed=true;break;}}
         if(!pose_changed)return 28;
         preview.render(camera,true,gbfr::PreviewShadingMode::lit,true,true);
@@ -171,6 +185,9 @@ int main() {
     const auto corrupt = test_temp / L"gbfr_corrupt.skeleton";
     std::ofstream(corrupt, std::ios::binary | std::ios::trunc) << "bad";
     try { (void)gbfr::load_skeleton(corrupt); return 8; } catch (const std::exception&) {}
+    const auto corrupt_sop=test_temp/L"gbfr_corrupt.sop";
+    std::ofstream(corrupt_sop,std::ios::binary|std::ios::trunc)<<"sop";
+    try{(void)gbfr::load_sop(corrupt_sop);return 56;}catch(const std::exception&){}
     fs::remove_all(test_temp);
     return 0;
 }

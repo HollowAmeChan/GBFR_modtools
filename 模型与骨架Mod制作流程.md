@@ -1,5 +1,7 @@
 # 模型与骨架 Mod 制作流程
 
+> 角色 `_aXX` deform/corrective 骨由原始 `.sop` 在 `.mot` 之后驱动，不是普通动画骨。修改骨架前先阅读 [`SOP骨骼后处理与Deform骨.md`](SOP骨骼后处理与Deform骨.md)，并保留 SOP 引用的原始骨名。
+
 本文记录从游戏原始角色资源到 Blender 编辑、插件导出和最终 Mod 目录的完整流程。
 
 ## 1. 建立角色工作区

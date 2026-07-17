@@ -314,6 +314,10 @@ bool load_model_preview(std::size_t index,bool force) {
         const auto info = gbfr::load_minfo(key.minfo);
         const auto skeleton=gbfr::load_skeleton(key.skeleton);
         const auto mesh = gbfr::load_mmesh(key.mesh, info);
+        gbfr::SopAsset sop;
+        auto sop_path=g_workspace->root()/L"source/data"/key.minfo.lexically_relative(g_workspace->root()/L"unpack/data");
+        sop_path.replace_extension(L".sop");
+        if(std::filesystem::is_regular_file(sop_path))sop=gbfr::load_sop(sop_path);
         const auto material_json=key.minfo.parent_path()/L"vars/0.mmat.json";
         if(!std::filesystem::is_regular_file(material_json)) throw std::runtime_error("找不到 vars/0.mmat.json");
         const auto materials=gbfr::load_mmat_json(material_json);
@@ -331,7 +335,7 @@ bool load_model_preview(std::size_t index,bool force) {
             if(!preview.albedo.empty()||(!preview.eye_conjunctiva.empty()&&!preview.eye_iris.empty()&&!preview.eye_highlight.empty()))++resolved_materials;
         }
         for(const auto& chunk:mesh.chunks) if(chunk.material>=materials.entries.size()) throw std::runtime_error("minfo MaterialID 超出 0.mmat 条目范围");
-        if (!g_preview->load(mesh, skeleton, preview_materials)) throw std::runtime_error("GPU 预览资源创建失败");
+        if (!g_preview->load(mesh, skeleton, preview_materials, sop)) throw std::runtime_error("GPU 预览资源创建失败");
         g_skeleton=skeleton;g_loaded_model=key;g_loaded_texture.clear();g_preview_mode=PreviewMode::model;
         discover_motions(key);
         g_preview->frame(g_camera);
@@ -342,7 +346,7 @@ bool load_model_preview(std::size_t index,bool force) {
             try { if(asset.subtype=="clh") g_clh_files.push_back({asset.input,gbfr::load_clh(asset.input)}); else if(asset.subtype=="clp") g_clp_files.push_back({asset.input,gbfr::load_clp(asset.input)}); } catch(const std::exception& error) { gbfr::Log::write(gbfr::LogLevel::warning,std::string("cloth 跳过：")+error.what()); }
         }
         update_collision_debug();
-        gbfr::Log::write(gbfr::LogLevel::info, "预览已加载：" + std::to_string(mesh.vertices.size()) + " 顶点，" + std::to_string(mesh.indices.size()/3) + " 三角形，" + std::to_string(mesh.chunks.size()) + " 材质分段，0.mmat 可见材质 " + std::to_string(resolved_materials) + "/" + std::to_string(materials.entries.size()));
+        gbfr::Log::write(gbfr::LogLevel::info, "预览已加载：" + std::to_string(mesh.vertices.size()) + " 顶点，" + std::to_string(mesh.indices.size()/3) + " 三角形，" + std::to_string(mesh.chunks.size()) + " 材质分段，SOP " + std::to_string(sop.operations.size()) + " 操作，0.mmat 可见材质 " + std::to_string(resolved_materials) + "/" + std::to_string(materials.entries.size()));
         return true;
     } catch (const std::exception& error) { gbfr::Log::write(gbfr::LogLevel::error, std::string("预览加载失败：") + error.what());return false; }
 }
@@ -710,7 +714,7 @@ void draw_editor_shell() {
     ImGui::Begin("Migration Coverage");
     if(ImGui::BeginTable("coverage",3,ImGuiTableFlags_RowBg|ImGuiTableFlags_BordersInnerV)){
         ImGui::TableSetupColumn("功能");ImGui::TableSetupColumn("处理端");ImGui::TableSetupColumn("状态");ImGui::TableHeadersRow();
-        const char* rows[][3]={{"工作区列表 / SHA-256 / 状态","C++","原生"},{"minfo / skeleton / mmesh","C++","原生"},{"模型构建与恢复","C++","原生"},{"D3D11 网格 / DDS / 骨架预览","C++","原生"},{"CLH / CLP 查看与 CLH 编辑","C++","原生"},{"texture 封回与恢复","PowerShell + _lib","兼容入口"},{"mmat 编码 / A4 快捷编辑","PowerShell + _lib","兼容入口"},{"cloth BXM 编码与恢复","PowerShell + _lib","兼容入口"},{"新建 .texture","PowerShell + nier_cli","兼容入口"}};
+        const char* rows[][3]={{"工作区列表 / SHA-256 / 状态","C++","原生"},{"minfo / skeleton / mmesh","C++","原生"},{"模型构建与恢复","C++","原生"},{"D3D11 网格 / DDS / 骨架预览","C++","原生"},{"MOT + SOP deform 动画求值","C++","核心操作"},{"CLH / CLP 查看与 CLH 编辑","C++","原生"},{"texture 封回与恢复","PowerShell + _lib","兼容入口"},{"mmat 编码 / A4 快捷编辑","PowerShell + _lib","兼容入口"},{"cloth BXM 编码与恢复","PowerShell + _lib","兼容入口"},{"新建 .texture","PowerShell + nier_cli","兼容入口"}};
         for(const auto& row:rows){ImGui::TableNextRow();for(const char* cell:row){ImGui::TableNextColumn();ImGui::TextUnformatted(cell);}}
         ImGui::EndTable();
     }

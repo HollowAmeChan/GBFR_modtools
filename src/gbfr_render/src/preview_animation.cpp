@@ -31,6 +31,84 @@ XMVECTOR euler_to_quaternion(const XMFLOAT3& euler) {
     return XMVectorSet(sx*cy*cz-cx*sy*sz,cx*sy*cz+sx*cy*sz,cx*cy*sz-sx*sy*cz,cx*cy*cz+sx*sy*sz);
 }
 
+XMFLOAT4 normalize_quaternion(XMFLOAT4 value) {
+    const float length=std::sqrt(value.x*value.x+value.y*value.y+value.z*value.z+value.w*value.w);
+    if(length<1e-8f)return {0,0,0,1};
+    const float inverse=1.0f/length;return {value.x*inverse,value.y*inverse,value.z*inverse,value.w*inverse};
+}
+
+XMFLOAT4 multiply_quaternions(const XMFLOAT4& left,const XMFLOAT4& right) {
+    return {
+        left.w*right.x+left.x*right.w+left.y*right.z-left.z*right.y,
+        left.w*right.y-left.x*right.z+left.y*right.w+left.z*right.x,
+        left.w*right.z+left.x*right.y-left.y*right.x+left.z*right.w,
+        left.w*right.w-left.x*right.x-left.y*right.y-left.z*right.z
+    };
+}
+
+XMFLOAT4 quaternion_power(XMFLOAT4 value,float rate) {
+    value=normalize_quaternion(value);
+    if(value.w<0.0f)value={-value.x,-value.y,-value.z,-value.w};
+    const float half_angle=std::acos(std::clamp(value.w,-1.0f,1.0f));
+    const float sine=std::sin(half_angle);
+    if(std::abs(sine)<1e-7f)return {0,0,0,1};
+    const float scaled=half_angle*rate;
+    const float vector_scale=std::sin(scaled)/sine;
+    return normalize_quaternion({value.x*vector_scale,value.y*vector_scale,value.z*vector_scale,std::cos(scaled)});
+}
+
+XMFLOAT4 to_float4(const gbfr::Vec4& value) { return {value.x,value.y,value.z,value.w}; }
+
+XMFLOAT4 euler_to_float4(const XMFLOAT3& euler) {
+    XMFLOAT4 result{};XMStoreFloat4(&result,euler_to_quaternion(euler));return normalize_quaternion(result);
+}
+
+const gbfr::SopProperty* floating_property(const gbfr::SopOperation& operation,std::uint32_t hash) {
+    const auto* property=operation.find(hash);
+    return property&&property->type==gbfr::SopPropertyType::floating&&std::isfinite(property->floating())?property:nullptr;
+}
+
+bool evaluate_core_sop(const gbfr::SopOperation& operation,const XMFLOAT4& source,XMFLOAT4& output) {
+    if(operation.type_hash!=gbfr::sop_swing_twist_operation&&operation.type_hash!=gbfr::sop_twist_operation)return false;
+    const auto* axis_x=floating_property(operation,gbfr::sop_axis_x_property);
+    const auto* axis_y=floating_property(operation,gbfr::sop_axis_y_property);
+    const auto* axis_z=floating_property(operation,gbfr::sop_axis_z_property);
+    const auto* twist_rate=floating_property(operation,gbfr::sop_twist_rate_property);
+    if(!axis_x||!axis_y||!axis_z||!twist_rate)return false;
+    XMFLOAT3 axis{axis_x->floating(),axis_y->floating(),axis_z->floating()};
+    const float axis_length=std::sqrt(axis.x*axis.x+axis.y*axis.y+axis.z*axis.z);
+    if(axis_length<1e-8f)return false;
+    axis.x/=axis_length;axis.y/=axis_length;axis.z/=axis_length;
+
+    const auto normalized_source=normalize_quaternion(source);
+    const float projection=normalized_source.x*axis.x+normalized_source.y*axis.y+normalized_source.z*axis.z;
+    const auto twist=normalize_quaternion({axis.x*projection,axis.y*projection,axis.z*projection,normalized_source.w});
+    XMFLOAT4 base{};
+    if(operation.type_hash==gbfr::sop_swing_twist_operation){
+        const auto* swing_rate=floating_property(operation,gbfr::sop_swing_rate_property);
+        if(!swing_rate)return false;
+        const auto inverse_twist=XMFLOAT4{-twist.x,-twist.y,-twist.z,twist.w};
+        const auto swing=normalize_quaternion(multiply_quaternions(normalized_source,inverse_twist));
+        base=multiply_quaternions(quaternion_power(swing,swing_rate->floating()),quaternion_power(twist,twist_rate->floating()));
+    } else {
+        base=quaternion_power(twist,twist_rate->floating());
+    }
+
+    XMFLOAT3 offset{};
+    if(const auto* property=floating_property(operation,gbfr::sop_offset_x_property))offset.x=property->floating();
+    if(const auto* property=floating_property(operation,gbfr::sop_offset_y_property))offset.y=property->floating();
+    if(const auto* property=floating_property(operation,gbfr::sop_offset_z_property))offset.z=property->floating();
+    output=normalize_quaternion(multiply_quaternions(base,euler_to_float4(offset)));
+    return true;
+}
+
+float quaternion_error(const XMFLOAT4& left,const XMFLOAT4& right) {
+    const auto a=normalize_quaternion(left),b=normalize_quaternion(right);
+    const float minus=std::sqrt((a.x-b.x)*(a.x-b.x)+(a.y-b.y)*(a.y-b.y)+(a.z-b.z)*(a.z-b.z)+(a.w-b.w)*(a.w-b.w));
+    const float plus=std::sqrt((a.x+b.x)*(a.x+b.x)+(a.y+b.y)*(a.y+b.y)+(a.z+b.z)*(a.z+b.z)+(a.w+b.w)*(a.w+b.w));
+    return std::min(minus,plus);
+}
+
 XMMATRIX local_matrix(const gbfr::Vec3& position,const gbfr::Vec3& scale,FXMVECTOR rotation) {
     return XMMatrixScaling(scale.x,scale.y,scale.z)*XMMatrixRotationQuaternion(rotation)*XMMatrixTranslation(position.x,position.y,position.z);
 }
@@ -60,6 +138,23 @@ bool PreviewRenderer::apply_animation(const AnimationClip* clip,float frame) {
         }
     }
 
+    std::vector<XMFLOAT4> local_rotations(bone_count);
+    for(std::size_t i=0;i<bone_count;++i)local_rotations[i]=clip?euler_to_float4(rotations[i]):to_float4(skeleton_.bones[i].rotation);
+    applied_sop_operation_count_=0;
+    if(clip){
+        for(const auto& operation:sop_.operations){
+            const auto source=bone_indices.find(static_cast<int>(operation.source_bone));
+            const auto target=bone_indices.find(static_cast<int>(operation.target_bone));
+            if(source==bone_indices.end()||target==bone_indices.end())continue;
+            XMFLOAT4 rest_output{};
+            if(!evaluate_core_sop(operation,to_float4(skeleton_.bones[source->second].rotation),rest_output)||
+               quaternion_error(rest_output,to_float4(skeleton_.bones[target->second].rotation))>1e-4f)continue;
+            XMFLOAT4 animated_output{};
+            if(!evaluate_core_sop(operation,local_rotations[source->second],animated_output))continue;
+            local_rotations[target->second]=animated_output;++applied_sop_operation_count_;
+        }
+    }
+
     std::vector<XMMATRIX> rest_world(bone_count),posed_world(bone_count);
     BoneConstants gpu_bones{};
     const auto identity=XMMatrixIdentity();
@@ -69,7 +164,7 @@ bool PreviewRenderer::apply_animation(const AnimationClip* clip,float frame) {
     for(std::size_t i=0;i<bone_count;++i){
         const auto& bone=skeleton_.bones[i];
         const auto rest_local=local_matrix(bone.position,bone.scale,XMVectorSet(bone.rotation.x,bone.rotation.y,bone.rotation.z,bone.rotation.w));
-        const auto posed_local=clip?local_matrix(positions[i],scales[i],euler_to_quaternion(rotations[i])):rest_local;
+        const auto posed_local=clip?local_matrix(positions[i],scales[i],XMLoadFloat4(&local_rotations[i])):rest_local;
         if(bone.parent==0xffff){rest_world[i]=rest_local;posed_world[i]=posed_local;}
         else {if(bone.parent>=i)return false;rest_world[i]=rest_local*rest_world[bone.parent];posed_world[i]=posed_local*posed_world[bone.parent];}
         XMVECTOR determinant{};const auto inverse=XMMatrixInverse(&determinant,rest_world[i]);
