@@ -1,5 +1,6 @@
 #include <gbfr/formats/cloth.hpp>
 #include <pugixml.hpp>
+#include <algorithm>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
@@ -25,6 +26,15 @@ ClpAsset load_clp(const std::filesystem::path& path) {
     auto doc=read_xml(path);const auto root=doc.child("CLOTH");if(!root)throw std::runtime_error("CLP root CLOTH missing");ClpAsset result;
     const auto header=root.child("CLOTH_HEADER");if(!header)throw std::runtime_error("CLP CLOTH_HEADER missing");result.id=integer(header,"id_",-1);result.collision_flags=integer(header,"useCollisionFlags_");
     for(const auto node:root.child("CLOTH_WK_LIST").children("CLOTH_WK")){ClothNode c;c.bone=integer(node,"no");c.up=integer(node,"noUp",4095);c.down=integer(node,"noDown",4095);c.side=integer(node,"noSide",4095);c.poly=integer(node,"noPoly",4095);c.fix=integer(node,"noFix",4095);c.rotation_limit=number(node,"rotLimit");c.friction=number(node,"friction");c.offset=vec4(node.child("offset").text().as_string());c.weight=number(node,"weight_");c.thickness=number(node,"thick_");c.wind_area=number(node,"windForceArea_");result.nodes.push_back(c);}return result;
+}
+
+ClothSequenceAsset load_cloth_sequence(const std::filesystem::path& path) {
+    auto doc=read_xml(path);const auto root=doc.child("SeqRoot");if(!root)throw std::runtime_error("Cloth sequence SeqRoot missing");ClothSequenceAsset result;
+    for(const auto node:root.child("ClothTrack").children("Seq")){
+        ClothSequenceEvent event;event.layer_flags=node.attribute("LayerFlag").as_uint(0xffffffffu);event.start_time=node.attribute("StartTime").as_float();event.sequence_flag=node.attribute("SeqFlag").as_int();event.file_id=node.attribute("FileId").as_int(-1);event.scale_rate=node.attribute("ScaleRate").as_float();event.fade_frames=node.attribute("FadeInFrame").as_int();event.floor_offset=node.attribute("FloorAdditiveOffset").as_float();event.floor_fade_frames=node.attribute("FloorAdditiveOffsetFadeInFrame").as_int();
+        for(std::size_t i=0;i<event.collision_ids.size();++i){const auto name="CollisionId"+std::to_string(i);event.collision_ids[i]=node.attribute(name.c_str()).as_int(-1);}result.events.push_back(event);
+    }
+    std::stable_sort(result.events.begin(),result.events.end(),[](const auto& left,const auto& right){return left.start_time<right.start_time;});return result;
 }
 
 void save_clh_collision(const std::filesystem::path& path,const ClothCollision& collision) {

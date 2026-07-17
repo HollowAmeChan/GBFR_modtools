@@ -62,6 +62,8 @@ bool g_show_cloth_links = true;
 bool g_show_alpha_overlays = true;
 std::vector<std::filesystem::path> g_motion_files;
 std::optional<gbfr::AnimationClip> g_motion;
+std::optional<gbfr::ClothSequenceAsset> g_cloth_sequence;
+std::filesystem::path g_cloth_sequence_path;
 std::array<char,128> g_motion_search{};
 int g_selected_motion = -1;
 float g_motion_frame = 0.0f;
@@ -264,7 +266,7 @@ std::filesystem::path resolve_base_albedo(const std::filesystem::path& workspace
 }
 
 void clear_motion_state() {
-    g_motion_files.clear();g_motion.reset();g_motion_search.fill('\0');g_selected_motion=-1;g_motion_frame=0.0f;g_applied_motion_frame=-1.0f;g_motion_playing=false;
+    g_motion_files.clear();g_motion.reset();g_cloth_sequence.reset();g_cloth_sequence_path.clear();g_motion_search.fill('\0');g_selected_motion=-1;g_motion_frame=0.0f;g_applied_motion_frame=-1.0f;g_motion_playing=false;
 }
 
 void discover_motions(const ModelPreviewKey& key) {
@@ -283,8 +285,18 @@ void discover_motions(const ModelPreviewKey& key) {
 bool select_motion(int index) {
     if(!g_preview||index<0||index>=static_cast<int>(g_motion_files.size()))return false;
     try {
-        auto motion=gbfr::load_mot(g_motion_files[static_cast<std::size_t>(index)]);
+        const auto& motion_path=g_motion_files[static_cast<std::size_t>(index)];
+        auto motion=gbfr::load_mot(motion_path);
         if(!g_preview->apply_animation(&motion,0.0f))throw std::runtime_error("动画姿态应用失败");
+        g_cloth_sequence.reset();g_cloth_sequence_path.clear();
+        if(g_workspace&&motion_path.parent_path().parent_path().filename()==L"pl"){
+            const auto model_id=motion_path.parent_path().filename();
+            const auto sequence_path=g_workspace->root()/L"unpack/data/pl"/model_id/(motion_path.stem().wstring()+L"_0_seq_edit_cloth.bxm.xml");
+            if(std::filesystem::is_regular_file(sequence_path)){
+                try{g_cloth_sequence=gbfr::load_cloth_sequence(sequence_path);g_cloth_sequence_path=sequence_path;}
+                catch(const std::exception& error){gbfr::Log::write(gbfr::LogLevel::warning,std::string("cloth 动画覆盖读取失败：")+error.what());}
+            }
+        }
         g_motion=std::move(motion);g_selected_motion=index;g_motion_frame=0.0f;g_applied_motion_frame=0.0f;g_motion_playing=false;
         update_collision_debug();
         gbfr::Log::write(gbfr::LogLevel::info,"动画已加载："+g_motion->name+"，"+std::to_string(g_motion->frame_count)+" 帧");
@@ -293,7 +305,7 @@ bool select_motion(int index) {
 }
 
 void reset_motion_pose() {
-    g_motion.reset();g_selected_motion=-1;g_motion_frame=0.0f;g_applied_motion_frame=-1.0f;g_motion_playing=false;
+    g_motion.reset();g_cloth_sequence.reset();g_cloth_sequence_path.clear();g_selected_motion=-1;g_motion_frame=0.0f;g_applied_motion_frame=-1.0f;g_motion_playing=false;
     if(g_preview&&g_preview->apply_animation(nullptr,0.0f)) {
         if(g_show_collisions)update_collision_debug();
     }
@@ -474,6 +486,20 @@ std::string collision_layer_list(int mask) {
     std::string result;for(int layer=0;layer<31;++layer)if(mask&(1<<layer)){if(!result.empty())result+=", ";result+=std::to_string(layer);}return result.empty()?"无":result;
 }
 
+bool cloth_event_has_collisions(const gbfr::ClothSequenceEvent& event) {
+    return std::any_of(event.collision_ids.begin(),event.collision_ids.end(),[](int id){return id>=0;});
+}
+
+int cloth_sequence_file_mask(bool collisions_only) {
+    if(!g_cloth_sequence)return 0;int mask{};
+    for(const auto& event:g_cloth_sequence->events)if(event.file_id>=0&&event.file_id<31&&(!collisions_only||cloth_event_has_collisions(event)))mask|=1<<event.file_id;
+    return mask;
+}
+
+std::string cloth_collision_id_list(const gbfr::ClothSequenceEvent& event) {
+    std::string result;for(const int id:event.collision_ids)if(id>=0){if(!result.empty())result+=", ";result+=std::to_string(id);}return result.empty()?"-":result;
+}
+
 void update_collision_debug() {
     if(!g_preview)return;
     std::vector<gbfr::Vec3> collision_lines,longitudinal_lines,lateral_lines,polygon_lines;
@@ -600,6 +626,26 @@ void draw_motion_controls() {
         if(std::abs(g_motion_frame-g_applied_motion_frame)>1e-4f){if(g_preview->apply_animation(&*g_motion,g_motion_frame)){g_applied_motion_frame=g_motion_frame;update_collision_debug();}else{g_motion_playing=false;gbfr::Log::write(gbfr::LogLevel::error,"动画姿态更新失败");}}
     }
     ImGui::EndDisabled();
+    const int base_mask=active_collision_mask();
+    if(!g_cloth_sequence){ImGui::Text("基础 CLH: %s | 动画覆盖: 无",collision_layer_list(base_mask).c_str());return;}
+    const int collision_mask=cloth_sequence_file_mask(true),event_mask=cloth_sequence_file_mask(false);
+    const float current_time=g_motion_frame/60.0f;
+    const auto triggered=std::count_if(g_cloth_sequence->events.begin(),g_cloth_sequence->events.end(),[&](const auto& event){return event.start_time<=current_time+1e-5f;});
+    ImGui::Text("基础 CLH: %s | 动画引用 CLH: %s | FileId 事件: %s | 已触发 %d/%d",collision_layer_list(base_mask).c_str(),collision_layer_list(collision_mask).c_str(),collision_layer_list(event_mask).c_str(),static_cast<int>(triggered),static_cast<int>(g_cloth_sequence->events.size()));
+    if(ImGui::CollapsingHeader("Cloth 动画覆盖")){
+        ImGui::TextUnformatted(utf8(g_cloth_sequence_path.filename().wstring()).c_str());
+        constexpr ImGuiTableFlags flags=ImGuiTableFlags_Borders|ImGuiTableFlags_RowBg|ImGuiTableFlags_ScrollY|ImGuiTableFlags_Resizable|ImGuiTableFlags_SizingStretchProp;
+        if(ImGui::BeginTable("##cloth_sequence",10,flags,ImVec2(0,170.0f))){
+            ImGui::TableSetupScrollFreeze(0,1);ImGui::TableSetupColumn("状态");ImGui::TableSetupColumn("时间");ImGui::TableSetupColumn("FileId");ImGui::TableSetupColumn("SeqFlag");ImGui::TableSetupColumn("LayerFlag");ImGui::TableSetupColumn("Collision IDs");ImGui::TableSetupColumn("Scale");ImGui::TableSetupColumn("淡入帧");ImGui::TableSetupColumn("地面偏移");ImGui::TableSetupColumn("地面淡入帧");ImGui::TableHeadersRow();
+            for(const auto& event:g_cloth_sequence->events){
+                ImGui::TableNextRow();ImGui::TableNextColumn();ImGui::TextUnformatted(event.start_time<=current_time+1e-5f?"已触发":"等待");
+                ImGui::TableNextColumn();ImGui::Text("%.3f",event.start_time);ImGui::TableNextColumn();ImGui::Text("%d",event.file_id);ImGui::TableNextColumn();ImGui::Text("%d",event.sequence_flag);
+                ImGui::TableNextColumn();ImGui::Text("0x%08X",event.layer_flags);ImGui::TableNextColumn();ImGui::TextUnformatted(cloth_collision_id_list(event).c_str());ImGui::TableNextColumn();ImGui::Text("%.3f",event.scale_rate);ImGui::TableNextColumn();ImGui::Text("%d",event.fade_frames);
+                ImGui::TableNextColumn();ImGui::Text("%.3f",event.floor_offset);ImGui::TableNextColumn();ImGui::Text("%d",event.floor_fade_frames);
+            }
+            ImGui::EndTable();
+        }
+    }
 }
 
 void return_to_start() {

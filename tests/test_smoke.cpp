@@ -165,6 +165,12 @@ int main() {
         const auto clh_path=cloth_root/L"pl1400_0_0_clh.bxm.xml",clp_path=cloth_root/L"pl1400_0_0_clp.bxm.xml";
         const auto clh=gbfr::load_clh(clh_path);const auto clp=gbfr::load_clp(clp_path);
         if(clh.collisions.size()!=8||clp.nodes.size()!=60||clp.id!=0||clp.collision_flags!=18)return 9;
+        const auto cloth_sequence_root=integration.parent_path()/L"unpack/data/pl/pl1400";
+        const auto cloth_sequence=gbfr::load_cloth_sequence(cloth_sequence_root/L"pl1400_0002_0_seq_edit_cloth.bxm.xml");
+        if(cloth_sequence.events.size()!=8||cloth_sequence.events[0].file_id!=0||cloth_sequence.events[0].collision_ids[0]!=0||cloth_sequence.events[0].collision_ids[1]!=1||cloth_sequence.events[1].file_id!=5||cloth_sequence.events[0].layer_flags!=0xffffffffu||std::abs(cloth_sequence.events.back().start_time-12.450001f)>.0001f)return 74;
+        std::size_t cloth_sequence_count{},cloth_event_count{};
+        for(const auto& entry:fs::directory_iterator(cloth_sequence_root))if(entry.is_regular_file()&&entry.path().filename().string().find("_seq_edit_cloth.bxm.xml")!=std::string::npos){const auto sequence=gbfr::load_cloth_sequence(entry.path());++cloth_sequence_count;cloth_event_count+=sequence.events.size();if(!std::is_sorted(sequence.events.begin(),sequence.events.end(),[](const auto& left,const auto& right){return left.start_time<right.start_time;}))return 75;}
+        if(cloth_sequence_count!=43||cloth_event_count!=229)return 76;
         if(clh.collisions[0].capsule!=-1||clh.collisions[1].capsule!=clh.collisions[0].id||clh.collisions[2].capsule!=clh.collisions[1].id||clh.collisions[3].capsule!=clh.collisions[2].id)return 62;
         if(std::any_of(clh.collisions.begin(),clh.collisions.end(),[](const auto& collision){return collision.p1!=collision.p2||collision.weight!=0.0f;}))return 63;
         const auto clp_grid=gbfr::load_clp(cloth_root/L"pl1400_0_2_clp.bxm.xml");
