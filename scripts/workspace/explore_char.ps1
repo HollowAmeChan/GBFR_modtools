@@ -1,6 +1,6 @@
 ﻿# explore_char.ps1
 # Explore all assets related to a GBFR character starting from its .minfo file
-# Usage: drag a .minfo file onto explore_char.bat
+# Internal backend used by the C++ editor to create a workspace from a .minfo file.
 # All user-visible strings are loaded from _lib/explore_strings_zh.json at runtime
 
 param([string]$MinfoPath = "")
@@ -8,20 +8,28 @@ param([string]$MinfoPath = "")
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$libRoot = Join-Path $PSScriptRoot "_lib"
-$flatcExe = Join-Path $libRoot "flatc.exe"
-$graniteExe = Join-Path $libRoot "GraniteTextureReader.exe"
-$texconvExe = Join-Path $libRoot "texconv.exe"
-$gbfrDataToolsExe = Join-Path $libRoot "GBFRDataTools.exe"
+$repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
+$libRoot = Join-Path $repoRoot "_lib"
+$toolsRoot = Join-Path $libRoot "tools"
+$flatcExe = Join-Path $toolsRoot "flatc.exe"
+$graniteExe = Join-Path $toolsRoot "GraniteTextureReader.exe"
+$texconvExe = Join-Path $toolsRoot "texconv.exe"
+$gbfrDataToolsExe = Join-Path $toolsRoot "GBFRDataTools\GBFRDataTools.exe"
 $schemaFbs = Join-Path $libRoot "MMat_ModelMaterial.fbs"
-. (Join-Path $libRoot "workspace_lib.ps1")
-. (Join-Path $libRoot "sop_report.ps1")
+. (Join-Path $PSScriptRoot "workspace_lib.ps1")
+. (Join-Path $PSScriptRoot "sop_report.ps1")
 
 # Load Chinese strings from JSON at runtime (no parse-time encoding issues)
 $stringsFile = Join-Path $libRoot "explore_strings_zh.json"
 $S = ConvertFrom-Json ([IO.File]::ReadAllText($stringsFile, [Text.Encoding]::UTF8))
 $sopCatalog = Import-SopOperationCatalog (Join-Path $libRoot "sop_operations_zh.json")
 $sopBoneNames = Import-SopBoneNames (Join-Path $libRoot "humanoid_bone_names.json")
+
+foreach ($requiredTool in @($flatcExe, $graniteExe, $texconvExe, $gbfrDataToolsExe)) {
+    if (-not (Test-Path -LiteralPath $requiredTool -PathType Leaf)) {
+        throw "Workspace decoder is missing: $requiredTool. Run build.bat tools."
+    }
+}
 
 # Section headers via codepoints
 $H_MODEL   = -join ([char]0x6A21,[char]0x578B,[char]0x5C42)
@@ -153,8 +161,7 @@ Write-Host ""
 
 # --- Output file setup ---
 
-$scriptDir = $PSScriptRoot
-$outDir    = Join-Path $scriptDir "explore_output"
+$outDir    = Join-Path $repoRoot "explore_output"
 if (Test-Path -LiteralPath $outDir) { Remove-Item -LiteralPath $outDir -Recurse -Force }
 $sourceRoot = Join-Path $outDir "source"
 $unpackRoot = Join-Path $outDir "unpack"

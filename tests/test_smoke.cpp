@@ -53,7 +53,7 @@ int main() {
     if (workspace.changed_count() != 0) return 5;
     fs::remove_all(root);
 
-    const fs::path integration = fs::path(GBFR_SOURCE_DIR) / L"explore_output/workspace.json";
+    const fs::path integration = fs::path(GBFR_ROOT_DIR) / L"explore_output/workspace.json";
     if (fs::is_regular_file(integration)) {
         const auto pl1400 = gbfr::Workspace::load(integration);
         nlohmann::json document;
@@ -72,7 +72,7 @@ int main() {
         const auto sop_path=integration.parent_path()/L"source/data/model/pl/pl1400/pl1400.sop";
         const auto sop=gbfr::load_sop(sop_path);
         nlohmann::json sop_catalog;
-        {std::ifstream input(fs::path(GBFR_SOURCE_DIR)/L"_lib/sop_operations_zh.json");if(!input)return 59;input>>sop_catalog;}
+        {std::ifstream input(fs::path(GBFR_ROOT_DIR)/L"_lib/sop_operations_zh.json");if(!input)return 59;input>>sop_catalog;}
         const auto mesh = gbfr::load_mmesh(integration.parent_path() / L"unpack/data/model_streaming/lod0/pl1400.mmesh", minfo);
         if (mesh.vertices.size() != minfo.vertex_count || mesh.indices.size() != minfo.index_count || skeleton.bones.empty()) return 7;
         if(sop.version!=gbfr::sop_version_20200309||sop.operations.size()!=101)return 52;
@@ -93,7 +93,7 @@ int main() {
         if(FAILED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_WARP,nullptr,0,nullptr,0,D3D11_SDK_VERSION,&device,nullptr,&context)))return 15;
         gbfr::PreviewRenderer preview;
         const auto dds=integration.parent_path()/L"unpack/data/granite/2k/pl1400_body01_lod0_albd.dds";
-        const auto shader_file=fs::path(GBFR_SOURCE_DIR)/L"assets/shaders/preview.hlsl";
+        const auto shader_file=fs::path(GBFR_ROOT_DIR)/L"assets/shaders/preview.hlsl";
         if(!preview.initialize(device.Get(),context.Get(),shader_file)||!preview.load_texture_preview(dds)||!preview.texture_image()||!preview.texture_width()||!preview.texture_height())return 16;
         std::vector<gbfr::PreviewMaterialTextures> preview_materials(materials.entries.size());for(auto& material:preview_materials)material.albedo=dds;
         gbfr::OrbitCamera camera;

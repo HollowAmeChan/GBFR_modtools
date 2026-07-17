@@ -206,8 +206,8 @@ bool start_workspace_extraction() {
     if(g_extract_process) return false;
     const std::filesystem::path minfo=wide(g_minfo_path.data());
     if(!std::filesystem::is_regular_file(minfo)||minfo.extension()!=L".minfo") { g_start_status="请选择有效的原始 .minfo 文件。"; return false; }
-    const auto script=tool_root()/L"explore_char.ps1";
-    if(!std::filesystem::is_regular_file(script)) { g_start_status="找不到 explore_char.ps1。"; return false; }
+    const auto script=tool_root()/L"scripts/workspace/explore_char.ps1";
+    if(!std::filesystem::is_regular_file(script)) { g_start_status="找不到工作区生成脚本。"; return false; }
     std::wstring command=L"powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File \""+script.wstring()+L"\" \""+minfo.wstring()+L"\"";
     std::vector<wchar_t> mutable_command(command.begin(),command.end()); mutable_command.push_back(L'\0');
     STARTUPINFOW startup{sizeof(startup)}; PROCESS_INFORMATION process{};
@@ -241,13 +241,6 @@ void run_selected_model_action(bool restore) {
     } catch (const std::exception& error) {
         gbfr::Log::write(gbfr::LogLevel::error, error.what());
     }
-}
-
-void launch_legacy_builder() {
-    if (!g_workspace) return;
-    const auto launcher = tool_root() / L"_lib" / L"launch_workspace_builder.vbs";
-    const std::wstring arguments = L"\"" + launcher.wstring() + L"\" \"" + (g_workspace->root() / L"manifest.md").wstring() + L"\"";
-    ShellExecuteW(nullptr, L"open", L"wscript.exe", arguments.c_str(), nullptr, SW_HIDE);
 }
 
 void update_collision_debug();
@@ -579,7 +572,6 @@ void build_default_dock_layout(ImGuiID dockspace) {
     ImGui::DockBuilderDockWindow("Viewport",center);
     ImGui::DockBuilderDockWindow("Inspector",right_top);
     ImGui::DockBuilderDockWindow("Skeleton & Cloth",right_bottom);
-    ImGui::DockBuilderDockWindow("Migration Coverage",bottom);
     ImGui::DockBuilderDockWindow("Log",bottom);
     ImGui::DockBuilderFinish(dockspace);
     g_reset_layout=false;
@@ -720,8 +712,6 @@ void draw_editor_shell() {
     ImGui::SameLine();
     if (g_workspace && ImGui::Button("刷新")) g_workspace->refresh();
     ImGui::SameLine();
-    if (g_workspace && ImGui::Button("旧版构建器")) launch_legacy_builder();
-    ImGui::SameLine();
     ImGui::Checkbox("只看修改", &g_changed_only);
     if (!g_workspace) {
         ImGui::Separator();
@@ -850,7 +840,7 @@ void draw_editor_shell() {
             ImGui::SameLine();
             if (ImGui::Button("恢复 unpack")) run_selected_model_action(true);
         } else {
-            ImGui::TextUnformatted("此类型继续由旧版构建器处理。M5 前保持兼容入口。");
+            ImGui::TextUnformatted("当前 C++ 版本尚未实现此类型的构建操作。");
         }
     } else ImGui::TextUnformatted("选择一个资源");
     ImGui::End();
@@ -908,15 +898,6 @@ void draw_editor_shell() {
     for (const auto& entry : gbfr::Log::snapshot()) ImGui::TextUnformatted(entry.message.c_str());
     ImGui::End();
 
-    ImGui::Begin("Migration Coverage");
-    if(ImGui::BeginTable("coverage",3,ImGuiTableFlags_RowBg|ImGuiTableFlags_BordersInnerV)){
-        ImGui::TableSetupColumn("功能");ImGui::TableSetupColumn("处理端");ImGui::TableSetupColumn("状态");ImGui::TableHeadersRow();
-        const char* rows[][3]={{"工作区列表 / SHA-256 / 状态","C++","原生"},{"minfo / skeleton / mmesh","C++","原生"},{"模型构建与恢复","C++","原生"},{"D3D11 网格 / DDS / 骨架预览","C++","原生"},{"MOT + SOP deform 动画求值","C++","核心操作"},{"CLH / CLP 查看与 CLH 编辑","C++","原生"},{"texture 封回与恢复","PowerShell + _lib","兼容入口"},{"mmat 编码 / A4 快捷编辑","PowerShell + _lib","兼容入口"},{"cloth BXM 编码与恢复","PowerShell + _lib","兼容入口"},{"新建 .texture","PowerShell + nier_cli","兼容入口"}};
-        for(const auto& row:rows){ImGui::TableNextRow();for(const char* cell:row){ImGui::TableNextColumn();ImGui::TextUnformatted(cell);}}
-        ImGui::EndTable();
-    }
-    if(g_workspace&&ImGui::Button("打开旧版构建器"))launch_legacy_builder();
-    ImGui::End();
 }
 }
 

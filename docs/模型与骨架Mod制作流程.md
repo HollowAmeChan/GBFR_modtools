@@ -1,12 +1,12 @@
 # 模型与骨架 Mod 制作流程
 
-> 角色 `_aXX` deform/corrective 骨由原始 `.sop` 在 `.mot` 之后驱动，不是普通动画骨。修改骨架前先阅读 [`SOP骨骼后处理与Deform骨.md`](SOP骨骼后处理与Deform骨.md)，并保留 SOP 引用的原始骨名。
+> 角色 `_aXX` deform/corrective 骨由原始 `.sop` 在 `.mot` 之后驱动，不是普通动画骨。修改骨架前先阅读 [SOP 骨骼后处理与 Deform 骨](formats/SOP骨骼后处理与Deform骨.md)，并保留 SOP 引用的原始骨名。
 
 本文记录从游戏原始角色资源到 Blender 编辑、插件导出和最终 Mod 目录的完整流程。
 
 ## 1. 建立角色工作区
 
-将玩家角色的 `.minfo` 拖到 `探索角色资源.bat`，例如：
+双击根目录 `build.bat` 启动编辑器，在开始页第一行选择玩家角色 `.minfo`，例如：
 
 ```text
 data/model/pl/pl1400/pl1400.minfo
@@ -20,7 +20,7 @@ data/model/pl/pl1400/pl1400.minfo
 
 `fn` 和 `np` 是其他独立 NPC 的资源，不会自动加入玩家工作区。
 
-探索结果位于：
+生成的工作区位于：
 
 ```text
 explore_output/
@@ -31,7 +31,7 @@ explore_output/
   build/data/
 ```
 
-注意：再次运行探索器会重建整个 `explore_output`。不要把 Blender 工程或长期编辑文件只保存在 `explore_output/source` 中；开始编辑前应复制工作区，或将模型工程放到独立目录。
+注意：再次从 minfo 生成会重建整个 `explore_output`。不要把 Blender 工程或长期编辑文件只保存在 `explore_output/source` 中；开始编辑前应复制工作区，或将模型工程放到独立目录。
 
 ## 2. 准备 Blender 导入文件
 
@@ -136,7 +136,7 @@ Blender 网格
 
 ## 5. 最终 Mod 路径
 
-插件导出完成后，将整个 `_Exported_MInfo` 文件夹拖入 `GBFR编辑封包工具.bat` 打开的窗口。构建器会忽略调试 JSON，并按文件名把三个二进制文件覆盖到当前工作区：
+插件导出完成后，把 `_Exported_MInfo` 中的三个二进制文件复制到当前工作区对应路径：
 
 ```text
 unpack/data/model/pl/pl1400/pl1400.minfo
@@ -144,7 +144,7 @@ unpack/data/model/pl/pl1400/pl1400.skeleton
 unpack/data/model_streaming/lod0/pl1400.mmesh
 ```
 
-构建列表会将它们标记为已修改并自动勾选。需要撤销某个导出文件时，使用该行的“恢复”；构建后文件会恢复到游戏原始路径，而不是原样复制 `_Exported_MInfo` 文件夹。
+返回编辑器点击“刷新”，三项会按 SHA-256 标记为已修改。选中每个模型项后，在 Inspector 使用“写入 build”；需要撤销时使用“恢复 unpack”。
 
 ```text
 Mod目录/
@@ -172,14 +172,16 @@ data/model/pl/pl1400/pl1400.mmesh
 
 仅修改顶点、权重或现有骨架，并保持材质槽结构不变时，通常不需要修改 `.mmat`。
 
-以下情况才需要额外构建材质或贴图：
+以下情况在完整 Mod 流程中需要同时修改材质或贴图；当前仓库只负责保留和预览这些中间态，反向编码能力见本节末尾：
 
-- 修改贴图内容：编辑 `unpack/data/texture/.../*.dds`，再用构建器封回 `.texture`。
-- 将 Granite 贴图改为普通贴图：编辑或保留 `unpack/data/granite/.../*.dds`，在构建器中勾选对应“新建贴图”，并删除 mmat 条目中的 `A4`。
+- 修改贴图内容：编辑 `unpack/data/texture/.../*.dds`，最终输出需要编码为对应 `.texture`。
+- 将 Granite 贴图改为普通贴图：最终输出需要把 `unpack/data/granite/.../*.dds` 编码为普通 `.texture`，并删除 mmat 条目中的 `A4`。
 - 修改贴图引用或 Granite 映射：编辑对应的 `*.mmat.json`。
 - 新增、删除或重新排序材质槽：必须同时确认 `.minfo` 的 `chunks[].material_id`、`materials[]` 与 `vars/*.mmat` 是否仍然对应。
 
 `.minfo` JSON 中的 `materials[]` 只是模型侧的材质哈希和索引信息，不等同于完整 `.mmat` 内容。
+
+> 当前 C++ 版本尚未实现 WTB `.texture` 和 mmat JSON 的反向编码。因此涉及贴图或材质的 Mod 目前不能只依靠本仓库生成完整输出；编辑器会保留中间态供预览，但不会假装已构建成功。
 
 ## 7. 导出后检查清单
 

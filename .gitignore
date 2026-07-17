@@ -4,9 +4,5 @@ explore_output/
 /out/
 /CMakeUserPresets.json
 
-# Third-party runtime binary (see README)
-_lib/flatc.exe
-_lib/GraniteTextureReader.exe
-_lib/texconv.exe
-_lib/GBFRDataTools.exe
-_lib/nier_cli_mgrr_*/
+# Third-party runtime tools installed by scripts/bootstrap_tools.ps1
+/_lib/tools/
