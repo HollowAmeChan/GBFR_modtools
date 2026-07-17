@@ -126,6 +126,8 @@
   "mod_C_steps": "编辑 unpack 中的 mmat JSON → 构建器自动编码",
   "cloth_groups": "布料组数",
   "cloth_convert": "探索时自动解码到 unpack；构建器从 XML 封回 BXM",
+  "cloth_collision_model": "CLH 每条记录是一个加权骨骼附着端点；capsule 引用同组另一碰撞 ID，-1 表示独立球",
+  "cloth_topology_model": "CLP Up/Down 是纵向链，Side 是只需存一次的横向边；Poly 的精确求解公式尚未探明",
   "cloth_not_found": "未找到 cloth 目录",
   "behav_not_found": "未找到行为层目录",
   "model_not_found": "目录不存在",

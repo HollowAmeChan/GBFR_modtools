@@ -193,11 +193,25 @@ data/pl/<角色>/<角色>_<动作>_<变体>_seq_edit_cloth.bxm
                                                 动画时间轴上的布料覆盖
 ```
 
-`_clp` 解码后的根节点是 `CLOTH`。`CLOTH_HEADER` 保存重力、空气/风阻、拉伸、局部重力、地面碰撞、移动响应和碰撞 Flags 等整组参数；`CLOTH_WK_LIST` 保存节点图。节点通过 `noUp/noDown/noSide/noPoly/noFix` 相互引用，`4095` 表示无连接。部分组存在大量横向和多边形连接，不能一律当作线性骨链。
+`_clp` 解码后的根节点是 `CLOTH`。`CLOTH_HEADER` 保存重力、空气/风阻、拉伸、局部重力、地面碰撞、移动响应和碰撞 Flags 等整组参数；`CLOTH_WK_LIST` 保存节点图。节点通过 `noUp/noDown/noSide/noPoly/noFix` 相互引用，`4095` 表示无连接。文件名中的 `_0_<N>_` 是物理组边界，同编号 CLP 与 CLH 配对；连接不能跨组混用。
 
-`_clh` 解码后的根节点是 `CLOTH_AT`，其中每个 `ClothCollision` 有独立的 `id_`、`p1/p2`、偏移、半径、权重和 capsule 链接。碰撞 ID 可能不连续，动作文件必须按真实 `id_` 引用，不能用列表行号替代。
+CLP 连接目前可按拓扑关系理解：`noUp/noDown` 是同一布料链的纵向相邻节点，样本中双向互相引用；`noSide` 是相邻链之间的横向边，只保存一次方向，另一端不必再反向写一条；`noPoly` 是多边形关系。`pl1400` 中 52 条有效 `noSide` 与 `noPoly` 完全相同，说明它们共同描述布料带/布料面的横向结构，但 `noPoly` 在求解器中究竟控制四边形、剪切还是其他约束仍未证实。预览将纵向边显示为绿色、横向边显示为品红；只有 `noPoly != noSide` 时才额外用橙色显示，避免把同一条横边画两遍。横向边是布料结构约束，不是碰撞体，因此“一条横向连接”已经足以表达两个节点的关系。
 
-CLP 的 `no/noUp/noDown/noSide/noPoly/noFix` 与 CLH 的 `p1/p2` 使用的是**骨骼名编码**，不是 `.skeleton` 的骨骼数组下标，也不是 FlatBuffers 中的 `BoneId`。数值按十六进制转换后就是 Blender 插件导入的原始骨骼名：例如 `3141 = 0xC45` 对应 `_c45`，`545 = 0x221` 对应 `_221`。因此每个碰撞体确实通过 `p1/p2` 引用了主体骨架；但 `p1 == p2` 或 `p1 != p2` 本身不能直接判断碰撞形状，还要结合 `offset1/offset2` 与 `capsule` 字段。编辑器使用 `unpack/data/model/pl/<角色>/<角色>.skeleton` 验证并显示名称，因此拖入 Blender 导出的新骨架后会立即刷新；它不会混用可能出现重名的 fp/wp 骨架，未命中的引用会明确显示“未在主体骨架中找到”。
+`_clh` 解码后的根节点是 `CLOTH_AT`。每条 `ClothCollision` 记录描述一个碰撞端点：`p1/p2` 是两根附着骨骼，`offset1/offset2` 是各自骨骼局部空间中的位置，`weight` 在两个变换后的位置之间插值：
+
+```text
+attachment1 = TransformPoint(BoneWorld(p1), offset1)
+attachment2 = TransformPoint(BoneWorld(p2), offset2)
+center      = attachment1 * (1 - weight) + attachment2 * weight
+```
+
+因此 `p1/p2` **不是胶囊两端**。端点本身以 `center + radius` 构成球；当 `capsule >= 0` 时，它引用同一 CLH 文件中另一条碰撞记录的真实 `id_`，两个记录的球心与各自半径共同构成胶囊或变半径胶囊。`capsule = -1` 表示独立球。碰撞 ID 可能不连续，动作文件和 capsule 链都必须按真实 `id_` 引用，不能用列表行号替代。编辑器会显示“球”“胶囊 -> ID”或“无效引用”，并使用动画后的完整骨骼世界变换绘制 offset。
+
+这个结论来自现有文件的结构关联，不是官方公开的运行时代码。当前 8 组 `pl1400` 样本共有 112 条 CLH 记录：91 条 `p1 == p2` 且 `weight == 0`，另外 21 条 `p1 != p2` 全部使用非零权重；46 条记录的 `capsule` 指向同组内另一个碰撞 `id_`。例如 `_0_0_clh` 中存在 `id 1 -> 0`、`2 -> 1`、`3 -> 2` 的连续 capsule 链；`id 4 -> 0` 又横向连接另一侧端点，随后 `5 -> 4`、`6 -> 5`、`7 -> 6`。这与沿肢体串联胶囊、再用单个引用建立横向胶囊完全吻合，也说明横向胶囊不需要反向再存一条。后续若从游戏运行时或更多角色样本得到反例，应以新证据修正规则。
+
+CLH 参数的当前解释如下：`radius` 是该端点的球半径；`offset1/offset2` 是骨骼局部偏移，必须随骨骼旋转和缩放；`weight` 是双附着插值权重，不是质量或碰撞强度；`capsule` 是另一端点 ID，不是布尔形状开关；`notUseInBattle/notUseInIdle` 分别控制战斗/待机状态是否禁用。两个状态字段的切换时机仍需游戏内验证。CLP 节点的 `rotLimit` 很可能是弧度制关节摆角限制，`friction`、`thick_`、`windForceArea_` 分别对应摩擦、节点碰撞厚度和受风面积；`weight_` 更像求解权重而非直接的公斤质量。`gravityBlendRate_`、`originalRate_`、`jointScale_`、`axisAdjustRate_` 和允许缩放标志的精确公式尚未探明，编辑器不应擅自归一化或改写。
+
+CLP 的 `no/noUp/noDown/noSide/noPoly/noFix` 与 CLH 的 `p1/p2` 使用的是**骨骼名编码**，不是 `.skeleton` 的骨骼数组下标，也不是 FlatBuffers 中的 `BoneId`。数值按十六进制转换后就是 Blender 插件导入的原始骨骼名：例如 `3141 = 0xC45` 对应 `_c45`，`545 = 0x221` 对应 `_221`。编辑器使用 `unpack/data/model/pl/<角色>/<角色>.skeleton` 验证并显示名称，因此拖入 Blender 导出的新骨架后会立即刷新；它不会混用可能出现重名的 fp/wp 骨架，未命中的引用会明确显示“未在主体骨架中找到”。
 
 当前 `pl1400` 样本中，CLP 的 175 个不同骨骼引用与 CLH 的 38 个不同端点引用都能在 `pl1400.skeleton` 中找到。骨骼名 `_xxx` 是游戏原始标识；Blender 插件中的“Translate Bones”只会把一部分通用人体骨骼另行翻译为 `Hips/Chest/Head` 等便于阅读的别名，cloth 专用骨骼通常仍保留 `_c45` 这类名字。
 

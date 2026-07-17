@@ -58,6 +58,7 @@ bool g_show_mesh = true;
 gbfr::PreviewShadingMode g_preview_shading = gbfr::PreviewShadingMode::lit;
 bool g_show_skeleton = true;
 bool g_show_collisions = true;
+bool g_show_cloth_links = true;
 bool g_show_alpha_overlays = true;
 std::vector<std::filesystem::path> g_motion_files;
 std::optional<gbfr::AnimationClip> g_motion;
@@ -416,20 +417,87 @@ bool asset_matches_search(const gbfr::WorkspaceAsset& asset) {
            contains_ascii_case_insensitive(asset.subtype,query);
 }
 
-std::optional<gbfr::Vec3> collision_point(int id,const gbfr::Vec4& offset) {
-    const auto* pose=g_preview?&g_preview->bone_positions():nullptr;
-    for(std::size_t i=0;i<g_skeleton.bones.size();++i) if(cloth_bone_id(g_skeleton.bones[i].name)==id) {const auto& p=pose&&i<pose->size()?(*pose)[i]:g_skeleton.bones[i].world_position;return gbfr::Vec3{p.x+offset.x,p.y+offset.y,p.z+offset.z};}
+std::optional<gbfr::Vec3> bone_point(int id,const gbfr::Vec4& offset={}) {
+    for(std::size_t i=0;i<g_skeleton.bones.size();++i)if(cloth_bone_id(g_skeleton.bones[i].name)==id){
+        gbfr::Vec3 point{};
+        if(g_preview&&g_preview->transform_bone_point(i,{offset.x,offset.y,offset.z},point))return point;
+        const auto& rest=g_skeleton.bones[i].world_position;return gbfr::Vec3{rest.x+offset.x,rest.y+offset.y,rest.z+offset.z};
+    }
     return std::nullopt;
 }
+
+gbfr::Vec3 add(gbfr::Vec3 a,gbfr::Vec3 b){return {a.x+b.x,a.y+b.y,a.z+b.z};}
+gbfr::Vec3 subtract(gbfr::Vec3 a,gbfr::Vec3 b){return {a.x-b.x,a.y-b.y,a.z-b.z};}
+gbfr::Vec3 multiply(gbfr::Vec3 value,float scale){return {value.x*scale,value.y*scale,value.z*scale};}
+float length(gbfr::Vec3 value){return std::sqrt(value.x*value.x+value.y*value.y+value.z*value.z);}
+gbfr::Vec3 cross(gbfr::Vec3 a,gbfr::Vec3 b){return {a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x};}
+gbfr::Vec3 normalize(gbfr::Vec3 value){const float size=length(value);return size>1e-7f?multiply(value,1.0f/size):gbfr::Vec3{};}
 
 void append_circle(std::vector<gbfr::Vec3>& lines,gbfr::Vec3 center,float radius,int plane) {
     constexpr int segments=20; constexpr float tau=6.283185307f;
     for(int i=0;i<segments;++i){const float a=tau*i/segments,b=tau*(i+1)/segments;gbfr::Vec3 p=center,q=center;const float ca=std::cos(a)*radius,sa=std::sin(a)*radius,cb=std::cos(b)*radius,sb=std::sin(b)*radius;if(plane==0){p.x+=ca;p.y+=sa;q.x+=cb;q.y+=sb;}else if(plane==1){p.x+=ca;p.z+=sa;q.x+=cb;q.z+=sb;}else{p.y+=ca;p.z+=sa;q.y+=cb;q.z+=sb;}lines.push_back(p);lines.push_back(q);}
 }
 
+void append_sphere(std::vector<gbfr::Vec3>& lines,gbfr::Vec3 center,float radius){for(int plane=0;plane<3;++plane)append_circle(lines,center,radius,plane);}
+
+void append_capsule(std::vector<gbfr::Vec3>& lines,gbfr::Vec3 a,float radius_a,gbfr::Vec3 b,float radius_b) {
+    const auto axis=normalize(subtract(b,a));if(length(axis)<1e-7f)return;
+    const gbfr::Vec3 reference=std::abs(axis.y)<.8f?gbfr::Vec3{0,1,0}:gbfr::Vec3{1,0,0};
+    const auto u=normalize(cross(axis,reference)),v=normalize(cross(axis,u));
+    constexpr int segments=16;constexpr float tau=6.283185307f;
+    for(int i=0;i<segments;++i){
+        const float angle=tau*static_cast<float>(i)/segments;
+        const auto radial=add(multiply(u,std::cos(angle)),multiply(v,std::sin(angle)));
+        lines.push_back(add(a,multiply(radial,radius_a)));lines.push_back(add(b,multiply(radial,radius_b)));
+    }
+}
+
+std::wstring cloth_group_key(const std::filesystem::path& path) {
+    auto name=path.filename().wstring();
+    for(const std::wstring suffix:{L"_clh.bxm.xml",L"_clp.bxm.xml"})if(name.ends_with(suffix)){name.resize(name.size()-suffix.size());break;}
+    return name;
+}
+
 void update_collision_debug() {
-    if(!g_preview)return;std::vector<gbfr::Vec3> lines;
-    for(std::size_t file_index=0;file_index<g_clh_files.size();++file_index){if(!g_all_clh_files&&static_cast<int>(file_index)!=g_selected_clh)continue;for(const auto& c:g_clh_files[file_index].data.collisions){if(!g_all_bones&&g_selected_bone>=0&&c.p1!=g_selected_bone&&c.p2!=g_selected_bone)continue;const auto p=collision_point(c.p1,c.offset1),q=collision_point(c.p2,c.offset2);if(!p||!q)continue;lines.push_back(*p);lines.push_back(*q);append_circle(lines,*p,c.radius,0);append_circle(lines,*p,c.radius,1);append_circle(lines,*p,c.radius,2);if(c.p1!=c.p2||c.offset1.x!=c.offset2.x||c.offset1.y!=c.offset2.y||c.offset1.z!=c.offset2.z){append_circle(lines,*q,c.radius,0);append_circle(lines,*q,c.radius,1);append_circle(lines,*q,c.radius,2);}}}g_preview->set_collision_lines(lines);
+    if(!g_preview)return;
+    std::vector<gbfr::Vec3> collision_lines,longitudinal_lines,lateral_lines,polygon_lines;
+    std::vector<std::wstring> visible_groups;
+    for(std::size_t file_index=0;file_index<g_clh_files.size();++file_index){
+        if(!g_all_clh_files&&static_cast<int>(file_index)!=g_selected_clh)continue;
+        const auto& collisions=g_clh_files[file_index].data.collisions;visible_groups.push_back(cloth_group_key(g_clh_files[file_index].path));
+        struct Endpoint{gbfr::Vec3 center{};float radius{};const gbfr::ClothCollision* source{};};
+        std::unordered_map<int,Endpoint> endpoints;
+        for(const auto& collision:collisions){
+            const auto first=bone_point(collision.p1,collision.offset1),second=bone_point(collision.p2,collision.offset2);if(!first||!second)continue;
+            endpoints[collision.id]={add(multiply(*first,1.0f-collision.weight),multiply(*second,collision.weight)),collision.radius,&collision};
+        }
+        for(const auto& collision:collisions){
+            const auto endpoint=endpoints.find(collision.id);if(endpoint==endpoints.end())continue;
+            const auto linked=collision.capsule>=0?endpoints.find(collision.capsule):endpoints.end();
+            bool visible=g_all_bones||g_selected_bone<0||collision.p1==g_selected_bone||collision.p2==g_selected_bone;
+            if(!visible&&linked!=endpoints.end())visible=linked->second.source->p1==g_selected_bone||linked->second.source->p2==g_selected_bone;
+            if(!visible)continue;
+            append_sphere(collision_lines,endpoint->second.center,endpoint->second.radius);
+            if(linked!=endpoints.end()){
+                append_sphere(collision_lines,linked->second.center,linked->second.radius);
+                append_capsule(collision_lines,linked->second.center,linked->second.radius,endpoint->second.center,endpoint->second.radius);
+            }
+        }
+    }
+    const auto group_visible=[&](const std::filesystem::path& path){if(g_all_clh_files)return true;const auto key=cloth_group_key(path);return std::find(visible_groups.begin(),visible_groups.end(),key)!=visible_groups.end();};
+    for(const auto& file:g_clp_files){
+        if(!group_visible(file.path))continue;
+        std::unordered_map<int,gbfr::Vec3> positions;
+        for(const auto& node:file.data.nodes)if(const auto point=bone_point(node.bone))positions.emplace(node.bone,*point);
+        const auto append_edge=[&](std::vector<gbfr::Vec3>& lines,const gbfr::ClothNode& node,int target){
+            if(target<0||target==4095)return;const auto from=positions.find(node.bone),to=positions.find(target);if(from==positions.end()||to==positions.end())return;
+            if(!g_all_bones&&g_selected_bone>=0&&node.bone!=g_selected_bone&&target!=g_selected_bone)return;
+            lines.push_back(from->second);lines.push_back(to->second);
+        };
+        for(const auto& node:file.data.nodes){append_edge(longitudinal_lines,node,node.down);append_edge(lateral_lines,node,node.side);if(node.poly!=node.side)append_edge(polygon_lines,node,node.poly);}
+    }
+    g_preview->set_collision_lines(collision_lines);
+    g_preview->set_cloth_lines(longitudinal_lines,lateral_lines,polygon_lines);
 }
 
 void save_selected_collision() {
@@ -514,7 +582,7 @@ void draw_motion_controls() {
         if(g_motion_playing&&end>0.0f){g_motion_frame+=ImGui::GetIO().DeltaTime*60.0f*g_motion_speed;if(g_motion_frame>=frame_count){if(g_motion_loop)g_motion_frame=std::fmod(g_motion_frame,frame_count);else{g_motion_frame=end;g_motion_playing=false;}}}
         ImGui::SetNextItemWidth(-110.0f);if(ImGui::SliderFloat("##motion_frame",&g_motion_frame,0.0f,end,"帧 %.1f"))g_motion_playing=false;
         ImGui::SameLine();ImGui::Text("%.2f / %.2f 秒",g_motion_frame/60.0f,g_motion->duration_seconds());
-        if(std::abs(g_motion_frame-g_applied_motion_frame)>1e-4f){if(g_preview->apply_animation(&*g_motion,g_motion_frame)){g_applied_motion_frame=g_motion_frame;if(g_show_collisions)update_collision_debug();}else{g_motion_playing=false;gbfr::Log::write(gbfr::LogLevel::error,"动画姿态更新失败");}}
+        if(std::abs(g_motion_frame-g_applied_motion_frame)>1e-4f){if(g_preview->apply_animation(&*g_motion,g_motion_frame)){g_applied_motion_frame=g_motion_frame;update_collision_debug();}else{g_motion_playing=false;gbfr::Log::write(gbfr::LogLevel::error,"动画姿态更新失败");}}
     }
     ImGui::EndDisabled();
 }
@@ -661,6 +729,7 @@ void draw_editor_shell() {
         if(ImGui::Combo("显示模式",&mode,modes,3))g_preview_shading=static_cast<gbfr::PreviewShadingMode>(mode);ImGui::SameLine();
         ImGui::Checkbox("骨架", &g_show_skeleton); ImGui::SameLine();
         if(ImGui::Checkbox("碰撞体", &g_show_collisions)&&g_show_collisions)update_collision_debug(); ImGui::SameLine();
+        if(ImGui::Checkbox("Cloth 连接", &g_show_cloth_links)&&g_show_cloth_links)update_collision_debug(); ImGui::SameLine();
         ImGui::Checkbox("透明覆盖",&g_show_alpha_overlays);ImGui::SameLine();
         if (g_preview && g_preview->has_model() && ImGui::Button("取景")) g_preview->frame(g_camera);
         if(!g_motion_files.empty())draw_motion_controls();
@@ -670,7 +739,7 @@ void draw_editor_shell() {
     ImVec2 available = ImGui::GetContentRegionAvail();
     if (g_preview&&g_preview_mode==PreviewMode::model&&available.x > 1 && available.y > 1) {
         g_preview->resize(static_cast<unsigned>(available.x), static_cast<unsigned>(available.y));
-        g_preview->render(g_camera, g_show_mesh, g_preview_shading, g_show_skeleton, g_show_collisions, g_show_alpha_overlays);
+        g_preview->render(g_camera, g_show_mesh, g_preview_shading, g_show_skeleton, g_show_collisions, g_show_alpha_overlays, g_show_cloth_links);
         const ImVec2 image_origin=ImGui::GetCursorScreenPos();
         ImGui::Image(reinterpret_cast<ImTextureID>(g_preview->image()), available);
         if (ImGui::IsItemHovered()) {
@@ -746,11 +815,15 @@ void draw_editor_shell() {
             if(ImGui::BeginCombo("CLH 文件",current.c_str())){for(int i=0;i<static_cast<int>(g_clh_files.size());++i){const auto name=utf8(g_clh_files[i].path.filename().wstring());if(ImGui::Selectable(name.c_str(),i==g_selected_clh)){g_selected_clh=i;g_selected_collision=-1;update_collision_debug();}}ImGui::EndCombo();}
             if(ImGui::Checkbox("全部 CLH",&g_all_clh_files))update_collision_debug();ImGui::SameLine();if(ImGui::Checkbox("全部骨骼",&g_all_bones))update_collision_debug();ImGui::SameLine();ImGui::Text("CLP %zu",g_clp_files.size());
             auto& collisions=g_clh_files[g_selected_clh].data.collisions;
-            if(ImGui::BeginTable("collisions",6,ImGuiTableFlags_RowBg|ImGuiTableFlags_BordersInnerV|ImGuiTableFlags_ScrollY,ImVec2(0,220))){ImGui::TableSetupColumn("ID");ImGui::TableSetupColumn("P1");ImGui::TableSetupColumn("P2");ImGui::TableSetupColumn("半径");ImGui::TableSetupColumn("权重");ImGui::TableSetupColumn("Capsule");ImGui::TableHeadersRow();for(int i=0;i<static_cast<int>(collisions.size());++i){const auto& c=collisions[i];if(!g_all_bones&&g_selected_bone>=0&&c.p1!=g_selected_bone&&c.p2!=g_selected_bone)continue;ImGui::TableNextRow();ImGui::TableNextColumn();if(ImGui::Selectable((std::to_string(c.id)+"##collision"+std::to_string(i)).c_str(),g_selected_collision==i,ImGuiSelectableFlags_SpanAllColumns))g_selected_collision=i;ImGui::TableNextColumn();ImGui::Text("%d",c.p1);ImGui::TableNextColumn();ImGui::Text("%d",c.p2);ImGui::TableNextColumn();ImGui::Text("%.4f",c.radius);ImGui::TableNextColumn();ImGui::Text("%.3f",c.weight);ImGui::TableNextColumn();ImGui::Text("%d",c.capsule);}ImGui::EndTable();}
+            const auto capsule_count=std::count_if(collisions.begin(),collisions.end(),[](const auto& collision){return collision.capsule>=0;});
+            const auto invalid_capsules=std::count_if(collisions.begin(),collisions.end(),[&](const auto& collision){return collision.capsule>=0&&std::none_of(collisions.begin(),collisions.end(),[&](const auto& other){return other.id==collision.capsule;});});
+            ImGui::Text("端点 %zu | 胶囊连接 %zu | 无效引用 %zu",collisions.size(),static_cast<std::size_t>(capsule_count),static_cast<std::size_t>(invalid_capsules));
+            if(ImGui::BeginTable("collisions",6,ImGuiTableFlags_RowBg|ImGuiTableFlags_BordersInnerV|ImGuiTableFlags_ScrollY,ImVec2(0,220))){ImGui::TableSetupColumn("ID");ImGui::TableSetupColumn("附着 P1");ImGui::TableSetupColumn("附着 P2");ImGui::TableSetupColumn("半径");ImGui::TableSetupColumn("权重");ImGui::TableSetupColumn("形状");ImGui::TableHeadersRow();for(int i=0;i<static_cast<int>(collisions.size());++i){const auto& c=collisions[i];if(!g_all_bones&&g_selected_bone>=0&&c.p1!=g_selected_bone&&c.p2!=g_selected_bone)continue;ImGui::TableNextRow();ImGui::TableNextColumn();if(ImGui::Selectable((std::to_string(c.id)+"##collision"+std::to_string(i)).c_str(),g_selected_collision==i,ImGuiSelectableFlags_SpanAllColumns))g_selected_collision=i;ImGui::TableNextColumn();ImGui::Text("%d",c.p1);ImGui::TableNextColumn();ImGui::Text("%d",c.p2);ImGui::TableNextColumn();ImGui::Text("%.4f",c.radius);ImGui::TableNextColumn();ImGui::Text("%.3f",c.weight);ImGui::TableNextColumn();if(c.capsule<0)ImGui::TextUnformatted("球");else if(std::any_of(collisions.begin(),collisions.end(),[&](const auto& other){return other.id==c.capsule;}))ImGui::Text("胶囊 -> %d",c.capsule);else ImGui::Text("无效 -> %d",c.capsule);}ImGui::EndTable();}
             if(g_selected_collision>=0&&g_selected_collision<static_cast<int>(collisions.size())){auto& c=collisions[g_selected_collision];ImGui::SeparatorText("碰撞属性");ImGui::DragFloat("半径",&c.radius,.001f,.0f,10.f,"%.4f");ImGui::DragFloat("权重",&c.weight,.01f,-100.f,100.f,"%.3f");ImGui::DragFloat4("Offset 1",&c.offset1.x,.001f);ImGui::DragFloat4("Offset 2",&c.offset2.x,.001f);if(ImGui::Button("保存到 unpack"))save_selected_collision();ImGui::SameLine();if(ImGui::Button("刷新预览"))update_collision_debug();}
         } else ImGui::TextUnformatted("工作区没有可用 CLH XML。");
         if(!g_clp_files.empty()&&ImGui::CollapsingHeader("CLP 节点",ImGuiTreeNodeFlags_DefaultOpen)){
-            if(ImGui::BeginTable("clp_nodes",8,ImGuiTableFlags_RowBg|ImGuiTableFlags_BordersInnerV|ImGuiTableFlags_ScrollY,ImVec2(0,180))){const char* columns[]={"文件","骨骼","Up","Down","旋转限制","摩擦","重量","厚度"};for(const char* column:columns)ImGui::TableSetupColumn(column);ImGui::TableHeadersRow();for(const auto& file:g_clp_files)for(const auto& node:file.data.nodes){if(!g_all_bones&&g_selected_bone>=0&&node.bone!=g_selected_bone)continue;ImGui::TableNextRow();ImGui::TableNextColumn();ImGui::TextUnformatted(utf8(file.path.filename().wstring()).c_str());ImGui::TableNextColumn();ImGui::Text("%d",node.bone);ImGui::TableNextColumn();ImGui::Text("%d",node.up);ImGui::TableNextColumn();ImGui::Text("%d",node.down);ImGui::TableNextColumn();ImGui::Text("%.3f",node.rotation_limit);ImGui::TableNextColumn();ImGui::Text("%.3f",node.friction);ImGui::TableNextColumn();ImGui::Text("%.3f",node.weight);ImGui::TableNextColumn();ImGui::Text("%.3f",node.thickness);}ImGui::EndTable();}
+            ImGui::TextColored(ImVec4(.3f,1.f,.22f,1),"Down 纵向");ImGui::SameLine();ImGui::TextColored(ImVec4(1.f,.25f,.8f,1),"Side 横向");ImGui::SameLine();ImGui::TextColored(ImVec4(1.f,.72f,.1f,1),"Poly 独立关系");
+            if(ImGui::BeginTable("clp_nodes",10,ImGuiTableFlags_RowBg|ImGuiTableFlags_BordersInnerV|ImGuiTableFlags_ScrollY,ImVec2(0,180))){const char* columns[]={"文件","骨骼","Up","Down","Side","Poly","旋转限制","摩擦","重量","厚度"};for(const char* column:columns)ImGui::TableSetupColumn(column);ImGui::TableHeadersRow();for(const auto& file:g_clp_files)for(const auto& node:file.data.nodes){if(!g_all_bones&&g_selected_bone>=0&&node.bone!=g_selected_bone&&node.up!=g_selected_bone&&node.down!=g_selected_bone&&node.side!=g_selected_bone&&node.poly!=g_selected_bone)continue;ImGui::TableNextRow();ImGui::TableNextColumn();ImGui::TextUnformatted(utf8(file.path.filename().wstring()).c_str());ImGui::TableNextColumn();ImGui::Text("%d",node.bone);ImGui::TableNextColumn();ImGui::Text("%d",node.up);ImGui::TableNextColumn();ImGui::Text("%d",node.down);ImGui::TableNextColumn();ImGui::Text("%d",node.side);ImGui::TableNextColumn();ImGui::Text("%d",node.poly);ImGui::TableNextColumn();ImGui::Text("%.3f",node.rotation_limit);ImGui::TableNextColumn();ImGui::Text("%.3f",node.friction);ImGui::TableNextColumn();ImGui::Text("%.3f",node.weight);ImGui::TableNextColumn();ImGui::Text("%.3f",node.thickness);}ImGui::EndTable();}
         }
         ImGui::EndTabItem();
         }

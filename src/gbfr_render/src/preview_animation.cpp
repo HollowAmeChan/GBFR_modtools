@@ -160,6 +160,7 @@ bool PreviewRenderer::apply_animation(const AnimationClip* clip,float frame) {
     const auto identity=XMMatrixIdentity();
     for(auto& matrix:gpu_bones.skin)XMStoreFloat4x4(&matrix,XMMatrixTranspose(identity));
     animated_bone_positions_.resize(bone_count);
+    animated_bone_world_.resize(bone_count);
     pose_hash_=1469598103934665603ull;
     for(std::size_t i=0;i<bone_count;++i){
         const auto& bone=skeleton_.bones[i];
@@ -172,7 +173,9 @@ bool PreviewRenderer::apply_animation(const AnimationClip* clip,float frame) {
         XMStoreFloat4x4(&gpu_bones.skin[i],XMMatrixTranspose(skin));
         const auto* bytes=reinterpret_cast<const std::uint8_t*>(&gpu_bones.skin[i]);
         for(std::size_t byte=0;byte<sizeof(XMFLOAT4X4);++byte){pose_hash_^=bytes[byte];pose_hash_*=1099511628211ull;}
-        XMFLOAT3 world{};XMStoreFloat3(&world,posed_world[i].r[3]);animated_bone_positions_[i]={world.x,world.y,world.z};
+        XMFLOAT4X4 world_matrix{};XMStoreFloat4x4(&world_matrix,posed_world[i]);
+        std::memcpy(animated_bone_world_[i].data(),&world_matrix,sizeof(world_matrix));
+        animated_bone_positions_[i]={world_matrix._41,world_matrix._42,world_matrix._43};
     }
 
     D3D11_MAPPED_SUBRESOURCE mapped{};

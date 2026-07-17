@@ -8,6 +8,7 @@
 #include <gbfr/render/preview_renderer.hpp>
 #include <nlohmann/json.hpp>
 #include <wrl/client.h>
+#include <DirectXMath.h>
 
 #include <filesystem>
 #include <fstream>
@@ -99,6 +100,7 @@ int main() {
         if(!preview.load(mesh,skeleton,preview_materials,sop))return 17;
         preview.resize(320,320);preview.frame(camera);
         preview.set_collision_lines({{0.0f,0.0f,0.0f},{0.0f,1.0f,0.0f}});
+        preview.set_cloth_lines({{0.0f,0.0f,0.0f},{0.0f,.5f,0.0f}},{{0.0f,.5f,0.0f},{.5f,.5f,0.0f}},{{.5f,.5f,0.0f},{.5f,0.0f,0.0f}});
         for(const auto mode:{gbfr::PreviewShadingMode::unlit,gbfr::PreviewShadingMode::lit,gbfr::PreviewShadingMode::wireframe})preview.render(camera,true,mode,true,true);
         preview.render(camera,true,gbfr::PreviewShadingMode::lit,true,false);
         context->Flush();
@@ -163,6 +165,24 @@ int main() {
         const auto clh_path=cloth_root/L"pl1400_0_0_clh.bxm.xml",clp_path=cloth_root/L"pl1400_0_0_clp.bxm.xml";
         const auto clh=gbfr::load_clh(clh_path);const auto clp=gbfr::load_clp(clp_path);
         if(clh.collisions.size()!=8||clp.nodes.size()!=60)return 9;
+        if(clh.collisions[0].capsule!=-1||clh.collisions[1].capsule!=clh.collisions[0].id||clh.collisions[2].capsule!=clh.collisions[1].id||clh.collisions[3].capsule!=clh.collisions[2].id)return 62;
+        if(std::any_of(clh.collisions.begin(),clh.collisions.end(),[](const auto& collision){return collision.p1!=collision.p2||collision.weight!=0.0f;}))return 63;
+        const auto clp_grid=gbfr::load_clp(cloth_root/L"pl1400_0_2_clp.bxm.xml");
+        const auto cross_link=std::find_if(clp_grid.nodes.begin(),clp_grid.nodes.end(),[](const auto& node){return node.side!=4095;});
+        if(cross_link==clp_grid.nodes.end()||cross_link->side!=cross_link->poly)return 64;
+        std::size_t collision_count{},blended_attachment_count{},capsule_count{},longitudinal_count{},side_count{},poly_count{};
+        for(int group=0;group<8;++group){
+            const auto suffix=std::to_wstring(group);
+            const auto group_clh=gbfr::load_clh(cloth_root/(L"pl1400_0_"+suffix+L"_clh.bxm.xml"));
+            const auto group_clp=gbfr::load_clp(cloth_root/(L"pl1400_0_"+suffix+L"_clp.bxm.xml"));
+            collision_count+=group_clh.collisions.size();
+            for(const auto& item:group_clh.collisions){
+                if(item.p1!=item.p2){if(item.weight==0.0f)return 67;++blended_attachment_count;}
+                if(item.capsule>=0){if(std::none_of(group_clh.collisions.begin(),group_clh.collisions.end(),[&](const auto& target){return target.id==item.capsule;}))return 68;++capsule_count;}
+            }
+            for(const auto& node:group_clp.nodes){if(node.down!=4095)++longitudinal_count;if(node.side!=4095)++side_count;if(node.poly!=4095)++poly_count;}
+        }
+        if(collision_count!=112||blended_attachment_count!=21||capsule_count!=46||longitudinal_count!=141||side_count!=52||poly_count!=52)return 69;
         const auto editable=test_temp/L"gbfr_clh_test.xml";fs::copy_file(clh_path,editable,fs::copy_options::overwrite_existing);auto collision=clh.collisions.front();collision.radius=.123f;gbfr::save_clh_collision(editable,collision);if(std::abs(gbfr::load_clh(editable).collisions.front().radius-.123f)>.0001f)return 10;fs::remove(editable);
         const auto motion_root=integration.parent_path()/L"source/data/pl/pl1400";
         const auto idle=gbfr::load_mot(motion_root/L"pl1400_0000.mot");
@@ -171,8 +191,11 @@ int main() {
         if(first_motion_track==idle.tracks.end()||first_motion_track->compression!=1||std::abs(first_motion_track->sample(1.0f)-(-.000534661114f))>1e-7f)return 23;
         if(!preview.load(mesh,skeleton,preview_materials,sop))return 27;
         const auto rest_bones=preview.bone_positions();
+        {gbfr::Vec3 transformed{};if(!preview.transform_bone_point(0,{},transformed)||std::abs(transformed.x-rest_bones[0].x)+std::abs(transformed.y-rest_bones[0].y)+std::abs(transformed.z-rest_bones[0].z)>1e-5f)return 65;}
+        {const gbfr::Vec3 local{.031f,-.017f,.043f};gbfr::Vec3 transformed{};if(!preview.transform_bone_point(0,local,transformed))return 70;const auto& root_bone=skeleton.bones[0];const auto matrix=DirectX::XMMatrixScaling(root_bone.scale.x,root_bone.scale.y,root_bone.scale.z)*DirectX::XMMatrixRotationQuaternion(DirectX::XMVectorSet(root_bone.rotation.x,root_bone.rotation.y,root_bone.rotation.z,root_bone.rotation.w))*DirectX::XMMatrixTranslation(root_bone.position.x,root_bone.position.y,root_bone.position.z);DirectX::XMFLOAT3 expected{};DirectX::XMStoreFloat3(&expected,DirectX::XMVector3TransformCoord(DirectX::XMVectorSet(local.x,local.y,local.z,1),matrix));if(std::abs(transformed.x-expected.x)+std::abs(transformed.y-expected.y)+std::abs(transformed.z-expected.z)>1e-5f)return 71;}
         for(std::size_t i=0;i<rest_bones.size();++i){const auto& actual=rest_bones[i];const auto& expected=skeleton.bones[i].world_position;if(std::abs(actual.x-expected.x)+std::abs(actual.y-expected.y)+std::abs(actual.z-expected.z)>1e-4f)return 31;}
         if(!preview.apply_animation(&idle,42.0f)||preview.bone_positions().size()!=skeleton.bones.size())return 30;
+        {gbfr::Vec3 transformed{};if(!preview.transform_bone_point(0,{},transformed)||std::abs(transformed.x-preview.bone_positions()[0].x)+std::abs(transformed.y-preview.bone_positions()[0].y)+std::abs(transformed.z-preview.bone_positions()[0].z)>1e-5f)return 66;}
         if(preview.applied_sop_operation_count()<30)return 55;
         const auto sop_pose_hash=preview.pose_hash();
         if(!preview.load(mesh,skeleton,preview_materials)||!preview.apply_animation(&idle,42.0f)||preview.applied_sop_operation_count()!=0||preview.pose_hash()==sop_pose_hash)return 57;
