@@ -136,7 +136,7 @@ Blender 网格
 
 ## 5. 最终 Mod 路径
 
-插件导出完成后，把 `_Exported_MInfo` 中的三个二进制文件复制到当前工作区对应路径：
+插件导出完成后，把 `_Exported_MInfo` 中的三个二进制文件复制到当前工作区的 `unpack` 对应路径。不要直接放进 `build`，否则预览、修改检测和逐项恢复都不会读取到它们：
 
 ```text
 unpack/data/model/pl/pl1400/pl1400.minfo
@@ -144,7 +144,7 @@ unpack/data/model/pl/pl1400/pl1400.skeleton
 unpack/data/model_streaming/lod0/pl1400.mmesh
 ```
 
-返回编辑器点击“刷新”，三项会按 SHA-256 标记为已修改。选中每个模型项后，在 Inspector 使用“写入 build”；需要撤销时使用“恢复 unpack”。
+返回编辑器点击“刷新”，三项会按 SHA-256 标记为已修改，预览器也会从 `unpack` 重新加载它们。选中每个模型项后，在 Inspector 使用“从 unpack 复制到 build”；需要撤销时使用“从 source 恢复 unpack”。`build` 是最终 Mod 输出，不参与预览。
 
 ```text
 Mod目录/

@@ -52,6 +52,8 @@ std::array<char,256> g_asset_search{};
 PreviewMode g_preview_mode = PreviewMode::none;
 std::optional<ModelPreviewKey> g_loaded_model;
 std::filesystem::path g_loaded_texture;
+std::filesystem::path g_loaded_material;
+std::filesystem::path g_loaded_sop;
 gbfr::OrbitCamera g_camera;
 gbfr::SkeletonAsset g_skeleton;
 bool g_show_mesh = true;
@@ -145,13 +147,64 @@ void set_path_input(std::array<char,32768>& input,const std::filesystem::path& p
     strncpy_s(input.data(),input.size(),value.c_str(),_TRUNCATE);
 }
 
+enum class WorkspaceArea { source, unpack, build, external };
+
+WorkspaceArea workspace_area(const std::filesystem::path& path) {
+    if(!g_workspace||path.empty())return WorkspaceArea::external;
+    const auto relative=path.lexically_relative(g_workspace->root());
+    if(relative.empty()||relative.native().starts_with(L".."))return WorkspaceArea::external;
+    const auto first=relative.begin();
+    if(first==relative.end())return WorkspaceArea::external;
+    if(*first==L"source")return WorkspaceArea::source;
+    if(*first==L"unpack")return WorkspaceArea::unpack;
+    if(*first==L"build")return WorkspaceArea::build;
+    return WorkspaceArea::external;
+}
+
+const char* workspace_area_name(WorkspaceArea area) {
+    switch(area){
+    case WorkspaceArea::source:return "source";
+    case WorkspaceArea::unpack:return "unpack";
+    case WorkspaceArea::build:return "build";
+    case WorkspaceArea::external:return "外部";
+    }
+    return "外部";
+}
+
+ImVec4 workspace_area_color(WorkspaceArea area) {
+    switch(area){
+    case WorkspaceArea::source:return ImVec4(.52f,.72f,.96f,1.0f);
+    case WorkspaceArea::unpack:return ImVec4(.43f,.86f,.58f,1.0f);
+    case WorkspaceArea::build:return ImVec4(.96f,.72f,.34f,1.0f);
+    case WorkspaceArea::external:return ImVec4(.72f,.72f,.72f,1.0f);
+    }
+    return ImVec4(1,1,1,1);
+}
+
+void draw_preview_source(const char* label,const std::filesystem::path& path) {
+    if(path.empty())return;
+    const auto area=workspace_area(path);
+    ImGui::TextUnformatted(label);
+    ImGui::SameLine(0.0f,4.0f);
+    ImGui::TextColored(workspace_area_color(area),"[%s]",workspace_area_name(area));
+    if(ImGui::IsItemHovered()){
+        const auto relative=g_workspace?path.lexically_relative(g_workspace->root()):path;
+        ImGui::SetTooltip("%s",utf8((relative.empty()?path:relative).wstring()).c_str());
+    }
+}
+
+void draw_preview_source_inline(const char* label,const std::filesystem::path& path) {
+    draw_preview_source(label,path);
+    ImGui::SameLine(0.0f,12.0f);
+}
+
 bool load_workspace(const std::filesystem::path& path) {
     try {
         g_workspace = std::make_unique<gbfr::Workspace>(gbfr::Workspace::load(path));
         clear_motion_state();
         g_selected_asset.reset();
         g_asset_function=AssetFunction::all;g_asset_search.fill('\0');
-        g_preview_mode=PreviewMode::none;g_loaded_model.reset();g_loaded_texture.clear();
+        g_preview_mode=PreviewMode::none;g_loaded_model.reset();g_loaded_texture.clear();g_loaded_material.clear();g_loaded_sop.clear();
         g_skeleton.bones.clear(); g_clh_files.clear(); g_clp_files.clear();g_sop_inspector.clear();
         if(g_preview) g_preview->clear();
         const auto settings_directory=g_workspace->root()/L".gbfr";
@@ -237,7 +290,7 @@ void run_selected_model_action(bool restore) {
         if (restore) g_workspace->restore_model(*g_selected_asset);
         else g_workspace->build_model(*g_selected_asset);
         if(restore) load_model_preview(*g_selected_asset,true);
-        gbfr::Log::write(gbfr::LogLevel::info, restore ? "模型文件已恢复" : "模型文件已写入 build");
+        gbfr::Log::write(gbfr::LogLevel::info, restore ? "模型文件已从 source 恢复到 unpack" : "模型文件已从 unpack 复制到 build");
     } catch (const std::exception& error) {
         gbfr::Log::write(gbfr::LogLevel::error, error.what());
     }
@@ -362,6 +415,8 @@ bool load_model_preview(std::size_t index,bool force) {
         }
         if (!g_preview->load(mesh, skeleton, preview_materials, sop)) throw std::runtime_error("GPU 预览资源创建失败");
         g_sop_inspector.set_asset(sop,sop_path);
+        g_loaded_material=material_json;
+        g_loaded_sop=std::filesystem::is_regular_file(sop_path)?sop_path:std::filesystem::path{};
         g_skeleton=skeleton;g_loaded_model=key;g_loaded_texture.clear();g_preview_mode=PreviewMode::model;
         discover_motions(key);
         g_preview->frame(g_camera);
@@ -589,6 +644,11 @@ void build_start_dock_layout(ImGuiID dockspace) {
 }
 
 void draw_motion_controls() {
+    if(g_selected_motion>=0){
+        draw_preview_source_inline("动画",g_motion_files[static_cast<std::size_t>(g_selected_motion)]);
+        if(!g_cloth_sequence_path.empty())draw_preview_source("cloth 覆盖",g_cloth_sequence_path);
+        else {ImGui::TextDisabled("cloth 覆盖 [无]");}
+    }else ImGui::TextDisabled("动画 [静止姿态]");
     const std::string current=g_selected_motion>=0?utf8(g_motion_files[static_cast<std::size_t>(g_selected_motion)].filename().wstring()):"静止姿态";
     ImGui::SetNextItemWidth(220.0f);
     if(ImGui::BeginCombo("##motion",current.c_str())){
@@ -643,7 +703,7 @@ void draw_motion_controls() {
 void return_to_start() {
     if(!g_imgui_ini.empty()) ImGui::SaveIniSettingsToDisk(g_imgui_ini.c_str());
     g_workspace.reset(); g_selected_asset.reset(); g_skeleton.bones.clear(); g_clh_files.clear(); g_clp_files.clear();g_sop_inspector.clear();
-    g_preview_mode=PreviewMode::none;g_loaded_model.reset();g_loaded_texture.clear();clear_motion_state();
+    g_preview_mode=PreviewMode::none;g_loaded_model.reset();g_loaded_texture.clear();g_loaded_material.clear();g_loaded_sop.clear();clear_motion_state();
     g_imgui_ini.clear(); ImGui::GetIO().IniFilename=nullptr; g_start_layout_built=false;
     if(g_preview) g_preview->clear();
 }
@@ -738,8 +798,8 @@ void draw_editor_shell() {
         ImGui::TableSetupColumn("状态", ImGuiTableColumnFlags_WidthFixed, 80,0);
         ImGui::TableSetupColumn("类型", ImGuiTableColumnFlags_WidthFixed, 90,1);
         ImGui::TableSetupColumn("子类", ImGuiTableColumnFlags_WidthFixed, 80,2);
-        ImGui::TableSetupColumn("输入", ImGuiTableColumnFlags_WidthStretch|ImGuiTableColumnFlags_DefaultSort,0,3);
-        ImGui::TableSetupColumn("build", ImGuiTableColumnFlags_WidthStretch,0,4);
+        ImGui::TableSetupColumn("编辑输入 (unpack)", ImGuiTableColumnFlags_WidthStretch|ImGuiTableColumnFlags_DefaultSort,0,3);
+        ImGui::TableSetupColumn("Mod 输出 (build)", ImGuiTableColumnFlags_WidthStretch,0,4);
         ImGui::TableHeadersRow();
         if(auto* specs=ImGui::TableGetSortSpecs();specs&&specs->SpecsCount>0){
             std::stable_sort(visible_assets.begin(),visible_assets.end(),[&](std::size_t left_index,std::size_t right_index){
@@ -775,6 +835,17 @@ void draw_editor_shell() {
 
     ImGui::Begin("Viewport");
     if(g_preview_mode==PreviewMode::model){
+        if(g_loaded_model){
+            ImGui::Text("当前预览：%s",utf8(g_loaded_model->minfo.stem().wstring()).c_str());
+            draw_preview_source_inline("模型",g_loaded_model->minfo);
+            draw_preview_source_inline("材质 JSON",g_loaded_material);
+            draw_preview_source("DDS",g_workspace->root()/L"unpack/data");
+            if(!g_loaded_sop.empty())draw_preview_source_inline("SOP",g_loaded_sop);
+            else {ImGui::TextDisabled("SOP [无]");ImGui::SameLine(0.0f,12.0f);}
+            if(!g_clp_files.empty())draw_preview_source("cloth",g_clp_files.front().path);
+            else ImGui::TextDisabled("cloth [无]");
+            ImGui::TextDisabled("预览不读取 build；build 仅作为最终 Mod 输出。");
+        }
         ImGui::Checkbox("模型", &g_show_mesh); ImGui::SameLine();
         const char* modes[]={"无光照","柔和光照","线框"};int mode=static_cast<int>(g_preview_shading);ImGui::SetNextItemWidth(120);
         if(ImGui::Combo("显示模式",&mode,modes,3))g_preview_shading=static_cast<gbfr::PreviewShadingMode>(mode);ImGui::SameLine();
@@ -785,7 +856,9 @@ void draw_editor_shell() {
         if (g_preview && g_preview->has_model() && ImGui::Button("取景")) g_preview->frame(g_camera);
         if(!g_motion_files.empty())draw_motion_controls();
     }else if(g_preview_mode==PreviewMode::texture&&g_preview&&g_preview->texture_image()){
-        ImGui::Text("%s  |  %u x %u",utf8(g_loaded_texture.filename().wstring()).c_str(),g_preview->texture_width(),g_preview->texture_height());
+        ImGui::Text("当前预览：%s  |  %u x %u",utf8(g_loaded_texture.filename().wstring()).c_str(),g_preview->texture_width(),g_preview->texture_height());
+        ImGui::SameLine(0.0f,16.0f);draw_preview_source("贴图",g_loaded_texture);
+        ImGui::TextDisabled("预览不读取 build；build 仅作为最终 Mod 输出。");
     }
     ImVec2 available = ImGui::GetContentRegionAvail();
     if (g_preview&&g_preview_mode==PreviewMode::model&&available.x > 1 && available.y > 1) {
@@ -831,14 +904,20 @@ void draw_editor_shell() {
     if (g_workspace && g_selected_asset) {
         const auto& asset = g_workspace->assets()[*g_selected_asset];
         ImGui::Text("%s / %s", gbfr::asset_kind_name(asset.kind), asset.subtype.c_str());
-        ImGui::TextWrapped("%s", utf8(asset.input.wstring()).c_str());
+        ImGui::SeparatorText("文件路径");
+        ImGui::TextColored(workspace_area_color(WorkspaceArea::unpack),"编辑输入 (unpack)");
+        ImGui::TextWrapped("%s",utf8(asset.input.wstring()).c_str());
+        if(!asset.source.empty()){
+            ImGui::TextColored(workspace_area_color(WorkspaceArea::source),"原始基线 (source)");
+            ImGui::TextWrapped("%s",utf8(asset.source.wstring()).c_str());
+        }
+        ImGui::TextColored(workspace_area_color(WorkspaceArea::build),"Mod 输出 (build)");
+        ImGui::TextWrapped("%s",utf8(asset.output.wstring()).c_str());
         ImGui::Separator();
         if (asset.kind == gbfr::AssetKind::model) {
             if (ImGui::Button("重新加载预览")) load_model_preview(*g_selected_asset,true);
-            ImGui::SameLine();
-            if (ImGui::Button("写入 build")) run_selected_model_action(false);
-            ImGui::SameLine();
-            if (ImGui::Button("恢复 unpack")) run_selected_model_action(true);
+            if (ImGui::Button("从 unpack 复制到 build")) run_selected_model_action(false);
+            if (ImGui::Button("从 source 恢复 unpack")) run_selected_model_action(true);
         } else {
             ImGui::TextUnformatted("当前 C++ 版本尚未实现此类型的构建操作。");
         }
