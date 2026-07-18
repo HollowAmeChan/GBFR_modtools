@@ -70,26 +70,17 @@ data/model/pl/pl1400/pl1400.skeleton
 
 ## 4. 插件导出结果
 
-导出时需要在插件中选择一个已经包含同名 `.minfo` 的文件夹。例如导出 `pl1400` 时，所选目录中必须先存在：
+在当前 minfo 会话中点击“导出到工作区”，然后选择目标工作区的 `workspace.json`。导出界面会在确认前显示当前模型 ID、即将覆盖的三条 `unpack` 路径、调试 JSON 路径，并明确提示不会写入 `build`。
 
 ```text
-工作目录/
-  pl1400.minfo
+workspace.json
+unpack/data/model/pl/pl1400/pl1400.minfo
+unpack/data/model/pl/pl1400/pl1400.skeleton
+unpack/data/model_streaming/lod0/pl1400.mmesh
+.gbfr/exports/pl1400.json
 ```
 
-插件会读取这份原始 `.minfo` 作为模型描述模板。导出完成后，它会自动在所选目录下创建 `_Exported_MInfo`，不需要用户提前创建该文件夹：
-
-```text
-工作目录/
-  pl1400.minfo               原始模板
-  _Exported_MInfo/
-    pl1400.mmesh
-    pl1400.minfo             合并 Blender 网格信息后的新文件
-    pl1400.skeleton
-    pl1400.json
-```
-
-如果导出位置和原始 `.minfo` 不在同一目录，插件的 MInfo 转换步骤会直接报错。
+插件按当前会话的模型 ID 查询 `workspace.json/ModelFiles`，使用现有 `unpack` minfo（缺失时回退 `source`）作为描述模板，在临时目录完成全部转换。只有 `.minfo/.skeleton/.mmesh/.json` 都生成成功后才替换目标，因此不会再创建或要求用户管理 `_Exported_MInfo`。所选工作区必须登记同一模型 ID，且三个输出目标必须位于该工作区 `unpack` 内，否则导出会拒绝执行。
 
 各文件职责：
 
@@ -102,7 +93,7 @@ data/model/pl/pl1400/pl1400.skeleton
 
 ### 导出 JSON 的实际作用
 
-`pl1400.json` 不是游戏解包资源，也与 `.mmat` 封包无关。它是 Blender 插件生成和重建 `.minfo` 时使用的人类可读中间态，并在导出目录中保留下来方便检查。
+`pl1400.json` 不是游戏解包资源，也与 `.mmat` 封包无关。它是 Blender 插件生成和重建 `.minfo` 时使用的人类可读中间态，导出后保存在工作区 `.gbfr/exports/pl1400.json` 方便检查。
 
 它主要包含：
 
@@ -120,11 +111,12 @@ data/model/pl/pl1400/pl1400.skeleton
 ```text
 Blender 网格
   -> 生成新的 mmesh 与网格布局 JSON
-  -> 从所选目录读取同名原始 minfo
+  -> 从 workspace.json 定位当前模型的 minfo 模板
   -> flatc 将原始 minfo 解码为 JSON
   -> 用 Blender 导出的网格布局替换原 minfo 对应字段
   -> flatc 将合并后的 JSON 编码为新 minfo
-  -> 保留最终 JSON 供人工检查
+  -> 原子替换 unpack 中登记的三个二进制文件
+  -> 将最终 JSON 保存到 .gbfr/exports
 ```
 
 因此：
@@ -136,7 +128,7 @@ Blender 网格
 
 ## 5. 最终 Mod 路径
 
-插件导出完成后，把 `_Exported_MInfo` 中的三个二进制文件复制到当前工作区的 `unpack` 对应路径。不要直接放进 `build`，否则预览、修改检测和逐项恢复都不会读取到它们：
+插件导出完成后，三个二进制文件已经位于当前工作区的 `unpack` 对应路径，不需要再次复制：
 
 ```text
 unpack/data/model/pl/pl1400/pl1400.minfo
@@ -162,7 +154,7 @@ Mod目录/
 不要将下列文件放进最终 Mod：
 
 ```text
-_Exported_MInfo/pl1400.json
+.gbfr/exports/pl1400.json
 data/model/pl/pl1400/pl1400.mmesh
 ```
 
@@ -185,11 +177,11 @@ data/model/pl/pl1400/pl1400.mmesh
 
 ## 7. 导出后检查清单
 
-- `_Exported_MInfo` 中存在新的 `.mmesh`、`.minfo` 和 `.skeleton`。
-- `.json` 中 `vertex_count`、`poly_count_x3` 与预期模型规模相符。
+- 导出界面显示的三个 `unpack` 目标与当前模型 ID、工作区一致。
+- `.gbfr/exports/<模型ID>.json` 中 `vertex_count`、`poly_count_x3` 与预期模型规模相符。
 - `chunks[].material_id` 没有超出 `materials[]` 范围。
 - `sub_meshes` 名称、数量和包围盒合理。
 - 修改骨架时，`bones_to_weight_indices` 与实际权重骨骼一致。
 - 最终 Mod 中 `.mmesh` 位于 `model_streaming/lod0`。
-- 最终 Mod 不包含 `_Exported_MInfo` 文件夹或调试 JSON。
+- 最终 Mod 不包含 `.gbfr` 或调试 JSON。
 - 游戏内检查远近距离 LOD、动作变形、面部、武器、阴影和材质显示。
