@@ -131,6 +131,8 @@ int main() {
         const auto dds=integration.parent_path()/L"unpack/data/granite/2k/pl1400_body01_lod0_albd.dds";
         const auto shader_file=fs::path(GBFR_ROOT_DIR)/L"assets/shaders/preview.hlsl";
         if(!preview.initialize(device.Get(),context.Get(),shader_file)||!preview.load_texture_preview(dds)||!preview.texture_image()||!preview.texture_width()||!preview.texture_height())return 16;
+        gbfr::TexturePreviewResource thumbnail;
+        if(!preview.load_texture_thumbnail(dds,thumbnail,128)||!thumbnail.image||std::max(thumbnail.width,thumbnail.height)>128)return 77;
         std::vector<gbfr::PreviewMaterialTextures> preview_materials(materials.entries.size());for(auto& material:preview_materials)material.albedo=dds;
         gbfr::OrbitCamera camera;
         if(!preview.load(mesh,skeleton,preview_materials,sop))return 17;

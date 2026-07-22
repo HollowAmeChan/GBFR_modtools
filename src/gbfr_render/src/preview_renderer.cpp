@@ -131,6 +131,13 @@ bool PreviewRenderer::load_texture_preview(const fs::path& dds) {
     return true;
 }
 
+bool PreviewRenderer::load_texture_thumbnail(const fs::path& dds,TexturePreviewResource& output,unsigned maximum_dimension) {
+    TexturePreviewResource loaded;
+    if(!load_dds(dds,loaded.image,&loaded.width,&loaded.height,true,std::max(1u,maximum_dimension)))return false;
+    output=std::move(loaded);
+    return true;
+}
+
 void PreviewRenderer::clear() {
     index_count_=0; line_vertex_count_=0; bone_point_vertex_count_=0; collision_vertex_count_=0;
     cloth_longitudinal_vertex_count_=0;cloth_lateral_vertex_count_=0;cloth_polygon_vertex_count_=0;
@@ -169,7 +176,7 @@ bool PreviewRenderer::transform_bone_point(std::size_t bone_index,Vec3 local,Vec
     return true;
 }
 
-bool PreviewRenderer::load_dds(const fs::path& path,ComPtr<ID3D11ShaderResourceView>& output,unsigned* output_width,unsigned* output_height,bool display_encoded) {
+bool PreviewRenderer::load_dds(const fs::path& path,ComPtr<ID3D11ShaderResourceView>& output,unsigned* output_width,unsigned* output_height,bool display_encoded,unsigned maximum_dimension) {
     std::ifstream stream(path,std::ios::binary|std::ios::ate); if(!stream) return false; const auto file_size=stream.tellg(); if(file_size<148) return false;
     std::vector<std::byte> bytes(static_cast<std::size_t>(file_size));stream.seekg(0);stream.read(reinterpret_cast<char*>(bytes.data()),file_size);
     auto u32=[&](std::size_t p){std::uint32_t v{};std::memcpy(&v,bytes.data()+p,4);return v;};
@@ -187,12 +194,15 @@ bool PreviewRenderer::load_dds(const fs::path& path,ComPtr<ID3D11ShaderResourceV
     else if(format==DXGI_FORMAT_BC2_UNORM_SRGB){resource_format=DXGI_FORMAT_BC2_TYPELESS;if(display_encoded)view_format=DXGI_FORMAT_BC2_UNORM;}
     else if(format==DXGI_FORMAT_BC3_UNORM_SRGB){resource_format=DXGI_FORMAT_BC3_TYPELESS;if(display_encoded)view_format=DXGI_FORMAT_BC3_UNORM;}
     else if(format==DXGI_FORMAT_BC7_UNORM_SRGB){resource_format=DXGI_FORMAT_BC7_TYPELESS;if(display_encoded)view_format=DXGI_FORMAT_BC7_UNORM;}
-    D3D11_TEXTURE2D_DESC desc{};desc.Width=width;desc.Height=height;desc.MipLevels=mips;desc.ArraySize=1;desc.Format=resource_format;desc.SampleDesc.Count=1;desc.BindFlags=D3D11_BIND_SHADER_RESOURCE;
-    std::vector<D3D11_SUBRESOURCE_DATA> levels;levels.reserve(mips);std::size_t offset=148;UINT w=width,h=height;
-    for(UINT i=0;i<mips;++i){const UINT row=std::max(1u,(w+3)/4)*block_bytes;const UINT size=row*std::max(1u,(h+3)/4);if(offset+size>bytes.size())return false;levels.push_back({bytes.data()+offset,row,size});offset+=size;w=std::max(1u,w/2);h=std::max(1u,h/2);}
-    D3D11_SHADER_RESOURCE_VIEW_DESC view{};view.Format=view_format;view.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2D;view.Texture2D.MipLevels=mips;
+    std::size_t offset=148;UINT selected_width=width,selected_height=height,first_mip=0;
+    while(maximum_dimension&&first_mip+1<mips&&std::max(selected_width,selected_height)>maximum_dimension){const UINT row=std::max(1u,(selected_width+3)/4)*block_bytes;offset+=row*std::max(1u,(selected_height+3)/4);selected_width=std::max(1u,selected_width/2);selected_height=std::max(1u,selected_height/2);++first_mip;}
+    const UINT selected_mips=maximum_dimension?1u:mips-first_mip;
+    D3D11_TEXTURE2D_DESC desc{};desc.Width=selected_width;desc.Height=selected_height;desc.MipLevels=selected_mips;desc.ArraySize=1;desc.Format=resource_format;desc.SampleDesc.Count=1;desc.BindFlags=D3D11_BIND_SHADER_RESOURCE;
+    std::vector<D3D11_SUBRESOURCE_DATA> levels;levels.reserve(selected_mips);UINT w=selected_width,h=selected_height;
+    for(UINT i=0;i<selected_mips;++i){const UINT row=std::max(1u,(w+3)/4)*block_bytes;const UINT size=row*std::max(1u,(h+3)/4);if(offset+size>bytes.size())return false;levels.push_back({bytes.data()+offset,row,size});offset+=size;w=std::max(1u,w/2);h=std::max(1u,h/2);}
+    D3D11_SHADER_RESOURCE_VIEW_DESC view{};view.Format=view_format;view.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2D;view.Texture2D.MipLevels=selected_mips;
     ComPtr<ID3D11Texture2D> texture;if(FAILED(device_->CreateTexture2D(&desc,levels.data(),&texture))||FAILED(device_->CreateShaderResourceView(texture.Get(),&view,&output)))return false;
-    if(output_width)*output_width=width;if(output_height)*output_height=height;return true;
+    if(output_width)*output_width=selected_width;if(output_height)*output_height=selected_height;return true;
 }
 
 void PreviewRenderer::frame(OrbitCamera& camera) const { camera.target={(bounds_min_.x+bounds_max_.x)*.5f,(bounds_min_.y+bounds_max_.y)*.5f,(bounds_min_.z+bounds_max_.z)*.5f};const float dx=bounds_max_.x-bounds_min_.x,dy=bounds_max_.y-bounds_min_.y,dz=bounds_max_.z-bounds_min_.z;camera.distance=std::max(0.2f,std::sqrt(dx*dx+dy*dy+dz*dz)*0.85f); }

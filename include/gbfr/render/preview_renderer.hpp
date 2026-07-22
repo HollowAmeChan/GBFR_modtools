@@ -22,6 +22,12 @@ struct PreviewMaterialTextures {
     bool alpha_blended{};
 };
 
+struct TexturePreviewResource {
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> image;
+    unsigned width{};
+    unsigned height{};
+};
+
 class PreviewRenderer {
 public:
     static constexpr std::size_t max_skin_bones = 512;
@@ -32,6 +38,9 @@ public:
               const std::vector<PreviewMaterialTextures>& materials = {},
               const SopAsset& sop = {});
     bool load_texture_preview(const std::filesystem::path& dds);
+    bool load_texture_thumbnail(const std::filesystem::path& dds,
+                                TexturePreviewResource& output,
+                                unsigned maximum_dimension = 256);
     void clear();
     bool apply_animation(const AnimationClip* clip, float frame);
     void set_collision_lines(const std::vector<Vec3>& points);
@@ -76,7 +85,8 @@ private:
     };
     bool load_dds(const std::filesystem::path& path,
                   Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>& output,
-                  unsigned* width = nullptr, unsigned* height = nullptr, bool display_encoded = false);
+                  unsigned* width = nullptr, unsigned* height = nullptr,
+                  bool display_encoded = false, unsigned maximum_dimension = 0);
     ID3D11Device* device_{};
     ID3D11DeviceContext* context_{};
     unsigned width_{1}, height_{1}, texture_width_{}, texture_height_{}, index_count_{}, line_vertex_count_{};

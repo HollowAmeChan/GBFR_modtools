@@ -1,4 +1,4 @@
-add_executable(GBFRModtools WIN32 src/main.cpp src/sop_inspector.cpp)
+add_executable(GBFRModtools WIN32 src/main.cpp src/sop_inspector.cpp src/texture_gallery.cpp)
 target_include_directories(GBFRModtools PRIVATE "${GBFR_ROOT_DIR}/include")
 target_compile_options(GBFRModtools PRIVATE /W4 /permissive- /Zc:__cplusplus)
 target_compile_definitions(GBFRModtools PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)

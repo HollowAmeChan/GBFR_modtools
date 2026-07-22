@@ -7,6 +7,7 @@
 #include <gbfr/render/d3d11_context.hpp>
 #include <gbfr/render/preview_renderer.hpp>
 #include "sop_inspector.hpp"
+#include "texture_gallery.hpp"
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -80,6 +81,7 @@ std::vector<ClhFile> g_clh_files;
 std::vector<ClpFile> g_clp_files;
 std::unordered_map<std::string,std::string> g_bone_names;
 gbfr::editor::SopInspector g_sop_inspector;
+gbfr::editor::TextureGallery g_texture_gallery;
 int g_selected_clh = 0;
 int g_selected_clp = 0;
 int g_selected_bone = -1;
@@ -204,13 +206,14 @@ bool load_workspace(const std::filesystem::path& path) {
         g_workspace = std::make_unique<gbfr::Workspace>(gbfr::Workspace::load(path));
         clear_motion_state();
         g_selected_asset.reset();
+        g_texture_gallery.clear();
         g_asset_function=AssetFunction::all;g_asset_search.fill('\0');
         g_preview_mode=PreviewMode::none;g_loaded_model.reset();g_loaded_texture.clear();g_loaded_texture_is_ui=false;g_loaded_material.clear();g_loaded_sop.clear();
         g_skeleton.bones.clear(); g_clh_files.clear(); g_clp_files.clear();g_sop_inspector.clear();
         if(g_preview) g_preview->clear();
         const auto settings_directory=g_workspace->root()/L".gbfr";
         std::filesystem::create_directories(settings_directory);
-        const auto settings_file=settings_directory/L"imgui_v3.ini";
+        const auto settings_file=settings_directory/L"imgui_v4.ini";
         g_imgui_ini=utf8(settings_file.wstring());
         ImGui::GetIO().IniFilename=g_imgui_ini.c_str();
         if(std::filesystem::is_regular_file(settings_file)) {
@@ -290,6 +293,7 @@ void run_selected_asset_action(bool restore) {
     try {
         if (restore) g_workspace->restore_asset(*g_selected_asset);
         else g_workspace->build_asset(*g_selected_asset);
+        if(restore)g_texture_gallery.clear();
         if(restore && g_workspace->assets()[*g_selected_asset].kind==gbfr::AssetKind::model) load_model_preview(*g_selected_asset,true);
         gbfr::Log::write(gbfr::LogLevel::info, restore ? "资源已从 source 恢复到 unpack" : "资源已从 unpack 封回 build");
     } catch (const std::exception& error) {
@@ -449,6 +453,15 @@ void preview_asset(std::size_t index) {
         return;
     }
     g_preview_mode=PreviewMode::none;
+}
+
+void preview_gallery_texture(std::size_t asset_index,const std::filesystem::path& path,bool is_ui) {
+    if(!g_preview||!std::filesystem::is_regular_file(path))return;
+    g_selected_asset=asset_index;
+    g_loaded_texture_is_ui=is_ui;
+    if(g_loaded_texture==path&&g_preview->texture_image()){g_preview_mode=PreviewMode::texture;return;}
+    if(g_preview->load_texture_preview(path)){g_loaded_texture=path;g_preview_mode=PreviewMode::texture;gbfr::Log::write(gbfr::LogLevel::info,"DDS 预览已加载："+utf8(path.filename().wstring()));}
+    else {g_preview_mode=PreviewMode::none;gbfr::Log::write(gbfr::LogLevel::error,"DDS 预览加载失败："+utf8(path.wstring()));}
 }
 
 bool asset_matches_function(const gbfr::WorkspaceAsset& asset,AssetFunction function) {
@@ -627,6 +640,7 @@ void build_default_dock_layout(ImGuiID dockspace) {
     ImGui::DockBuilderSplitNode(right,ImGuiDir_Up,.32f,&right_top,&right_bottom);
 
     ImGui::DockBuilderDockWindow("Workspace",left);
+    ImGui::DockBuilderDockWindow("贴图库",center);
     ImGui::DockBuilderDockWindow("Viewport",center);
     ImGui::DockBuilderDockWindow("Inspector",right_top);
     ImGui::DockBuilderDockWindow("Skeleton & Cloth",right_bottom);
@@ -708,6 +722,7 @@ void return_to_start() {
     g_workspace.reset(); g_selected_asset.reset(); g_skeleton.bones.clear(); g_clh_files.clear(); g_clp_files.clear();g_sop_inspector.clear();
     g_preview_mode=PreviewMode::none;g_loaded_model.reset();g_loaded_texture.clear();g_loaded_texture_is_ui=false;g_loaded_material.clear();g_loaded_sop.clear();clear_motion_state();
     g_imgui_ini.clear(); ImGui::GetIO().IniFilename=nullptr; g_start_layout_built=false;
+    g_texture_gallery.clear();
     if(g_preview) g_preview->clear();
 }
 
@@ -773,7 +788,7 @@ void draw_editor_shell() {
     ImGui::SameLine();
     if (ImGui::Button("重置布局")) g_reset_layout=true;
     ImGui::SameLine();
-    if (g_workspace && ImGui::Button("刷新")) g_workspace->refresh();
+    if (g_workspace && ImGui::Button("刷新")) {g_workspace->refresh();g_texture_gallery.clear();}
     ImGui::SameLine();
     ImGui::Checkbox("只看修改", &g_changed_only);
     if (!g_workspace) {
@@ -904,6 +919,8 @@ void draw_editor_shell() {
         ImGui::TextUnformatted("当前对象没有可用预览");
     }
     ImGui::End();
+
+    g_texture_gallery.draw(*g_workspace,*g_preview,g_selected_asset,preview_gallery_texture);
 
     ImGui::Begin("Inspector");
     if (g_workspace && g_selected_asset) {
