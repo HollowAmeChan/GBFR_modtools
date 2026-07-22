@@ -1,5 +1,6 @@
 # Generated workspace
 explore_output/
+research_output/
 /.deps/
 /out/
 /CMakeUserPresets.json
