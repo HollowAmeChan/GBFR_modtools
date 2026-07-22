@@ -453,7 +453,10 @@ ModelPreviewKey resolve_model_preview_key(const gbfr::WorkspaceAsset& selected) 
         if(asset.kind!=gbfr::AssetKind::model||asset.input.stem()!=stem) continue;
         if(asset.subtype=="minfo") key.minfo=asset.input;
         else if(asset.subtype=="skeleton") key.skeleton=asset.input;
-        else if(asset.subtype=="mmesh") key.mesh=asset.input;
+        else if(asset.subtype=="mmesh") {
+            const auto stream_level=asset.input.parent_path().filename().wstring();
+            if(key.mesh.empty()||_wcsicmp(stream_level.c_str(),L"lod0")==0) key.mesh=asset.input;
+        }
     }
     if(key.minfo.empty()) throw std::runtime_error("找不到同名 minfo");
     if(key.skeleton.empty()) throw std::runtime_error("找不到同名 skeleton");

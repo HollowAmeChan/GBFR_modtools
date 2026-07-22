@@ -316,9 +316,10 @@ function Initialize-WorkspaceArtifacts {
         $relativeParent = ConvertTo-WorkspacePath ([IO.Path]::GetDirectoryName($relativeDataPath))
         $isEditableModelFile = $extension -in @(".minfo", ".skeleton") -and
             $relativeParent -match '^model/[^/]+/[^/]+$'
-        $isEditableLod0Mesh = $extension -eq ".mmesh" -and $relativeParent -ieq "model_streaming/lod0"
+        $isEditableStreamMesh = $extension -eq ".mmesh" -and
+            $relativeParent -match '^model_streaming/(?:lod|shadowlod)\d+$'
 
-        if ($isEditableModelFile -or $isEditableLod0Mesh) {
+        if ($isEditableModelFile -or $isEditableStreamMesh) {
             try {
                 $inputRelative = ConvertTo-WorkspacePath (Join-Path "unpack\data" $relativeDataPath)
                 $inputPath = Resolve-WorkspaceFile $outDir $inputRelative
@@ -1225,11 +1226,20 @@ if (Test-Path $modelDirMain) {
 if ($prefix -eq "pl") {
     Write-Host ""
     Write-Host $S.mesh_layer -ForegroundColor Yellow
-    $lod0 = Join-Path $dataRoot "model_streaming\lod0"
-    foreach ($mp in @($charId,"fp$numId","wp$numId")) {
-        $f = Join-Path $lod0 "$mp.mmesh"
-        if (Test-Path $f) {
-            Write-Host ("  {0,-40} {1,10}" -f "$mp.mmesh", (Format-FileSize (Get-Item $f).Length))
+    $lodSummaryRoot = Join-Path $dataRoot "model_streaming"
+    $lodSummaryDirs = if (Test-Path -LiteralPath $lodSummaryRoot) {
+        @(Get-ChildItem -LiteralPath $lodSummaryRoot -Directory |
+            Where-Object { $_.Name -match '^(?:lod|shadowlod)\d+$' } |
+            Sort-Object Name)
+    } else { @() }
+    $summaryPrefixes = @($charId)
+    if ($prefix -eq "pl") { $summaryPrefixes += @("fp$numId", "wp$numId") }
+    foreach ($lodSummaryDir in $lodSummaryDirs) {
+        foreach ($mp in $summaryPrefixes) {
+            $f = Join-Path $lodSummaryDir.FullName "$mp.mmesh"
+            if (Test-Path -LiteralPath $f) {
+                Write-Host ("  {0,-12} {1,-28} {2,10}" -f $lodSummaryDir.Name, "$mp.mmesh", (Format-FileSize (Get-Item $f).Length))
+            }
         }
     }
 
