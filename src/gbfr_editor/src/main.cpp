@@ -17,6 +17,7 @@
 #include <windows.h>
 #include <commdlg.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <nlohmann/json.hpp>
 
 #include <memory>
@@ -91,8 +92,10 @@ bool g_all_bones = false;
 bool g_reset_layout = true;
 bool g_start_layout_built = false;
 std::array<char,32768> g_minfo_path{};
+std::array<char,32768> g_workspace_output_path{};
 std::array<char,32768> g_workspace_path{};
 HANDLE g_extract_process = nullptr;
+std::filesystem::path g_extract_output;
 std::string g_start_status;
 
 void clear_motion_state();
@@ -239,6 +242,28 @@ void choose_minfo_path() {
     if(GetOpenFileNameW(&dialog)) set_path_input(g_minfo_path,path);
 }
 
+std::filesystem::path workspace_output_path() {
+    std::filesystem::path output=wide(g_workspace_output_path.data());
+    if(output.empty()) return tool_root()/L"explore_output";
+    std::error_code error;
+    const auto absolute=std::filesystem::absolute(output,error);
+    return (error?output:absolute).lexically_normal();
+}
+
+void choose_workspace_output_path() {
+    const HRESULT com_result=CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);
+    BROWSEINFOW dialog{};
+    dialog.hwndOwner=GetActiveWindow();
+    dialog.lpszTitle=L"选择工作区输出文件夹";
+    dialog.ulFlags=BIF_RETURNONLYFSDIRS|BIF_NEWDIALOGSTYLE|BIF_EDITBOX;
+    if(const auto item=SHBrowseForFolderW(&dialog)) {
+        wchar_t path[32768]{};
+        if(SHGetPathFromIDListW(item,path)) set_path_input(g_workspace_output_path,path);
+        CoTaskMemFree(item);
+    }
+    if(SUCCEEDED(com_result)) CoUninitialize();
+}
+
 void choose_workspace() {
     wchar_t path[MAX_PATH]{};
     OPENFILENAMEW dialog{sizeof(dialog)};
@@ -265,12 +290,14 @@ bool start_workspace_extraction() {
     if(!std::filesystem::is_regular_file(minfo)||minfo.extension()!=L".minfo") { g_start_status="请选择有效的原始 .minfo 文件。"; return false; }
     const auto script=tool_root()/L"scripts/workspace/explore_char.ps1";
     if(!std::filesystem::is_regular_file(script)) { g_start_status="找不到工作区生成脚本。"; return false; }
-    std::wstring command=L"powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File \""+script.wstring()+L"\" \""+minfo.wstring()+L"\"";
+    const auto output=workspace_output_path();
+    std::wstring command=L"powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File \""+script.wstring()+
+        L"\" -MinfoPath \""+minfo.wstring()+L"\" -OutputPath \""+output.wstring()+L"\"";
     std::vector<wchar_t> mutable_command(command.begin(),command.end()); mutable_command.push_back(L'\0');
     STARTUPINFOW startup{sizeof(startup)}; PROCESS_INFORMATION process{};
     const auto cwd=tool_root().wstring();
     if(!CreateProcessW(nullptr,mutable_command.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,cwd.c_str(),&startup,&process)) { g_start_status="无法启动资源抽取进程，错误码 "+std::to_string(GetLastError()); return false; }
-    CloseHandle(process.hThread); g_extract_process=process.hProcess; g_start_status="正在抽取并生成工作区，请等待..."; return true;
+    CloseHandle(process.hThread); g_extract_process=process.hProcess; g_extract_output=output; g_start_status="正在抽取并生成工作区，请等待..."; return true;
 }
 
 void poll_workspace_extraction() {
@@ -278,8 +305,9 @@ void poll_workspace_extraction() {
     DWORD exit_code{};
     if(!GetExitCodeProcess(g_extract_process,&exit_code)||exit_code==STILL_ACTIVE) return;
     CloseHandle(g_extract_process); g_extract_process=nullptr;
-    if(exit_code!=0) { g_start_status="工作区生成失败，退出码 "+std::to_string(exit_code)+"。"; return; }
-    const auto workspace=tool_root()/L"explore_output/workspace.json";
+    if(exit_code!=0) { g_extract_output.clear(); g_start_status="工作区生成失败，退出码 "+std::to_string(exit_code)+"。"; return; }
+    const auto workspace=(g_extract_output.empty()?workspace_output_path():g_extract_output)/L"workspace.json";
+    g_extract_output.clear();
     if(!std::filesystem::is_regular_file(workspace)) { g_start_status="抽取完成，但没有生成 workspace.json。"; return; }
     set_path_input(g_workspace_path,workspace);
     g_start_status="工作区生成完成。";
@@ -732,21 +760,28 @@ void draw_start_screen() {
     ImGui::SeparatorText("新建工作区");
     ImGui::TextUnformatted("原始 minfo");
     const float action_width=130.0f,browse_width=82.0f;
-    ImGui::SetNextItemWidth(std::max(120.0f,ImGui::GetContentRegionAvail().x-action_width-browse_width-16.0f));
+    ImGui::SetNextItemWidth(std::max(120.0f,ImGui::GetContentRegionAvail().x-browse_width-8.0f));
+    ImGui::BeginDisabled(g_extract_process!=nullptr);
     ImGui::InputText("##minfo_path",g_minfo_path.data(),g_minfo_path.size());
     ImGui::SameLine();
-    ImGui::BeginDisabled(g_extract_process!=nullptr);
     if(ImGui::Button("选择...",ImVec2(browse_width,0))) choose_minfo_path();
+
+    ImGui::TextUnformatted("工作区输出目录（留空使用默认目录）");
+    ImGui::SetNextItemWidth(std::max(120.0f,ImGui::GetContentRegionAvail().x-action_width-browse_width-16.0f));
+    ImGui::InputText("##workspace_output_path",g_workspace_output_path.data(),g_workspace_output_path.size());
+    ImGui::SameLine();
+    if(ImGui::Button("选择...##output",ImVec2(browse_width,0))) choose_workspace_output_path();
     ImGui::SameLine();
     if(ImGui::Button("抽取并生成",ImVec2(action_width,0))) {
-        if(std::filesystem::is_directory(tool_root()/L"explore_output")) ImGui::OpenPopup("覆盖现有工作区？");
+        if(std::filesystem::exists(workspace_output_path())) ImGui::OpenPopup("覆盖现有工作区？");
         else start_workspace_extraction();
     }
     ImGui::EndDisabled();
-    ImGui::Text("输出：%s",utf8((tool_root()/L"explore_output").wstring()).c_str());
+    if(g_workspace_output_path[0]=='\0') ImGui::TextDisabled("默认：%s",utf8(workspace_output_path().wstring()).c_str());
 
     if(ImGui::BeginPopupModal("覆盖现有工作区？",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextUnformatted("现有 explore_output 将被完整替换。");
+        ImGui::TextUnformatted("目标目录已存在，将被完整重建：");
+        ImGui::TextWrapped("%s",utf8(workspace_output_path().wstring()).c_str());
         if(ImGui::Button("继续生成",ImVec2(110,0))) { ImGui::CloseCurrentPopup(); start_workspace_extraction(); }
         ImGui::SameLine();
         if(ImGui::Button("取消",ImVec2(90,0))) ImGui::CloseCurrentPopup();

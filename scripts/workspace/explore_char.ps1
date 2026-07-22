@@ -3,7 +3,10 @@
 # Internal backend used by the C++ editor to create a workspace from a .minfo file.
 # All user-visible strings are loaded from _lib/explore_strings_zh.json at runtime
 
-param([string]$MinfoPath = "")
+param(
+    [string]$MinfoPath = "",
+    [string]$OutputPath = ""
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -162,7 +165,21 @@ Write-Host ""
 
 # --- Output file setup ---
 
-$outDir    = Join-Path $repoRoot "explore_output"
+$outDir = if ([string]::IsNullOrWhiteSpace($OutputPath)) {
+    Join-Path $repoRoot "explore_output"
+} else {
+    [IO.Path]::GetFullPath($OutputPath)
+}
+$outDir = $outDir.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+$pathRoot = [IO.Path]::GetPathRoot($outDir).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+$comparison = [StringComparison]::OrdinalIgnoreCase
+$outPrefix = $outDir + [IO.Path]::DirectorySeparatorChar
+if ($outDir.Equals($pathRoot, $comparison) -or
+    $repoRoot.Equals($outDir, $comparison) -or $repoRoot.StartsWith($outPrefix, $comparison) -or
+    $gameRoot.Equals($outDir, $comparison) -or $gameRoot.StartsWith($outPrefix, $comparison) -or
+    $outDir.StartsWith($gameRoot.TrimEnd('\') + '\', $comparison)) {
+    throw "Unsafe workspace output directory: $outDir"
+}
 if (Test-Path -LiteralPath $outDir) { Remove-Item -LiteralPath $outDir -Recurse -Force }
 $sourceRoot = Join-Path $outDir "source"
 $unpackRoot = Join-Path $outDir "unpack"

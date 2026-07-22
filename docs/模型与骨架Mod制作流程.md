@@ -6,7 +6,7 @@
 
 ## 1. 建立角色工作区
 
-双击根目录 `build.bat` 启动编辑器，在开始页第一行选择玩家角色 `.minfo`，例如：
+双击根目录 `build.bat` 启动编辑器，在开始页选择玩家角色 `.minfo`，并指定本次工作区的输出目录，例如：
 
 ```text
 data/model/pl/pl1400/pl1400.minfo
@@ -20,10 +20,10 @@ data/model/pl/pl1400/pl1400.minfo
 
 `fn` 和 `np` 是其他独立 NPC 的资源，不会自动加入玩家工作区。
 
-生成的工作区位于：
+输出目录留空时使用根目录的 `explore_output`。指定目录后，生成的工作区位于：
 
 ```text
-explore_output/
+<所选工作区>/
   manifest.md
   workspace.json
   source/data/
@@ -31,7 +31,7 @@ explore_output/
   build/data/
 ```
 
-注意：再次从 minfo 生成会重建整个 `explore_output`。不要把 Blender 工程或长期编辑文件只保存在 `explore_output/source` 中；开始编辑前应复制工作区，或将模型工程放到独立目录。
+注意：再次从 minfo 生成会重建整个所选输出目录。需要同时保留多个角色或 Mod 方案时，应分别选择独立目录；不要把 Blender 工程或其他无关文件放进会被重建的工作区目录。
 
 ## 2. 准备 Blender 导入文件
 
