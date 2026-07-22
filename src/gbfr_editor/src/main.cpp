@@ -27,6 +27,7 @@
 #include <string>
 #include <charconv>
 #include <fstream>
+#include <deque>
 #include <unordered_map>
 #include <vector>
 #include <array>
@@ -95,7 +96,12 @@ std::array<char,32768> g_minfo_path{};
 std::array<char,32768> g_workspace_output_path{};
 std::array<char,32768> g_workspace_path{};
 HANDLE g_extract_process = nullptr;
+HANDLE g_extract_output_read = nullptr;
 std::filesystem::path g_extract_output;
+std::deque<std::string> g_extract_console_lines;
+std::string g_extract_console_pending;
+bool g_extract_console_updated = false;
+bool g_extract_console_auto_scroll = true;
 std::string g_start_status;
 
 void clear_motion_state();
@@ -294,16 +300,65 @@ bool start_workspace_extraction() {
     std::wstring command=L"powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File \""+script.wstring()+
         L"\" -MinfoPath \""+minfo.wstring()+L"\" -OutputPath \""+output.wstring()+L"\"";
     std::vector<wchar_t> mutable_command(command.begin(),command.end()); mutable_command.push_back(L'\0');
+    SECURITY_ATTRIBUTES security{sizeof(security),nullptr,TRUE};
+    HANDLE output_read=nullptr,output_write=nullptr;
+    if(!CreatePipe(&output_read,&output_write,&security,0)||!SetHandleInformation(output_read,HANDLE_FLAG_INHERIT,0)) {
+        const DWORD pipe_error=GetLastError();
+        if(output_read)CloseHandle(output_read);if(output_write)CloseHandle(output_write);
+        g_start_status="无法创建抽取控制台管道，错误码 "+std::to_string(pipe_error);return false;
+    }
+    HANDLE null_input=CreateFileW(L"NUL",GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE,&security,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(null_input==INVALID_HANDLE_VALUE) {
+        const DWORD input_error=GetLastError();CloseHandle(output_read);CloseHandle(output_write);
+        g_start_status="无法准备抽取进程输入，错误码 "+std::to_string(input_error);return false;
+    }
     STARTUPINFOW startup{sizeof(startup)}; PROCESS_INFORMATION process{};
+    startup.dwFlags=STARTF_USESTDHANDLES;startup.hStdInput=null_input;startup.hStdOutput=output_write;startup.hStdError=output_write;
     const auto cwd=tool_root().wstring();
-    if(!CreateProcessW(nullptr,mutable_command.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,cwd.c_str(),&startup,&process)) { g_start_status="无法启动资源抽取进程，错误码 "+std::to_string(GetLastError()); return false; }
-    CloseHandle(process.hThread); g_extract_process=process.hProcess; g_extract_output=output; g_start_status="正在抽取并生成工作区，请等待..."; return true;
+    const bool started=CreateProcessW(nullptr,mutable_command.data(),nullptr,nullptr,TRUE,CREATE_NO_WINDOW,nullptr,cwd.c_str(),&startup,&process)!=FALSE;
+    const DWORD launch_error=started?ERROR_SUCCESS:GetLastError();CloseHandle(output_write);CloseHandle(null_input);
+    if(!started) { CloseHandle(output_read);g_start_status="无法启动资源抽取进程，错误码 "+std::to_string(launch_error); return false; }
+    CloseHandle(process.hThread);g_extract_process=process.hProcess;g_extract_output_read=output_read;g_extract_output=output;
+    g_extract_console_lines.clear();g_extract_console_pending.clear();g_extract_console_updated=true;
+    g_start_status="正在抽取并生成工作区，可在下方控制台查看进度。";return true;
+}
+
+void append_extraction_console(const char* bytes,std::size_t size) {
+    g_extract_console_pending.append(bytes,size);
+    std::size_t newline{};
+    while((newline=g_extract_console_pending.find('\n'))!=std::string::npos) {
+        std::string line=g_extract_console_pending.substr(0,newline);
+        if(!line.empty()&&line.back()=='\r')line.pop_back();
+        g_extract_console_lines.push_back(std::move(line));
+        g_extract_console_pending.erase(0,newline+1);
+        while(g_extract_console_lines.size()>4000)g_extract_console_lines.pop_front();
+        g_extract_console_updated=true;
+    }
+}
+
+void drain_extraction_console(bool flush_pending=false) {
+    if(g_extract_output_read) {
+        for(;;) {
+            DWORD available{};
+            if(!PeekNamedPipe(g_extract_output_read,nullptr,0,nullptr,&available,nullptr)||available==0)break;
+            std::array<char,4096> buffer{};DWORD read{};
+            if(!ReadFile(g_extract_output_read,buffer.data(),std::min<DWORD>(available,static_cast<DWORD>(buffer.size())),&read,nullptr)||read==0)break;
+            append_extraction_console(buffer.data(),read);
+        }
+    }
+    if(flush_pending&&!g_extract_console_pending.empty()) {
+        if(!g_extract_console_pending.empty()&&g_extract_console_pending.back()=='\r')g_extract_console_pending.pop_back();
+        g_extract_console_lines.push_back(std::move(g_extract_console_pending));g_extract_console_pending.clear();g_extract_console_updated=true;
+    }
 }
 
 void poll_workspace_extraction() {
     if(!g_extract_process) return;
+    drain_extraction_console();
     DWORD exit_code{};
     if(!GetExitCodeProcess(g_extract_process,&exit_code)||exit_code==STILL_ACTIVE) return;
+    drain_extraction_console(true);
+    if(g_extract_output_read){CloseHandle(g_extract_output_read);g_extract_output_read=nullptr;}
     CloseHandle(g_extract_process); g_extract_process=nullptr;
     if(exit_code!=0) { g_extract_output.clear(); g_start_status="工作区生成失败，退出码 "+std::to_string(exit_code)+"。"; return; }
     const auto workspace=(g_extract_output.empty()?workspace_output_path():g_extract_output)/L"workspace.json";
@@ -683,7 +738,10 @@ void build_start_dock_layout(ImGuiID dockspace) {
     ImGui::DockBuilderAddNode(dockspace,ImGuiDockNodeFlags_DockSpace);
     ImGui::DockBuilderSetNodePos(dockspace,viewport->WorkPos);
     ImGui::DockBuilderSetNodeSize(dockspace,viewport->WorkSize);
-    ImGui::DockBuilderDockWindow("开始",dockspace);
+    ImGuiID start{},console{};
+    ImGui::DockBuilderSplitNode(dockspace,ImGuiDir_Down,0.42f,&console,&start);
+    ImGui::DockBuilderDockWindow("开始",start);
+    ImGui::DockBuilderDockWindow("抽取控制台",console);
     ImGui::DockBuilderFinish(dockspace);
     g_start_layout_built=true;
 }
@@ -805,6 +863,23 @@ void draw_start_screen() {
     ImGui::End();
 }
 
+void draw_extraction_console() {
+    ImGui::Begin("抽取控制台",nullptr,ImGuiWindowFlags_NoCollapse);
+    ImGui::TextColored(g_extract_process?ImVec4(.45f,.85f,.55f,1.0f):ImVec4(.65f,.65f,.65f,1.0f),g_extract_process?"抽取进行中":"未运行");
+    ImGui::SameLine();ImGui::Checkbox("自动滚动",&g_extract_console_auto_scroll);
+    ImGui::SameLine();
+    if(ImGui::Button("清空")){g_extract_console_lines.clear();g_extract_console_pending.clear();g_extract_console_updated=false;}
+    ImGui::Separator();
+    ImGui::BeginChild("##extract_console",ImVec2(0,0),false,ImGuiWindowFlags_HorizontalScrollbar);
+    if(g_extract_console_lines.empty()&&g_extract_console_pending.empty())ImGui::TextDisabled("抽取开始后将在这里显示实时输出。");
+    ImGuiListClipper clipper;clipper.Begin(static_cast<int>(g_extract_console_lines.size()));
+    while(clipper.Step())for(int i=clipper.DisplayStart;i<clipper.DisplayEnd;++i)ImGui::TextUnformatted(g_extract_console_lines[static_cast<std::size_t>(i)].c_str());
+    if(g_extract_console_auto_scroll&&g_extract_console_updated)ImGui::SetScrollY(ImGui::GetScrollMaxY());
+    g_extract_console_updated=false;
+    ImGui::EndChild();
+    ImGui::End();
+}
+
 void draw_editor_shell() {
     poll_workspace_extraction();
     const ImGuiID dockspace=ImGui::GetID("GBFRDockSpace");
@@ -812,6 +887,7 @@ void draw_editor_shell() {
     if(!g_workspace) {
         if(!g_start_layout_built) build_start_dock_layout(dockspace);
         draw_start_screen();
+        draw_extraction_console();
         return;
     }
     if(g_reset_layout) build_default_dock_layout(dockspace);
@@ -1109,6 +1185,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();
     d3d.shutdown();
+    if(g_extract_output_read){CloseHandle(g_extract_output_read);g_extract_output_read=nullptr;}
     if(g_extract_process) { CloseHandle(g_extract_process); g_extract_process=nullptr; }
     g_preview = nullptr;
     g_d3d = nullptr;

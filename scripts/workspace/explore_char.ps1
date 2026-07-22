@@ -10,6 +10,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
 $libRoot = Join-Path $repoRoot "_lib"
@@ -120,9 +121,6 @@ function Extract-MmatHashes([string]$mmatPath) {
 }
 
 function Finish([int]$code = 0) {
-    Write-Host ""
-    Write-Host $S.press_any_key -ForegroundColor DarkGray
-    try { $null = [Console]::ReadKey($true) } catch { }
     exit $code
 }
 
