@@ -23,6 +23,18 @@ int main() {
     if (gbfr::Log::snapshot().size() != 1) return 1;
     if(!gbfr::is_color_variant_texture("pl1400_body_lod0_c01_albd")||
        gbfr::is_color_variant_texture("pl1400_body_lod0_albd"))return 14;
+    {
+        nlohmann::json bone_names;
+        std::ifstream(fs::path(GBFR_ROOT_DIR)/L"_lib/humanoid_bone_names.json")>>bone_names;
+        if(bone_names.value("_830",std::string{})!="Brow_01_L"||bone_names.value("_840",std::string{})!="Lid Top_00_L"||
+           bone_names.value("_8c2",std::string{})!="Tongue Tip"||bone_names.value("_820",std::string{})!="Mouth Inside Bottom")return 78;
+    }
+    {
+        Microsoft::WRL::ComPtr<ID3D11Device> device;Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
+        if(FAILED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_WARP,nullptr,0,nullptr,0,D3D11_SDK_VERSION,&device,nullptr,&context)))return 82;
+        gbfr::PreviewRenderer shader_smoke;
+        if(!shader_smoke.initialize(device.Get(),context.Get(),fs::path(GBFR_ROOT_DIR)/L"assets/shaders/preview.hlsl"))return 83;
+    }
 
     const fs::path test_temp = fs::current_path() / L".gbfr_test_temp";
     const fs::path root = test_temp / L"workspace";
@@ -30,6 +42,22 @@ int main() {
     fs::remove_all(root);
     fs::create_directories(root / L"source");
     fs::create_directories(root / L"unpack");
+    {
+        std::vector<unsigned char> bytes(84,0);
+        const auto put_u16=[&](std::size_t offset,std::uint16_t value){bytes[offset]=static_cast<unsigned char>(value);bytes[offset+1]=static_cast<unsigned char>(value>>8);};
+        for(std::uint16_t i=0;i<8;++i)put_u16(32+i*2,i);
+        for(std::size_t i=0;i<8;++i)put_u16(48+i*2,static_cast<std::uint16_t>(65535-i*4096));
+        bytes[64]=255;bytes[65]=128;bytes[66]=0;bytes[67]=64;put_u16(68,0x3c00);put_u16(70,0x4000);
+        const auto path=test_temp/L"v2_channels.mmesh";
+        std::ofstream(path,std::ios::binary).write(reinterpret_cast<const char*>(bytes.data()),static_cast<std::streamsize>(bytes.size()));
+        gbfr::ModelInfoAsset info;info.bones_to_weight_indices={10,11,12,13,14,15,16,17};
+        gbfr::ModelLodAsset lod;lod.vertex_count=1;lod.index_count=3;lod.buffer_types=127;
+        lod.buffers={{0,32},{32,8},{40,8},{48,8},{56,8},{64,4},{68,4},{72,12}};info.lods.push_back(lod);
+        const auto mesh=gbfr::load_mmesh(path,info);
+        if(mesh.influence_count!=8||!mesh.has_color||!mesh.has_uv1||mesh.vertices[0].joints[7]!=17||
+           std::abs(mesh.vertices[0].weights[4]-static_cast<float>(65535-4*4096)/65535.0f)>1e-6f||
+           std::abs(mesh.vertices[0].color.y-128.0f/255.0f)>1e-6f||mesh.vertices[0].uv1.x!=1.0f||mesh.vertices[0].uv1.y!=2.0f)return 84;
+    }
     {
         std::ofstream(root / L"source/model.mmesh", std::ios::binary) << "baseline";
         std::ofstream(root / L"unpack/model.mmesh", std::ios::binary) << "baseline";
@@ -89,7 +117,25 @@ int main() {
     fs::remove_all(wtb_root);
 
     const fs::path integration = fs::path(GBFR_ROOT_DIR) / L"explore_output/workspace.json";
-    if (fs::is_regular_file(integration)) {
+    if(fs::is_regular_file(integration)){
+        nlohmann::json current;std::ifstream(integration)>>current;
+        const auto id=current.value("CharacterId",std::string{});
+        const auto current_root=integration.parent_path()/L"unpack/data/model/pl"/fs::path(id);
+        const auto current_minfo=current_root/fs::path(id+".minfo");
+        if(fs::is_regular_file(current_minfo)){
+            const auto info=gbfr::load_minfo(current_minfo);
+            if(info.lods.empty()||info.vertex_count!=info.lods.front().vertex_count||info.chunks.size()!=info.lods.front().chunks.size())return 79;
+            for(std::size_t lod=0;lod<info.lods.size();++lod){
+                const auto path=integration.parent_path()/L"unpack/data/model_streaming"/fs::path(L"lod"+std::to_wstring(lod))/fs::path(std::wstring(id.begin(),id.end())+L".mmesh");
+                if(!fs::is_regular_file(path))continue;
+                const auto mesh=gbfr::load_mmesh(path,info,lod);
+                if(mesh.vertices.size()!=info.lods[lod].vertex_count||mesh.indices.size()!=info.lods[lod].index_count||mesh.buffer_types!=info.lods[lod].buffer_types)return 80;
+                if(mesh.influence_count!=((mesh.buffer_types&16)?8:((mesh.buffer_types&8)?4:0))||mesh.has_color!=static_cast<bool>(mesh.buffer_types&32)||mesh.has_uv1!=static_cast<bool>(mesh.buffer_types&64))return 81;
+            }
+        }
+    }
+    const fs::path pl1400_sample = integration.parent_path() / L"unpack/data/model/pl/pl1400/pl1400.minfo";
+    if (fs::is_regular_file(integration) && fs::is_regular_file(pl1400_sample)) {
         const auto pl1400 = gbfr::Workspace::load(integration);
         nlohmann::json document;
         std::ifstream(integration) >> document;

@@ -32,6 +32,7 @@
 #include <vector>
 #include <array>
 #include <cctype>
+#include <cwctype>
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
 
@@ -48,12 +49,21 @@ struct ModelPreviewKey {
     std::filesystem::path minfo;
     std::filesystem::path skeleton;
     std::filesystem::path mesh;
+    std::size_t lod_index{};
+    bool shadow_lod{};
     bool operator==(const ModelPreviewKey&) const = default;
+};
+struct ModelPreviewStats {
+    std::size_t lod_count{}, shadow_lod_count{}, mesh_count{}, chunk_count{};
+    std::size_t vertex_count{}, triangle_count{};
+    unsigned influence_count{};
+    bool has_uv1{}, has_color{};
 };
 AssetFunction g_asset_function = AssetFunction::all;
 std::array<char,256> g_asset_search{};
 PreviewMode g_preview_mode = PreviewMode::none;
 std::optional<ModelPreviewKey> g_loaded_model;
+ModelPreviewStats g_loaded_model_stats;
 std::filesystem::path g_loaded_texture;
 bool g_loaded_texture_is_ui = false;
 std::filesystem::path g_loaded_material;
@@ -449,13 +459,21 @@ ModelPreviewKey resolve_model_preview_key(const gbfr::WorkspaceAsset& selected) 
     if(!g_workspace||selected.kind!=gbfr::AssetKind::model) throw std::runtime_error("选中项不是模型文件");
     ModelPreviewKey key;
     const auto stem=selected.input.stem();
+    const auto set_lod=[&](const std::filesystem::path& mesh) {
+        auto level=mesh.parent_path().filename().wstring();
+        std::transform(level.begin(),level.end(),level.begin(),[](wchar_t value){return static_cast<wchar_t>(std::towlower(value));});
+        key.shadow_lod=level.starts_with(L"shadowlod");
+        const auto prefix=key.shadow_lod?std::wstring_view{L"shadowlod"}:std::wstring_view{L"lod"};
+        if(level.starts_with(prefix))key.lod_index=static_cast<std::size_t>(std::stoul(level.substr(prefix.size())));
+    };
+    if(selected.subtype=="mmesh"){key.mesh=selected.input;set_lod(key.mesh);}
     for(const auto& asset:g_workspace->assets()) {
         if(asset.kind!=gbfr::AssetKind::model||asset.input.stem()!=stem) continue;
         if(asset.subtype=="minfo") key.minfo=asset.input;
         else if(asset.subtype=="skeleton") key.skeleton=asset.input;
-        else if(asset.subtype=="mmesh") {
+        else if(asset.subtype=="mmesh"&&key.mesh.empty()) {
             const auto stream_level=asset.input.parent_path().filename().wstring();
-            if(key.mesh.empty()||_wcsicmp(stream_level.c_str(),L"lod0")==0) key.mesh=asset.input;
+            if(_wcsicmp(stream_level.c_str(),L"lod0")==0){key.mesh=asset.input;set_lod(key.mesh);}
         }
     }
     if(key.minfo.empty()) throw std::runtime_error("找不到同名 minfo");
@@ -473,7 +491,8 @@ bool load_model_preview(std::size_t index,bool force) {
         if(!force&&g_loaded_model&&*g_loaded_model==key&&g_preview->has_model()) {g_preview_mode=PreviewMode::model;return true;}
         const auto info = gbfr::load_minfo(key.minfo);
         const auto skeleton=gbfr::load_skeleton(key.skeleton);
-        const auto mesh = gbfr::load_mmesh(key.mesh, info);
+        const auto mesh = gbfr::load_mmesh(key.mesh, info, key.lod_index, key.shadow_lod);
+        const auto lod_label=std::string(key.shadow_lod?"shadowlod":"lod")+std::to_string(key.lod_index);
         gbfr::SopAsset sop;
         auto sop_path=g_workspace->root()/L"source/data"/key.minfo.lexically_relative(g_workspace->root()/L"unpack/data");
         sop_path.replace_extension(L".sop");
@@ -499,7 +518,7 @@ bool load_model_preview(std::size_t index,bool force) {
             if(chunk.material>=materials.entries.size()) throw std::runtime_error("minfo MaterialID 超出 0.mmat 条目范围");
             const auto submesh=chunk.submesh<info.submesh_names.size()?info.submesh_names[chunk.submesh]:std::string{"?"};
             gbfr::Log::write(gbfr::LogLevel::info,
-                "LOD0 分段：submesh="+submesh+
+                lod_label+" 分段：submesh="+submesh+
                 " material="+std::to_string(chunk.material)+
                 " indices="+std::to_string(chunk.count)+
                 " alpha="+(materials.entries[chunk.material].alpha_masked?"masked-overlay":materials.entries[chunk.material].alpha_blended?"blend":materials.entries[chunk.material].alpha_clipped?"clip":"none"));
@@ -509,6 +528,7 @@ bool load_model_preview(std::size_t index,bool force) {
         g_loaded_material=material_json;
         g_loaded_sop=std::filesystem::is_regular_file(sop_path)?sop_path:std::filesystem::path{};
         g_skeleton=skeleton;g_loaded_model=key;g_loaded_texture.clear();g_preview_mode=PreviewMode::model;
+        g_loaded_model_stats={info.lods.size(),info.shadow_lods.size(),info.submesh_names.size(),mesh.chunks.size(),mesh.vertices.size(),mesh.indices.size()/3,mesh.influence_count,mesh.has_uv1,mesh.has_color};
         discover_motions(key);
         g_preview->frame(g_camera);
         g_clh_files.clear(); g_clp_files.clear(); g_selected_collision=-1; g_selected_bone=-1; g_selected_clh=0;g_selected_clp=0;g_all_clp_groups=false;
@@ -521,7 +541,7 @@ bool load_model_preview(std::size_t index,bool force) {
         std::sort(g_clp_files.begin(),g_clp_files.end(),[](const auto& left,const auto& right){return left.data.id<right.data.id;});
         if(!g_clp_files.empty()){const int mask=g_clp_files.front().data.collision_flags;const auto found=std::find_if(g_clh_files.begin(),g_clh_files.end(),[&](const auto& file){return file.group_id>=0&&file.group_id<31&&(mask&(1<<file.group_id));});if(found!=g_clh_files.end())g_selected_clh=static_cast<int>(std::distance(g_clh_files.begin(),found));}
         update_collision_debug();
-        gbfr::Log::write(gbfr::LogLevel::info, "预览已加载：" + std::to_string(mesh.vertices.size()) + " 顶点，" + std::to_string(mesh.indices.size()/3) + " 三角形，" + std::to_string(mesh.chunks.size()) + " 材质分段，SOP " + std::to_string(sop.operations.size()) + " 操作，0.mmat 可见材质 " + std::to_string(resolved_materials) + "/" + std::to_string(materials.entries.size()));
+        gbfr::Log::write(gbfr::LogLevel::info, "预览已加载："+lod_label+"，" + std::to_string(mesh.vertices.size()) + " 顶点，" + std::to_string(mesh.indices.size()/3) + " 三角形，" + std::to_string(mesh.chunks.size()) + " 材质分段，"+std::to_string(mesh.influence_count)+" 权重，UV1 "+(mesh.has_uv1?"有":"无")+"，顶点色 "+(mesh.has_color?"有":"无")+"，SOP " + std::to_string(sop.operations.size()) + " 操作，0.mmat 可见材质 " + std::to_string(resolved_materials) + "/" + std::to_string(materials.entries.size()));
         return true;
     } catch (const std::exception& error) { gbfr::Log::write(gbfr::LogLevel::error, std::string("预览加载失败：") + error.what());return false; }
 }
@@ -968,7 +988,13 @@ void draw_editor_shell() {
     ImGui::Begin("Viewport");
     if(g_preview_mode==PreviewMode::model){
         if(g_loaded_model){
+            const auto lod_label=std::string(g_loaded_model->shadow_lod?"shadowlod":"lod")+std::to_string(g_loaded_model->lod_index);
             ImGui::Text("当前预览：%s",utf8(g_loaded_model->minfo.stem().wstring()).c_str());
+            ImGui::SameLine(0.0f,12.0f);ImGui::TextColored({0.38f,0.78f,1.0f,1.0f},"[%s]",lod_label.c_str());
+            ImGui::TextDisabled("LOD %zu + shadow %zu | Mesh %zu | 分段 %zu | %zu 顶点 / %zu 三角形 | %u 权重 | UV1 %s | COLOR %s",
+                g_loaded_model_stats.lod_count,g_loaded_model_stats.shadow_lod_count,g_loaded_model_stats.mesh_count,g_loaded_model_stats.chunk_count,
+                g_loaded_model_stats.vertex_count,g_loaded_model_stats.triangle_count,g_loaded_model_stats.influence_count,
+                g_loaded_model_stats.has_uv1?"有":"无",g_loaded_model_stats.has_color?"有":"无");
             draw_preview_source_inline("模型",g_loaded_model->minfo);
             draw_preview_source_inline("材质 JSON",g_loaded_material);
             draw_preview_source("DDS",g_workspace->root()/L"unpack/data");
@@ -1051,6 +1077,13 @@ void draw_editor_shell() {
         ImGui::TextWrapped("%s",utf8(asset.output.wstring()).c_str());
         ImGui::Separator();
         if (asset.kind == gbfr::AssetKind::model) {
+            if(g_loaded_model&&g_loaded_model->minfo.stem()==asset.input.stem()){
+                const auto lod_label=std::string(g_loaded_model->shadow_lod?"shadowlod":"lod")+std::to_string(g_loaded_model->lod_index);
+                ImGui::SeparatorText("模型能力");
+                ImGui::Text("当前：%s",lod_label.c_str());
+                ImGui::Text("普通 LOD %zu  |  阴影 LOD %zu  |  Mesh %zu",g_loaded_model_stats.lod_count,g_loaded_model_stats.shadow_lod_count,g_loaded_model_stats.mesh_count);
+                ImGui::Text("%u 权重  |  UV1 %s  |  顶点色 %s",g_loaded_model_stats.influence_count,g_loaded_model_stats.has_uv1?"有":"无",g_loaded_model_stats.has_color?"有":"无");
+            }
             if (ImGui::Button("重新加载预览")) load_model_preview(*g_selected_asset,true);
             if (ImGui::Button("从 unpack 复制到 build")) run_selected_asset_action(false);
             if (ImGui::Button("从 source 恢复 unpack")) run_selected_asset_action(true);

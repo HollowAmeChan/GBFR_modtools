@@ -7,9 +7,10 @@
 
 namespace gbfr::render_detail {
 struct GpuVertex {
-    float position[3], normal[3], uv[2];
-    std::uint16_t joints[4];
-    float weights[4];
+    float position[3]{}, normal[3]{}, uv[2]{}, uv1[2]{};
+    float color[4]{1,1,1,1};
+    std::uint16_t joints[8]{};
+    float weights[8]{};
 };
 
 struct SceneConstants {
@@ -25,7 +26,7 @@ struct BoneConstants {
     DirectX::XMFLOAT4X4 skin[PreviewRenderer::max_skin_bones];
 };
 
-static_assert(sizeof(GpuVertex) == 56);
+static_assert(sizeof(GpuVertex) == 104);
 static_assert(sizeof(SceneConstants) == 128);
 static_assert(sizeof(BoneConstants) == 32768);
 }

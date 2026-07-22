@@ -37,8 +37,17 @@ bool PreviewRenderer::initialize(ID3D11Device* device,ID3D11DeviceContext* conte
     if(!compile(shader_file,"VSMain","vs_5_0",vs)||!compile(shader_file,"PSMain","ps_5_0",ps)) return false;
     if(FAILED(device_->CreateVertexShader(vs->GetBufferPointer(),vs->GetBufferSize(),nullptr,&vertex_shader_))||
        FAILED(device_->CreatePixelShader(ps->GetBufferPointer(),ps->GetBufferSize(),nullptr,&pixel_shader_))) return false;
-    D3D11_INPUT_ELEMENT_DESC elements[]={{"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,0,D3D11_INPUT_PER_VERTEX_DATA,0},{"NORMAL",0,DXGI_FORMAT_R32G32B32_FLOAT,0,12,D3D11_INPUT_PER_VERTEX_DATA,0},{"TEXCOORD",0,DXGI_FORMAT_R32G32_FLOAT,0,24,D3D11_INPUT_PER_VERTEX_DATA,0},{"BLENDINDICES",0,DXGI_FORMAT_R16G16B16A16_UINT,0,32,D3D11_INPUT_PER_VERTEX_DATA,0},{"BLENDWEIGHT",0,DXGI_FORMAT_R32G32B32A32_FLOAT,0,40,D3D11_INPUT_PER_VERTEX_DATA,0}};
-    if(FAILED(device_->CreateInputLayout(elements,5,vs->GetBufferPointer(),vs->GetBufferSize(),&input_layout_))) return false;
+    D3D11_INPUT_ELEMENT_DESC elements[]={
+        {"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,0,D3D11_INPUT_PER_VERTEX_DATA,0},
+        {"NORMAL",0,DXGI_FORMAT_R32G32B32_FLOAT,0,12,D3D11_INPUT_PER_VERTEX_DATA,0},
+        {"TEXCOORD",0,DXGI_FORMAT_R32G32_FLOAT,0,24,D3D11_INPUT_PER_VERTEX_DATA,0},
+        {"TEXCOORD",1,DXGI_FORMAT_R32G32_FLOAT,0,32,D3D11_INPUT_PER_VERTEX_DATA,0},
+        {"COLOR",0,DXGI_FORMAT_R32G32B32A32_FLOAT,0,40,D3D11_INPUT_PER_VERTEX_DATA,0},
+        {"BLENDINDICES",0,DXGI_FORMAT_R16G16B16A16_UINT,0,56,D3D11_INPUT_PER_VERTEX_DATA,0},
+        {"BLENDINDICES",1,DXGI_FORMAT_R16G16B16A16_UINT,0,64,D3D11_INPUT_PER_VERTEX_DATA,0},
+        {"BLENDWEIGHT",0,DXGI_FORMAT_R32G32B32A32_FLOAT,0,72,D3D11_INPUT_PER_VERTEX_DATA,0},
+        {"BLENDWEIGHT",1,DXGI_FORMAT_R32G32B32A32_FLOAT,0,88,D3D11_INPUT_PER_VERTEX_DATA,0}};
+    if(FAILED(device_->CreateInputLayout(elements,9,vs->GetBufferPointer(),vs->GetBufferSize(),&input_layout_))) return false;
     D3D11_BUFFER_DESC cb{}; cb.ByteWidth=sizeof(SceneConstants); cb.Usage=D3D11_USAGE_DYNAMIC; cb.BindFlags=D3D11_BIND_CONSTANT_BUFFER; cb.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
     if(FAILED(device_->CreateBuffer(&cb,nullptr,&constants_))) return false;
     cb.ByteWidth=sizeof(BoneConstants);
@@ -89,7 +98,16 @@ bool PreviewRenderer::load(const MeshAsset& mesh,const SkeletonAsset& skeleton,c
     visible_bone_count_=static_cast<std::size_t>(std::count(visible_bones_.begin(),visible_bones_.end(),true));
     std::vector<GpuVertex> vertices; vertices.reserve(mesh.vertices.size());
     bounds_min_={std::numeric_limits<float>::max(),std::numeric_limits<float>::max(),std::numeric_limits<float>::max()}; bounds_max_={-bounds_min_.x,-bounds_min_.y,-bounds_min_.z};
-    for(const auto& v:mesh.vertices) { GpuVertex vertex{{v.position.x,v.position.y,v.position.z},{v.normal.x,v.normal.y,v.normal.z},{v.uv.x,v.uv.y},{v.joints[0],v.joints[1],v.joints[2],v.joints[3]},{v.weights[0],v.weights[1],v.weights[2],v.weights[3]}};vertices.push_back(vertex); bounds_min_.x=std::min(bounds_min_.x,v.position.x);bounds_min_.y=std::min(bounds_min_.y,v.position.y);bounds_min_.z=std::min(bounds_min_.z,v.position.z);bounds_max_.x=std::max(bounds_max_.x,v.position.x);bounds_max_.y=std::max(bounds_max_.y,v.position.y);bounds_max_.z=std::max(bounds_max_.z,v.position.z); }
+    for(const auto& v:mesh.vertices) {
+        GpuVertex vertex;
+        vertex.position[0]=v.position.x;vertex.position[1]=v.position.y;vertex.position[2]=v.position.z;
+        vertex.normal[0]=v.normal.x;vertex.normal[1]=v.normal.y;vertex.normal[2]=v.normal.z;
+        vertex.uv[0]=v.uv.x;vertex.uv[1]=v.uv.y;vertex.uv1[0]=v.uv1.x;vertex.uv1[1]=v.uv1.y;
+        vertex.color[0]=v.color.x;vertex.color[1]=v.color.y;vertex.color[2]=v.color.z;vertex.color[3]=v.color.w;
+        std::copy(v.joints.begin(),v.joints.end(),vertex.joints);std::copy(v.weights.begin(),v.weights.end(),vertex.weights);
+        vertices.push_back(vertex);
+        bounds_min_.x=std::min(bounds_min_.x,v.position.x);bounds_min_.y=std::min(bounds_min_.y,v.position.y);bounds_min_.z=std::min(bounds_min_.z,v.position.z);bounds_max_.x=std::max(bounds_max_.x,v.position.x);bounds_max_.y=std::max(bounds_max_.y,v.position.y);bounds_max_.z=std::max(bounds_max_.z,v.position.z);
+    }
     if(!create_buffer(device_,vertices,D3D11_BIND_VERTEX_BUFFER,vertices_)||!create_buffer(device_,mesh.indices,D3D11_BIND_INDEX_BUFFER,indices_)) return false;
     index_count_=static_cast<unsigned>(mesh.indices.size());
     draw_ranges_.reserve(mesh.chunks.size());

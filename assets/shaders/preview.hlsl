@@ -25,8 +25,12 @@ struct VSIn
     float3 position : POSITION;
     float3 normal : NORMAL;
     float2 uv : TEXCOORD0;
-    uint4 joints : BLENDINDICES0;
-    float4 weights : BLENDWEIGHT0;
+    float2 uv1 : TEXCOORD1;
+    float4 color : COLOR0;
+    uint4 joints0 : BLENDINDICES0;
+    uint4 joints1 : BLENDINDICES1;
+    float4 weights0 : BLENDWEIGHT0;
+    float4 weights1 : BLENDWEIGHT1;
 };
 
 struct VSOut
@@ -34,6 +38,7 @@ struct VSOut
     float4 position : SV_POSITION;
     float3 normal : NORMAL;
     float2 uv : TEXCOORD0;
+    float4 color : COLOR0;
 };
 
 VSOut VSMain(VSIn input)
@@ -42,7 +47,7 @@ VSOut VSMain(VSIn input)
     float3 normal = input.normal;
     if (skinningEnabled)
     {
-        float weightSum = dot(input.weights, 1.0.xxxx);
+        float weightSum = dot(input.weights0, 1.0.xxxx) + dot(input.weights1, 1.0.xxxx);
         if (weightSum > 0.0)
         {
             float4 skinnedPosition = 0.0.xxxx;
@@ -50,9 +55,16 @@ VSOut VSMain(VSIn input)
             [unroll]
             for (uint influence = 0; influence < 4; ++influence)
             {
-                float weight = input.weights[influence];
-                skinnedPosition += mul(position, skinMatrices[input.joints[influence]]) * weight;
-                skinnedNormal += mul(normal, (float3x3)skinMatrices[input.joints[influence]]) * weight;
+                float weight = input.weights0[influence];
+                skinnedPosition += mul(position, skinMatrices[input.joints0[influence]]) * weight;
+                skinnedNormal += mul(normal, (float3x3)skinMatrices[input.joints0[influence]]) * weight;
+            }
+            [unroll]
+            for (uint influence2 = 0; influence2 < 4; ++influence2)
+            {
+                float weight = input.weights1[influence2];
+                skinnedPosition += mul(position, skinMatrices[input.joints1[influence2]]) * weight;
+                skinnedNormal += mul(normal, (float3x3)skinMatrices[input.joints1[influence2]]) * weight;
             }
             position = skinnedPosition / weightSum;
             normal = normalize(skinnedNormal);
@@ -63,6 +75,7 @@ VSOut VSMain(VSIn input)
     output.position = mul(position, viewProjection);
     output.normal = normal;
     output.uv = input.uv;
+    output.color = input.color;
     return output;
 }
 
@@ -76,7 +89,7 @@ float4 PSMain(VSOut input) : SV_TARGET
 {
     float2 uv = float2(input.uv.x, 1.0 - input.uv.y);
     float4 primary = textured ? primaryTexture.Sample(linearSampler, uv) : color;
-    float3 base = primary.rgb;
+    float3 base = primary.rgb * input.color.rgb;
     if (eyeMaterial)
     {
         float4 iris = irisTexture.Sample(linearSampler, uv);
@@ -86,7 +99,7 @@ float4 PSMain(VSOut input) : SV_TARGET
         base = lerp(base, highlight.rgb, highlight.a);
     }
 
-    float coverage = primary.a;
+    float coverage = primary.a * input.color.a;
     if (alphaMasked)
         coverage *= alphaMaskTexture.Sample(linearSampler, uv).b;
     if (alphaBlended || alphaClipped)
