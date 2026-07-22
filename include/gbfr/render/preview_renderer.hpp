@@ -101,8 +101,10 @@ private:
     Microsoft::WRL::ComPtr<ID3D11Buffer> vertices_, indices_, lines_, bone_points_, constants_, bones_;
     Microsoft::WRL::ComPtr<ID3D11Buffer> collision_lines_, cloth_longitudinal_lines_, cloth_lateral_lines_, cloth_polygon_lines_;
     Microsoft::WRL::ComPtr<ID3D11VertexShader> vertex_shader_;
+    Microsoft::WRL::ComPtr<ID3D11VertexShader> debug_vertex_shader_;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> pixel_shader_;
     Microsoft::WRL::ComPtr<ID3D11InputLayout> input_layout_;
+    Microsoft::WRL::ComPtr<ID3D11InputLayout> debug_input_layout_;
     Microsoft::WRL::ComPtr<ID3D11SamplerState> sampler_;
     Microsoft::WRL::ComPtr<ID3D11RasterizerState> solid_, wire_, alpha_overlay_raster_;
     Microsoft::WRL::ComPtr<ID3D11DepthStencilState> overlay_depth_, alpha_depth_;

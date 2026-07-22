@@ -79,6 +79,16 @@ VSOut VSMain(VSIn input)
     return output;
 }
 
+VSOut VSDebug(float3 position : POSITION)
+{
+    VSOut output;
+    output.position = mul(float4(position, 1.0), viewProjection);
+    output.normal = float3(0.0, 1.0, 0.0);
+    output.uv = float2(0.0, 0.0);
+    output.color = float4(1.0, 1.0, 1.0, 1.0);
+    return output;
+}
+
 Texture2D primaryTexture : register(t0);
 Texture2D irisTexture : register(t1);
 Texture2D highlightTexture : register(t2);

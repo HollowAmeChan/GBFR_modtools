@@ -13,6 +13,7 @@ using Microsoft::WRL::ComPtr;
 using namespace DirectX;
 namespace fs = std::filesystem;
 using gbfr::render_detail::BoneConstants;
+using gbfr::render_detail::DebugVertex;
 using gbfr::render_detail::GpuVertex;
 using gbfr::render_detail::SceneConstants;
 namespace {
@@ -33,9 +34,10 @@ template<class T> bool create_buffer(ID3D11Device* device,const std::vector<T>& 
 namespace gbfr {
 bool PreviewRenderer::initialize(ID3D11Device* device,ID3D11DeviceContext* context,const fs::path& shader_file) {
     device_=device; context_=context;
-    ComPtr<ID3DBlob> vs,ps;
-    if(!compile(shader_file,"VSMain","vs_5_0",vs)||!compile(shader_file,"PSMain","ps_5_0",ps)) return false;
+    ComPtr<ID3DBlob> vs,debug_vs,ps;
+    if(!compile(shader_file,"VSMain","vs_5_0",vs)||!compile(shader_file,"VSDebug","vs_5_0",debug_vs)||!compile(shader_file,"PSMain","ps_5_0",ps)) return false;
     if(FAILED(device_->CreateVertexShader(vs->GetBufferPointer(),vs->GetBufferSize(),nullptr,&vertex_shader_))||
+       FAILED(device_->CreateVertexShader(debug_vs->GetBufferPointer(),debug_vs->GetBufferSize(),nullptr,&debug_vertex_shader_))||
        FAILED(device_->CreatePixelShader(ps->GetBufferPointer(),ps->GetBufferSize(),nullptr,&pixel_shader_))) return false;
     D3D11_INPUT_ELEMENT_DESC elements[]={
         {"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,0,D3D11_INPUT_PER_VERTEX_DATA,0},
@@ -48,6 +50,8 @@ bool PreviewRenderer::initialize(ID3D11Device* device,ID3D11DeviceContext* conte
         {"BLENDWEIGHT",0,DXGI_FORMAT_R32G32B32A32_FLOAT,0,72,D3D11_INPUT_PER_VERTEX_DATA,0},
         {"BLENDWEIGHT",1,DXGI_FORMAT_R32G32B32A32_FLOAT,0,88,D3D11_INPUT_PER_VERTEX_DATA,0}};
     if(FAILED(device_->CreateInputLayout(elements,9,vs->GetBufferPointer(),vs->GetBufferSize(),&input_layout_))) return false;
+    const D3D11_INPUT_ELEMENT_DESC debug_element{"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,0,D3D11_INPUT_PER_VERTEX_DATA,0};
+    if(FAILED(device_->CreateInputLayout(&debug_element,1,debug_vs->GetBufferPointer(),debug_vs->GetBufferSize(),&debug_input_layout_)))return false;
     D3D11_BUFFER_DESC cb{}; cb.ByteWidth=sizeof(SceneConstants); cb.Usage=D3D11_USAGE_DYNAMIC; cb.BindFlags=D3D11_BIND_CONSTANT_BUFFER; cb.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
     if(FAILED(device_->CreateBuffer(&cb,nullptr,&constants_))) return false;
     cb.ByteWidth=sizeof(BoneConstants);
@@ -131,12 +135,12 @@ bool PreviewRenderer::load(const MeshAsset& mesh,const SkeletonAsset& skeleton,c
         }
     }
 
-    std::vector<GpuVertex> lines;
-    for(std::size_t i=0;i<skeleton.bones.size();++i) { const auto& b=skeleton.bones[i]; if(!visible_bones_[i]||b.parent==0xffff||b.parent>=skeleton.bones.size()) continue; const auto& p=skeleton.bones[b.parent].world_position; lines.push_back({{p.x,p.y,p.z},{0,1,0},{0,0}});lines.push_back({{b.world_position.x,b.world_position.y,b.world_position.z},{0,1,0},{0,0}}); }
+    std::vector<DebugVertex> lines;
+    for(std::size_t i=0;i<skeleton.bones.size();++i) { const auto& b=skeleton.bones[i]; if(!visible_bones_[i]||b.parent==0xffff||b.parent>=skeleton.bones.size()) continue; const auto& p=skeleton.bones[b.parent].world_position; lines.push_back({{p.x,p.y,p.z}});lines.push_back({{b.world_position.x,b.world_position.y,b.world_position.z}}); }
     line_vertex_count_=static_cast<unsigned>(lines.size()); if(!lines.empty()) create_buffer(device_,lines,D3D11_BIND_VERTEX_BUFFER,lines_);
     const float dx=bounds_max_.x-bounds_min_.x,dy=bounds_max_.y-bounds_min_.y,dz=bounds_max_.z-bounds_min_.z;
-    bone_marker_size_=std::max(.001f,std::sqrt(dx*dx+dy*dy+dz*dz)*.004f);std::vector<GpuVertex> points;points.reserve(skeleton.bones.size()*6);
-    for(std::size_t i=0;i<skeleton.bones.size();++i){if(!visible_bones_[i])continue;const auto p=skeleton.bones[i].world_position;points.push_back({{p.x-bone_marker_size_,p.y,p.z},{0,1,0},{0,0}});points.push_back({{p.x+bone_marker_size_,p.y,p.z},{0,1,0},{0,0}});points.push_back({{p.x,p.y-bone_marker_size_,p.z},{0,1,0},{0,0}});points.push_back({{p.x,p.y+bone_marker_size_,p.z},{0,1,0},{0,0}});points.push_back({{p.x,p.y,p.z-bone_marker_size_},{0,1,0},{0,0}});points.push_back({{p.x,p.y,p.z+bone_marker_size_},{0,1,0},{0,0}});}
+    bone_marker_size_=std::max(.001f,std::sqrt(dx*dx+dy*dy+dz*dz)*.004f);std::vector<DebugVertex> points;points.reserve(skeleton.bones.size()*6);
+    for(std::size_t i=0;i<skeleton.bones.size();++i){if(!visible_bones_[i])continue;const auto p=skeleton.bones[i].world_position;points.push_back({{p.x-bone_marker_size_,p.y,p.z}});points.push_back({{p.x+bone_marker_size_,p.y,p.z}});points.push_back({{p.x,p.y-bone_marker_size_,p.z}});points.push_back({{p.x,p.y+bone_marker_size_,p.z}});points.push_back({{p.x,p.y,p.z-bone_marker_size_}});points.push_back({{p.x,p.y,p.z+bone_marker_size_}});}
     bone_point_vertex_count_=static_cast<unsigned>(points.size());if(!points.empty())create_buffer(device_,points,D3D11_BIND_VERTEX_BUFFER,bone_points_);
     return apply_animation(nullptr,0.0f);
 }
@@ -167,16 +171,16 @@ void PreviewRenderer::clear() {
 }
 
 void PreviewRenderer::set_collision_lines(const std::vector<Vec3>& points) {
-    std::vector<GpuVertex> lines; lines.reserve(points.size());
-    for (const auto& p : points) lines.push_back({{p.x,p.y,p.z},{0,1,0},{0,0}});
+    std::vector<DebugVertex> lines; lines.reserve(points.size());
+    for (const auto& p : points) lines.push_back({{p.x,p.y,p.z}});
     collision_lines_.Reset(); collision_vertex_count_=static_cast<unsigned>(lines.size());
     if(!lines.empty()) create_buffer(device_,lines,D3D11_BIND_VERTEX_BUFFER,collision_lines_);
 }
 
 void PreviewRenderer::set_cloth_lines(const std::vector<Vec3>& longitudinal,const std::vector<Vec3>& lateral,const std::vector<Vec3>& polygon) {
     const auto upload=[&](const std::vector<Vec3>& points,ComPtr<ID3D11Buffer>& buffer,unsigned& count){
-        std::vector<GpuVertex> lines;lines.reserve(points.size());
-        for(const auto& point:points)lines.push_back({{point.x,point.y,point.z},{0,1,0},{0,0}});
+        std::vector<DebugVertex> lines;lines.reserve(points.size());
+        for(const auto& point:points)lines.push_back({{point.x,point.y,point.z}});
         buffer.Reset();count=static_cast<unsigned>(lines.size());
         if(!lines.empty())create_buffer(device_,lines,D3D11_BIND_VERTEX_BUFFER,buffer);
     };
@@ -268,6 +272,7 @@ void PreviewRenderer::render(const OrbitCamera& camera,bool show_mesh,PreviewSha
     }
     context_->OMSetDepthStencilState(overlay_depth_.Get(),0);
     constants.lighting=0;constants.eye_material=0;constants.alpha_blended=0;constants.alpha_masked=0;constants.alpha_clipped=0;constants.skinning_enabled=0;
+    stride=sizeof(DebugVertex);context_->IASetInputLayout(debug_input_layout_.Get());context_->VSSetShader(debug_vertex_shader_.Get(),nullptr,0);
     if(show_skeleton&&line_vertex_count_){constants.color={1,.55f,.08f,1};constants.textured=0;upload_constants();context_->RSSetState(solid_.Get());context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST);context_->IASetVertexBuffers(0,1,lines_.GetAddressOf(),&stride,&offset);context_->Draw(line_vertex_count_,0);}
     if(show_skeleton&&bone_point_vertex_count_){constants.color={1,.88f,.24f,1};constants.textured=0;upload_constants();context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST);context_->IASetVertexBuffers(0,1,bone_points_.GetAddressOf(),&stride,&offset);context_->Draw(bone_point_vertex_count_,0);}
     if(show_collisions&&collision_vertex_count_){constants.color={.05f,.9f,.85f,1};constants.textured=0;upload_constants();context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST);context_->IASetVertexBuffers(0,1,collision_lines_.GetAddressOf(),&stride,&offset);context_->Draw(collision_vertex_count_,0);}

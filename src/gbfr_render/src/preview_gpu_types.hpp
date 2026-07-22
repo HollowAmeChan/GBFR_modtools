@@ -13,6 +13,10 @@ struct GpuVertex {
     float weights[8]{};
 };
 
+struct DebugVertex {
+    float position[3]{};
+};
+
 struct SceneConstants {
     DirectX::XMFLOAT4X4 view_projection;
     DirectX::XMFLOAT4 color;
@@ -27,6 +31,7 @@ struct BoneConstants {
 };
 
 static_assert(sizeof(GpuVertex) == 104);
+static_assert(sizeof(DebugVertex) == 12);
 static_assert(sizeof(SceneConstants) == 128);
 static_assert(sizeof(BoneConstants) == 32768);
 }

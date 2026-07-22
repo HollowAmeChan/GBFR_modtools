@@ -132,6 +132,30 @@ int main() {
                 if(mesh.vertices.size()!=info.lods[lod].vertex_count||mesh.indices.size()!=info.lods[lod].index_count||mesh.buffer_types!=info.lods[lod].buffer_types)return 80;
                 if(mesh.influence_count!=((mesh.buffer_types&16)?8:((mesh.buffer_types&8)?4:0))||mesh.has_color!=static_cast<bool>(mesh.buffer_types&32)||mesh.has_uv1!=static_cast<bool>(mesh.buffer_types&64))return 81;
             }
+            const auto skeleton_path=current_root/fs::path(id+".skeleton");
+            const auto mesh_path=integration.parent_path()/L"unpack/data/model_streaming/lod0"/fs::path(id+".mmesh");
+            const auto motion_path=integration.parent_path()/L"source/data/pl"/fs::path(id)/fs::path(id+"_0a23.mot");
+            if(fs::is_regular_file(skeleton_path)&&fs::is_regular_file(mesh_path)){
+                Microsoft::WRL::ComPtr<ID3D11Device> device;Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
+                if(FAILED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_WARP,nullptr,0,nullptr,0,D3D11_SDK_VERSION,&device,nullptr,&context)))return 85;
+                gbfr::PreviewRenderer preview;
+                if(!preview.initialize(device.Get(),context.Get(),fs::path(GBFR_ROOT_DIR)/L"assets/shaders/preview.hlsl"))return 86;
+                const auto mesh=gbfr::load_mmesh(mesh_path,info);
+                const auto skeleton=gbfr::load_skeleton(skeleton_path);
+                if(!preview.load(mesh,skeleton))return 87;
+                preview.resize(256,256);gbfr::OrbitCamera camera;preview.frame(camera);
+                preview.render(camera,true,gbfr::PreviewShadingMode::lit,false,false);const auto without_skeleton=preview.render_target_hash();
+                preview.render(camera,true,gbfr::PreviewShadingMode::lit,true,false);const auto with_skeleton=preview.render_target_hash();
+                if(!without_skeleton||!with_skeleton||without_skeleton==with_skeleton)return 90;
+                if(fs::is_regular_file(motion_path)){
+                    const auto clip=gbfr::load_mot(motion_path);
+                    const float test_frame=clip.frame_count?std::min(310.0f,static_cast<float>(clip.frame_count-1)):0.0f;
+                    if(!preview.apply_animation(&clip,test_frame))return 88;
+                    for(const auto& p:preview.bone_positions())if(!std::isfinite(p.x)||!std::isfinite(p.y)||!std::isfinite(p.z)||std::sqrt(p.x*p.x+p.y*p.y+p.z*p.z)>10.0f)return 91;
+                    const auto sop_path=integration.parent_path()/L"source/data/model/pl"/fs::path(id)/fs::path(id+".sop");
+                    if(fs::is_regular_file(sop_path)&&(!preview.load(mesh,skeleton,{},gbfr::load_sop(sop_path))||!preview.apply_animation(&clip,test_frame)))return 89;
+                }
+            }
         }
     }
     const fs::path pl1400_sample = integration.parent_path() / L"unpack/data/model/pl/pl1400/pl1400.minfo";
