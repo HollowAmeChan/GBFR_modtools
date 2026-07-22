@@ -39,7 +39,7 @@ std::unique_ptr<gbfr::Workspace> g_workspace;
 std::string g_imgui_ini;
 std::optional<std::size_t> g_selected_asset;
 bool g_changed_only = false;
-enum class AssetFunction { all, model, texture, material, cloth };
+enum class AssetFunction { all, model, texture, ui_image, material, cloth };
 enum class PreviewMode { none, model, texture };
 struct ModelPreviewKey {
     std::filesystem::path minfo;
@@ -52,6 +52,7 @@ std::array<char,256> g_asset_search{};
 PreviewMode g_preview_mode = PreviewMode::none;
 std::optional<ModelPreviewKey> g_loaded_model;
 std::filesystem::path g_loaded_texture;
+bool g_loaded_texture_is_ui = false;
 std::filesystem::path g_loaded_material;
 std::filesystem::path g_loaded_sop;
 gbfr::OrbitCamera g_camera;
@@ -204,7 +205,7 @@ bool load_workspace(const std::filesystem::path& path) {
         clear_motion_state();
         g_selected_asset.reset();
         g_asset_function=AssetFunction::all;g_asset_search.fill('\0');
-        g_preview_mode=PreviewMode::none;g_loaded_model.reset();g_loaded_texture.clear();g_loaded_material.clear();g_loaded_sop.clear();
+        g_preview_mode=PreviewMode::none;g_loaded_model.reset();g_loaded_texture.clear();g_loaded_texture_is_ui=false;g_loaded_material.clear();g_loaded_sop.clear();
         g_skeleton.bones.clear(); g_clh_files.clear(); g_clp_files.clear();g_sop_inspector.clear();
         if(g_preview) g_preview->clear();
         const auto settings_directory=g_workspace->root()/L".gbfr";
@@ -284,13 +285,13 @@ void poll_workspace_extraction() {
 
 bool load_model_preview(std::size_t index,bool force=false);
 
-void run_selected_model_action(bool restore) {
+void run_selected_asset_action(bool restore) {
     if (!g_workspace || !g_selected_asset) return;
     try {
-        if (restore) g_workspace->restore_model(*g_selected_asset);
-        else g_workspace->build_model(*g_selected_asset);
-        if(restore) load_model_preview(*g_selected_asset,true);
-        gbfr::Log::write(gbfr::LogLevel::info, restore ? "模型文件已从 source 恢复到 unpack" : "模型文件已从 unpack 复制到 build");
+        if (restore) g_workspace->restore_asset(*g_selected_asset);
+        else g_workspace->build_asset(*g_selected_asset);
+        if(restore && g_workspace->assets()[*g_selected_asset].kind==gbfr::AssetKind::model) load_model_preview(*g_selected_asset,true);
+        gbfr::Log::write(gbfr::LogLevel::info, restore ? "资源已从 source 恢复到 unpack" : "资源已从 unpack 封回 build");
     } catch (const std::exception& error) {
         gbfr::Log::write(gbfr::LogLevel::error, error.what());
     }
@@ -439,8 +440,9 @@ void preview_asset(std::size_t index) {
     if(!g_workspace||index>=g_workspace->assets().size()||!g_preview)return;
     const auto& asset=g_workspace->assets()[index];
     if(asset.kind==gbfr::AssetKind::model){load_model_preview(index);return;}
-    if(asset.kind==gbfr::AssetKind::texture||asset.kind==gbfr::AssetKind::new_texture){
+    if(asset.kind==gbfr::AssetKind::texture||asset.kind==gbfr::AssetKind::ui_image||asset.kind==gbfr::AssetKind::new_texture){
         if(!asset.available||asset.input.extension()!=L".dds"){g_preview_mode=PreviewMode::none;return;}
+        g_loaded_texture_is_ui = asset.kind == gbfr::AssetKind::ui_image;
         if(g_loaded_texture==asset.input&&g_preview->texture_image()){g_preview_mode=PreviewMode::texture;return;}
         if(g_preview->load_texture_preview(asset.input)){g_loaded_texture=asset.input;g_preview_mode=PreviewMode::texture;gbfr::Log::write(gbfr::LogLevel::info,"DDS 预览已加载："+utf8(asset.input.filename().wstring()));}
         else {g_preview_mode=PreviewMode::none;gbfr::Log::write(gbfr::LogLevel::error,"DDS 预览加载失败："+utf8(asset.input.wstring()));}
@@ -454,6 +456,7 @@ bool asset_matches_function(const gbfr::WorkspaceAsset& asset,AssetFunction func
     case AssetFunction::all:return true;
     case AssetFunction::model:return asset.kind==gbfr::AssetKind::model;
     case AssetFunction::texture:return asset.kind==gbfr::AssetKind::texture||asset.kind==gbfr::AssetKind::new_texture;
+    case AssetFunction::ui_image:return asset.kind==gbfr::AssetKind::ui_image;
     case AssetFunction::material:return asset.kind==gbfr::AssetKind::material;
     case AssetFunction::cloth:return asset.kind==gbfr::AssetKind::cloth;
     }
@@ -703,7 +706,7 @@ void draw_motion_controls() {
 void return_to_start() {
     if(!g_imgui_ini.empty()) ImGui::SaveIniSettingsToDisk(g_imgui_ini.c_str());
     g_workspace.reset(); g_selected_asset.reset(); g_skeleton.bones.clear(); g_clh_files.clear(); g_clp_files.clear();g_sop_inspector.clear();
-    g_preview_mode=PreviewMode::none;g_loaded_model.reset();g_loaded_texture.clear();g_loaded_material.clear();g_loaded_sop.clear();clear_motion_state();
+    g_preview_mode=PreviewMode::none;g_loaded_model.reset();g_loaded_texture.clear();g_loaded_texture_is_ui=false;g_loaded_material.clear();g_loaded_sop.clear();clear_motion_state();
     g_imgui_ini.clear(); ImGui::GetIO().IniFilename=nullptr; g_start_layout_built=false;
     if(g_preview) g_preview->clear();
 }
@@ -780,7 +783,7 @@ void draw_editor_shell() {
         ImGui::Text("%s | 候选 %zu | 已修改 %zu | 缺失 %zu", g_workspace->character_id().c_str(),
                 g_workspace->assets().size(), g_workspace->changed_count(), g_workspace->missing_count());
         const struct {AssetFunction function;const char* label;} filters[]={
-            {AssetFunction::all,"全部"},{AssetFunction::model,"模型"},{AssetFunction::texture,"贴图"},
+            {AssetFunction::all,"全部"},{AssetFunction::model,"模型"},{AssetFunction::texture,"贴图"},{AssetFunction::ui_image,"UI-image"},
             {AssetFunction::material,"mmat"},{AssetFunction::cloth,"cloth"}};
         for(std::size_t i=0;i<std::size(filters);++i){
             const auto count=std::count_if(g_workspace->assets().begin(),g_workspace->assets().end(),[&](const auto& asset){return asset_matches_function(asset,filters[i].function);});
@@ -894,7 +897,9 @@ void draw_editor_shell() {
         const float width=static_cast<float>(g_preview->texture_width()),height=static_cast<float>(g_preview->texture_height());
         const float scale=std::min(available.x/width,available.y/height);const ImVec2 image_size{width*scale,height*scale};
         const ImVec2 cursor=ImGui::GetCursorPos();ImGui::SetCursorPos({cursor.x+(available.x-image_size.x)*.5f,cursor.y+(available.y-image_size.y)*.5f});
-        ImGui::Image(reinterpret_cast<ImTextureID>(g_preview->texture_image()),image_size,ImVec2(0,1),ImVec2(1,0));
+        const ImVec2 uv_min = g_loaded_texture_is_ui ? ImVec2(0,0) : ImVec2(0,1);
+        const ImVec2 uv_max = g_loaded_texture_is_ui ? ImVec2(1,1) : ImVec2(1,0);
+        ImGui::Image(reinterpret_cast<ImTextureID>(g_preview->texture_image()),image_size,uv_min,uv_max);
     }else{
         ImGui::TextUnformatted("当前对象没有可用预览");
     }
@@ -916,8 +921,12 @@ void draw_editor_shell() {
         ImGui::Separator();
         if (asset.kind == gbfr::AssetKind::model) {
             if (ImGui::Button("重新加载预览")) load_model_preview(*g_selected_asset,true);
-            if (ImGui::Button("从 unpack 复制到 build")) run_selected_model_action(false);
-            if (ImGui::Button("从 source 恢复 unpack")) run_selected_model_action(true);
+            if (ImGui::Button("从 unpack 复制到 build")) run_selected_asset_action(false);
+            if (ImGui::Button("从 source 恢复 unpack")) run_selected_asset_action(true);
+        } else if (asset.kind == gbfr::AssetKind::texture || asset.kind == gbfr::AssetKind::ui_image) {
+            if (ImGui::Button("重新加载预览")) preview_asset(*g_selected_asset);
+            if (ImGui::Button("封回 WTB 到 build")) run_selected_asset_action(false);
+            if (ImGui::Button("从 source 恢复 DDS")) run_selected_asset_action(true);
         } else {
             ImGui::TextUnformatted("当前 C++ 版本尚未实现此类型的构建操作。");
         }

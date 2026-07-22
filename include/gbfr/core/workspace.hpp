@@ -9,7 +9,7 @@
 namespace gbfr {
 bool natural_less_case_insensitive(std::wstring_view left, std::wstring_view right);
 
-enum class AssetKind { texture, material, cloth, model, new_texture };
+enum class AssetKind { texture, ui_image, material, cloth, model, new_texture };
 
 struct WorkspaceAsset {
     AssetKind kind{};
@@ -22,6 +22,7 @@ struct WorkspaceAsset {
     bool available{};
     bool changed{};
     std::vector<std::pair<std::filesystem::path, std::string>> monitored_inputs;
+    std::vector<std::pair<unsigned, std::filesystem::path>> wtb_slots;
 };
 
 class Workspace {
@@ -30,6 +31,8 @@ public:
     void refresh();
     void build_model(std::size_t index);
     void restore_model(std::size_t index);
+    void build_asset(std::size_t index);
+    void restore_asset(std::size_t index);
     const std::filesystem::path& root() const noexcept { return root_; }
     const std::string& character_id() const noexcept { return character_id_; }
     const std::vector<WorkspaceAsset>& assets() const noexcept { return assets_; }

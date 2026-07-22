@@ -37,6 +37,7 @@ $H_MESH    = -join ([char]0x7F51,[char]0x683C,[char]0x6D41,[char]0x5F0F,[char]0x
 $H_BEHAV   = -join ([char]0x884C,[char]0x4E3A,[char]0x5C42)
 $H_CLOTH   = -join ([char]0x5E03,[char]0x6599,[char]0x7269,[char]0x7406,[char]0x5C42)
 $H_TEX     = -join ([char]0x8D34,[char]0x56FE,[char]0x6587,[char]0x4EF6,[char]0x5C42)
+$H_UI      = "UI-image"
 $H_SUMMARY = -join ([char]0x8D44,[char]0x6E90,[char]0x603B,[char]0x89C8)
 
 
@@ -285,6 +286,7 @@ function Copy-DiscoveredSources {
 
 function Initialize-WorkspaceArtifacts {
     $textures = [System.Collections.Generic.List[PSCustomObject]]::new()
+    $uiImages = [System.Collections.Generic.List[PSCustomObject]]::new()
     $materials = [System.Collections.Generic.List[PSCustomObject]]::new()
     $clothFiles = [System.Collections.Generic.List[PSCustomObject]]::new()
     $modelFiles = [System.Collections.Generic.List[PSCustomObject]]::new()
@@ -319,7 +321,7 @@ function Initialize-WorkspaceArtifacts {
             } catch {
                 $errors.Add("model: $relativeDataPath -- $($_.Exception.Message)")
             }
-        } elseif ($extension -ieq ".texture") {
+        } elseif ($extension -ieq ".texture" -or ($extension -ieq ".wtb" -and $relativeDataPath -match '^ui[\\/]')) {
             try {
                 $relativeDir = [IO.Path]::GetDirectoryName($relativeDataPath)
                 $unpackDir = Join-Path (Join-Path $unpackRoot "data") $relativeDir
@@ -331,14 +333,28 @@ function Initialize-WorkspaceArtifacts {
                         BaselineSha256 = $_.Sha256
                     }
                 })
-                $textures.Add([PSCustomObject]@{
+                $record = [PSCustomObject]@{
                     Source = $sourceRelative
                     Output = ConvertTo-WorkspacePath (Join-Path "build\data" $relativeDataPath)
                     SourceSha256 = Get-WorkspaceSha256 $sourceCopy
                     Slots = $slotRecords
-                })
+                }
+                if ($extension -ieq ".wtb") {
+                    $category = switch -Regex ($relativeDataPath.Replace('\','/')) {
+                        '/chara_plprm/' { '状态头像'; break }
+                        '/chara_voice/' { '对话头像'; break }
+                        '/image_chain/' { '奥义链图'; break }
+                        '/image_chara/' { '角色立绘'; break }
+                        '/image_chrcolor/' { '配色预览'; break }
+                        default { '角色 UI'; break }
+                    }
+                    $record | Add-Member -NotePropertyName Category -NotePropertyValue $category
+                    $uiImages.Add($record)
+                } else {
+                    $textures.Add($record)
+                }
             } catch {
-                $errors.Add("texture: $relativeDataPath -- $($_.Exception.Message)")
+                $errors.Add("WTB: $relativeDataPath -- $($_.Exception.Message)")
             }
         } elseif ($extension -ieq ".mmat") {
             try {
@@ -420,6 +436,7 @@ function Initialize-WorkspaceArtifacts {
         UnpackRoot = "unpack"
         BuildRoot = "build"
         Textures = @($textures)
+        UIImages = @($uiImages)
         Materials = @($materials)
         ClothFiles = @($clothFiles)
         ModelFiles = @($modelFiles)
@@ -431,6 +448,7 @@ function Initialize-WorkspaceArtifacts {
 
     return [PSCustomObject]@{
         TextureCount = $textures.Count
+        UIImageCount = $uiImages.Count
         MaterialCount = $materials.Count
         ClothCount = $clothFiles.Count
         ModelCount = $modelFiles.Count
@@ -503,9 +521,14 @@ function Expand-GraniteTextures {
         $decodeErrors.Add("Granite data directory not found: $graniteRoot")
     } else {
         try {
-            foreach ($res in @("2k", "4k")) {
-                $gtsRoot = Join-Path $graniteRoot "$res\gts"
-                if (-not (Test-Path -LiteralPath $gtsRoot)) {
+              foreach ($res in @("2k", "4k")) {
+                  # GBFRDataTools versions use either data/granite/<res>/gts or
+                  # data/granite/<res> directly. Keep both layouts readable.
+                  $gtsRoot = Join-Path $graniteRoot "$res\gts"
+                  if (-not (Test-Path -LiteralPath $gtsRoot)) {
+                      $gtsRoot = Join-Path $graniteRoot $res
+                  }
+                  if (-not (Test-Path -LiteralPath $gtsRoot)) {
                     foreach ($reference in $references) {
                         $missingGroups.Add([PSCustomObject]@{
                             Hash = $reference.Hash; Resolution = $res; Reason = "gts directory not found"
@@ -515,12 +538,16 @@ function Expand-GraniteTextures {
                     continue
                 }
 
-                Write-Host "  [scan] data/granite/$res/gts" -ForegroundColor Gray
+                Write-Host "  [scan] $($gtsRoot.Substring($dataRootPrefix.Length).Replace('\', '/'))" -ForegroundColor Gray
                 $gtpIndex = @{}
-                foreach ($gtp in (Get-ChildItem -LiteralPath $gtsRoot -Recurse -Filter "*.gtp" -File -ErrorAction SilentlyContinue | Sort-Object FullName)) {
-                    if ($gtp.BaseName -match "^\d+_([0-9a-f]{64})$") {
-                        $hash = $Matches[1].ToLowerInvariant()
-                        if (-not $gtpIndex.ContainsKey($hash)) { $gtpIndex[$hash] = $gtp }
+                $gtsFiles = @(Get-ChildItem -LiteralPath $gtsRoot -Recurse -Filter "*.gts" -File -ErrorAction SilentlyContinue | Sort-Object FullName)
+                foreach ($gts in $gtsFiles) {
+                    foreach ($reference in $references) {
+                        if ($gtpIndex.ContainsKey($reference.Hash)) { continue }
+                        $candidate = Join-Path $gts.DirectoryName "$($gts.BaseName)_$($reference.Hash).gtp"
+                        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+                            $gtpIndex[$reference.Hash] = Get-Item -LiteralPath $candidate
+                        }
                     }
                 }
 
@@ -550,7 +577,17 @@ function Expand-GraniteTextures {
                     $tempDir = Join-Path $tempRoot "$res\$($reference.Hash)"
                     New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
                     try {
-                        $toolOutput = @(& $graniteExe extract -t $gtsPath -f $reference.Hash -o $tempDir -l -1 2>&1)
+                        $toolOutput = @()
+                        for ($attempt = 1; $attempt -le 3; $attempt++) {
+                            $commandLine = '"' + $graniteExe + '" extract -t "' + $gtsPath + '" -f ' + $reference.Hash + ' -o "' + $tempDir + '" -l -1'
+                            $toolOutput = @(& $env:ComSpec /d /s /c $commandLine 2>&1)
+                            if (@(Get-ChildItem -LiteralPath $tempDir -Filter "*.tga" -File -ErrorAction SilentlyContinue).Count -gt 0) { break }
+                            if ($attempt -lt 3 -and (($toolOutput -join ' ') -match 'denied|占用|拒绝访问')) {
+                                Start-Sleep -Milliseconds (250 * $attempt)
+                            } else {
+                                break
+                            }
+                        }
                         $tgaFiles = @(Get-ChildItem -LiteralPath $tempDir -Filter "*.tga" -File -ErrorAction SilentlyContinue | Where-Object {
                             $_.BaseName -match "_(albd|msk1|msk2|nrml|conj|iris|eyeh)$"
                         })
@@ -970,6 +1007,50 @@ L ""
 }
 
 # ================================================================
+# Character UI Images
+# ================================================================
+$uiRoot = Join-Path $dataRoot "ui"
+$uiIdentityPattern = (@($numId, $charId) | Where-Object { $_ } | Select-Object -Unique | ForEach-Object { [regex]::Escape($_) }) -join '|'
+$uiFilePattern = "^(?:cmn_chrprm_(?:$uiIdentityPattern)_\d+|cmn_chrvo_(?:$uiIdentityPattern)_\d+|cmn_imgchain_(?:$uiIdentityPattern)(?:_glow)?|cmn_imgchr_(?:$uiIdentityPattern)(?:_glow)?|cmn_imgcol_(?:$uiIdentityPattern)_c\d+)\.wtb$"
+L ""
+L "---"
+L ""
+L "## $H_UI"
+L ""
+L "角色专属 UI WTB；``ui/fhd`` 是 1080p 资源，移除 ``fhd`` 的同路径是 4K 资源。"
+L ""
+
+$uiFiles = @()
+if (Test-Path -LiteralPath $uiRoot -PathType Container) {
+    $uiFiles = @(Get-ChildItem -LiteralPath $uiRoot -Recurse -Filter "*.wtb" -File | Where-Object {
+        $_.Name -match $uiFilePattern -and
+        $_.FullName.Substring($dataRootPrefix.Length).Replace('\','/') -match '^ui/(?:fhd/)?layouts/common/(?:chara_plprm|chara_voice|image_chain|image_chara|image_chrcolor)/noatlastextures/'
+    } | Sort-Object FullName)
+}
+if ($uiFiles.Count -eq 0) {
+    L "> 未找到与 ``$charId`` 匹配的角色 UI WTB。"
+} else {
+    L "| 分辨率 | 类别 | 文件 | 大小 |"
+    L "|---|---|---|---:|"
+    foreach ($uiFile in $uiFiles) {
+        Add-SourceFile $uiFile
+        $relative = $uiFile.FullName.Substring($dataRootPrefix.Length).Replace('\','/')
+        $resolution = if ($relative -match '^ui/fhd/') { '1080p' } else { '4K' }
+        $category = switch -Regex ($relative) {
+            '/chara_plprm/' { '状态头像'; break }
+            '/chara_voice/' { '对话头像'; break }
+            '/image_chain/' { '奥义链图'; break }
+            '/image_chara/' { '角色立绘'; break }
+            '/image_chrcolor/' { '配色预览'; break }
+            default { '角色 UI'; break }
+        }
+        L "| $resolution | $category | ``$relative`` | $(Format-FileSize $uiFile.Length) |"
+    }
+    L ""
+    L "> 共 $($uiFiles.Count) 个角色专属 UI WTB；解码后的 DDS 位于 ``unpack/data/ui``，编辑器中归类为 ``UI-image``。"
+}
+
+# ================================================================
 # Texture Files
 # ================================================================
 $texRoot = Join-Path $dataRoot "texture"
@@ -1090,6 +1171,7 @@ L "| **$($S.workspace_path)** | ``$outDir`` |"
 L "| **$($S.copy_count)** | $($copyResult.Copied) |"
 L "| **$($S.copy_total_size)** | $(Format-FileSize $copyResult.TotalBytes) |"
 L "| **$($S.decoded_textures)** | $($artifactResult.TextureCount) |"
+L "| **UI-image WTB** | $($artifactResult.UIImageCount) |"
 L "| **$($S.decoded_granite)** | $($graniteResult.FileCount) |"
 L "| **$($S.decoded_materials)** | $($artifactResult.MaterialCount) |"
 L "| **$($S.decoded_cloth)** | $($artifactResult.ClothCount) |"
@@ -1161,7 +1243,7 @@ Write-Host "  $sourceRoot" -ForegroundColor Green
 if ($copyResult.Failed.Count -gt 0) {
     Write-Host "$($S.copy_failed): $($copyResult.Failed.Count)" -ForegroundColor Yellow
 }
-Write-Host "$($S.decode_done): texture $($artifactResult.TextureCount), mmat $($artifactResult.MaterialCount), cloth $($artifactResult.ClothCount), model $($artifactResult.ModelCount)" -ForegroundColor Green
+Write-Host "$($S.decode_done): texture $($artifactResult.TextureCount), UI-image $($artifactResult.UIImageCount), mmat $($artifactResult.MaterialCount), cloth $($artifactResult.ClothCount), model $($artifactResult.ModelCount)" -ForegroundColor Green
 Write-Host "  $unpackRoot" -ForegroundColor Green
 Write-Host "$($S.granite_done): $($graniteResult.FileCount) DDS, $($graniteResult.MissingCount) $($S.granite_missing)" -ForegroundColor Green
 if ($artifactResult.ErrorCount -gt 0) {

@@ -53,12 +53,48 @@ int main() {
     if (workspace.changed_count() != 0) return 5;
     fs::remove_all(root);
 
+    const fs::path wtb_root = test_temp / L"wtb_workspace";
+    fs::create_directories(wtb_root / L"source");
+    fs::create_directories(wtb_root / L"unpack");
+    auto put_u32 = [](std::vector<unsigned char>& bytes, std::size_t offset, std::uint32_t value) {
+        for (unsigned shift = 0; shift < 32; shift += 8) bytes[offset + shift / 8] = static_cast<unsigned char>((value >> shift) & 0xff);
+    };
+    std::vector<unsigned char> wtb(0x1000, 0);
+    wtb[0] = 'W'; wtb[1] = 'T'; wtb[2] = 'B';
+    put_u32(wtb, 4, 3); put_u32(wtb, 8, 1); put_u32(wtb, 12, 0x20); put_u32(wtb, 16, 0x40); put_u32(wtb, 20, 0x60); put_u32(wtb, 24, 0x80);
+    const std::vector<unsigned char> baseline_dds{'D','D','S',' ',1,2,3,4};
+    put_u32(wtb, 0x20, 0x1000); put_u32(wtb, 0x40, static_cast<std::uint32_t>(baseline_dds.size()));
+    wtb.insert(wtb.end(), baseline_dds.begin(), baseline_dds.end());
+    std::ofstream(wtb_root / L"source/ui.wtb", std::ios::binary).write(reinterpret_cast<const char*>(wtb.data()), static_cast<std::streamsize>(wtb.size()));
+    std::ofstream(wtb_root / L"unpack/ui_0.dds", std::ios::binary).write(reinterpret_cast<const char*>(baseline_dds.data()), static_cast<std::streamsize>(baseline_dds.size()));
+    const auto wtb_hash = gbfr::sha256_file(wtb_root / L"source/ui.wtb");
+    const auto dds_hash = gbfr::sha256_file(wtb_root / L"unpack/ui_0.dds");
+    {
+        std::ofstream json(wtb_root / L"workspace.json");
+        json << "{\"Version\":1,\"CharacterId\":\"ui\",\"UIImages\":[{"
+                "\"Source\":\"source/ui.wtb\",\"SourceSha256\":\"" << wtb_hash << "\","
+                "\"Output\":\"build/ui.wtb\",\"Category\":\"角色立绘\",\"Slots\":[{"
+                "\"Index\":0,\"Path\":\"unpack/ui_0.dds\",\"BaselineSha256\":\"" << dds_hash << "\"}]}]}";
+    }
+    auto wtb_workspace = gbfr::Workspace::load(wtb_root / L"workspace.json");
+    if (wtb_workspace.assets().size() != 1 || wtb_workspace.assets()[0].kind != gbfr::AssetKind::ui_image) return 72;
+    std::ofstream(wtb_root / L"unpack/ui_0.dds", std::ios::binary | std::ios::trunc) << "DDS edited payload";
+    wtb_workspace.refresh();
+    if (!wtb_workspace.assets()[0].changed) return 73;
+    wtb_workspace.build_asset(0);
+    if (!fs::is_regular_file(wtb_root / L"build/ui.wtb")) return 74;
+    if (gbfr::sha256_file(wtb_root / L"build/ui.wtb") == wtb_hash) return 76;
+    wtb_workspace.restore_asset(0);
+    if (gbfr::sha256_file(wtb_root / L"unpack/ui_0.dds") != dds_hash) return 75;
+    fs::remove_all(wtb_root);
+
     const fs::path integration = fs::path(GBFR_ROOT_DIR) / L"explore_output/workspace.json";
     if (fs::is_regular_file(integration)) {
         const auto pl1400 = gbfr::Workspace::load(integration);
         nlohmann::json document;
         std::ifstream(integration) >> document;
         const auto expected_assets=document.value("Textures",nlohmann::json::array()).size()+
+            document.value("UIImages",nlohmann::json::array()).size()+
             document.value("Materials",nlohmann::json::array()).size()+
             document.value("ClothFiles",nlohmann::json::array()).size()+
             document.value("ModelFiles",nlohmann::json::array()).size()+

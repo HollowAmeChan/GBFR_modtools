@@ -20,7 +20,7 @@ build.bat
 2. 或直接选择已有工作区的 `workspace.json`。
 3. 只编辑 `unpack/data/`；`source/data/` 是恢复基线，`build/data/` 是 Mod 输出。
 
-Blender 插件导出的 `.minfo/.skeleton/.mmesh` 也应覆盖到 `unpack/data/` 的对应原路径。编辑器预览 `unpack` 中的模型、材质、DDS 与 cloth 中间态；MOT 动画和 SOP 约束仍从只读的 `source` 加载。确认结果后，再由 Inspector 将模型文件从 `unpack` 复制到 `build`。预览器不会读取 `build`。
+Blender 插件导出的 `.minfo/.skeleton/.mmesh` 也应覆盖到 `unpack/data/` 的对应原路径。编辑器预览 `unpack` 中的模型、材质、DDS、角色 `UI-image` 与 cloth 中间态；MOT 动画和 SOP 约束仍从只读的 `source` 加载。确认结果后，在 Inspector 中可将模型和 WTB/UI-image 从 `unpack` 封回 `build`。预览器不会读取 `build`。
 
 ## 文档
 
@@ -32,4 +32,4 @@ Blender 插件导出的 `.minfo/.skeleton/.mmesh` 也应覆盖到 `unpack/data/`
 
 ## 当前边界
 
-C++ 架构已支持工作区生成与检测、模型文件恢复/写入 `build`、DDS/网格/骨架/碰撞预览、MOT 动画、SOP deform 和 cloth 检查编辑。WTB `.texture`、`.mmat` 和 cloth BXM 的原生编码尚未实现，当前版本不再携带旧 PowerShell 构建器。
+C++ 架构已支持工作区生成与检测、模型文件和 WTB/UI-image 恢复/写入 `build`、DDS/网格/骨架/碰撞预览、MOT 动画、SOP deform 和 cloth 检查编辑。`.mmat` 和 cloth BXM 的原生编码尚未实现，当前版本不再携带旧 PowerShell 构建器。

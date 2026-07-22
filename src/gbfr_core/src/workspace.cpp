@@ -11,6 +11,7 @@
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
+#include <cstdint>
 
 namespace fs = std::filesystem;
 
@@ -35,6 +36,94 @@ void copy_atomic(const fs::path& source, const fs::path& destination) {
     if (ec) {
         fs::remove(temporary);
         throw std::runtime_error("Atomic replace failed: " + ec.message());
+    }
+}
+
+std::uint32_t read_u32(const std::vector<unsigned char>& bytes, std::size_t offset) {
+    if (offset + 4 > bytes.size()) throw std::runtime_error("WTB table extends beyond file");
+    return static_cast<std::uint32_t>(bytes[offset]) |
+        (static_cast<std::uint32_t>(bytes[offset + 1]) << 8) |
+        (static_cast<std::uint32_t>(bytes[offset + 2]) << 16) |
+        (static_cast<std::uint32_t>(bytes[offset + 3]) << 24);
+}
+
+void write_u32(std::vector<unsigned char>& bytes, std::size_t offset, std::uint32_t value) {
+    if (offset + 4 > bytes.size()) throw std::runtime_error("WTB table extends beyond file");
+    for (unsigned shift = 0; shift < 32; shift += 8) bytes[offset + shift / 8] = static_cast<unsigned char>((value >> shift) & 0xff);
+}
+
+std::vector<unsigned char> read_bytes(const fs::path& path) {
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream) throw std::runtime_error("Cannot open WTB/DDS file: " + path.string());
+    return std::vector<unsigned char>(std::istreambuf_iterator<char>(stream), {});
+}
+
+void write_wtb_from_slots(const fs::path& source, const fs::path& destination,
+                          const std::vector<std::pair<unsigned, fs::path>>& slots) {
+    auto template_bytes = read_bytes(source);
+    if (template_bytes.size() < 32 || template_bytes[0] != 'W' || template_bytes[1] != 'T' || template_bytes[2] != 'B' || template_bytes[3] != 0)
+        throw std::runtime_error("Not a supported WTB source: " + source.string());
+    const auto count = read_u32(template_bytes, 4);
+    const auto offset_table = read_u32(template_bytes, 12);
+    const auto size_table = read_u32(template_bytes, 16);
+    if (!count || count > 4096 || offset_table + count * 4 > template_bytes.size() || size_table + count * 4 > template_bytes.size())
+        throw std::runtime_error("Invalid WTB tables: " + source.string());
+
+    std::vector<std::vector<unsigned char>> payloads(count);
+    std::uint32_t first_offset = 0;
+    for (std::uint32_t i = 0; i < count; ++i) {
+        const auto offset = read_u32(template_bytes, offset_table + i * 4);
+        const auto size = read_u32(template_bytes, size_table + i * 4);
+        if (offset && size && (!first_offset || offset < first_offset)) first_offset = offset;
+    }
+    if (!first_offset) first_offset = 0x1000;
+    for (const auto& [index, path] : slots) {
+        if (index >= count) throw std::runtime_error("WTB slot index is out of range");
+        payloads[index] = read_bytes(path);
+        if (payloads[index].size() < 4 || payloads[index][0] != 'D' || payloads[index][1] != 'D' || payloads[index][2] != 'S' || payloads[index][3] != ' ')
+            throw std::runtime_error("WTB slot is not a DDS payload: " + path.string());
+    }
+
+    std::vector<unsigned char> output(template_bytes.begin(), template_bytes.begin() + std::min<std::size_t>(first_offset, template_bytes.size()));
+    output.resize(first_offset, 0);
+    for (std::uint32_t i = 0; i < count; ++i) {
+        if (payloads[i].empty()) {
+            write_u32(output, offset_table + i * 4, 0);
+            write_u32(output, size_table + i * 4, 0);
+            continue;
+        }
+        const auto aligned = (output.size() + 0xfff) & ~std::size_t(0xfff);
+        output.resize(aligned, 0);
+        write_u32(output, offset_table + i * 4, static_cast<std::uint32_t>(output.size()));
+        write_u32(output, size_table + i * 4, static_cast<std::uint32_t>(payloads[i].size()));
+        output.insert(output.end(), payloads[i].begin(), payloads[i].end());
+    }
+    fs::path temporary = destination;
+    temporary += L".tmp";
+    fs::create_directories(destination.parent_path());
+    std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
+    if (!stream) throw std::runtime_error("Cannot create WTB output: " + destination.string());
+    stream.write(reinterpret_cast<const char*>(output.data()), static_cast<std::streamsize>(output.size()));
+    stream.close();
+    std::error_code ec;
+    fs::remove(destination, ec);
+    fs::rename(temporary, destination, ec);
+    if (ec) { fs::remove(temporary); throw std::runtime_error("Atomic WTB replace failed: " + ec.message()); }
+}
+
+void restore_wtb_slots(const fs::path& source, const std::vector<std::pair<unsigned, fs::path>>& slots) {
+    const auto bytes = read_bytes(source);
+    if (bytes.size() < 32 || bytes[0] != 'W' || bytes[1] != 'T' || bytes[2] != 'B' || bytes[3] != 0) throw std::runtime_error("Not a supported WTB source");
+    const auto count = read_u32(bytes, 4), offset_table = read_u32(bytes, 12), size_table = read_u32(bytes, 16);
+    if (!count || count > 4096 || offset_table + count * 4 > bytes.size() || size_table + count * 4 > bytes.size()) throw std::runtime_error("Invalid WTB tables");
+    for (const auto& [index, path] : slots) {
+        if (index >= count) throw std::runtime_error("WTB slot index is out of range");
+        const auto offset = read_u32(bytes, offset_table + index * 4), size = read_u32(bytes, size_table + index * 4);
+        if (!offset || !size || static_cast<std::size_t>(offset) + size > bytes.size()) throw std::runtime_error("Invalid WTB slot payload");
+        fs::create_directories(path.parent_path());
+        std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+        if (!stream) throw std::runtime_error("Cannot restore WTB slot: " + path.string());
+        stream.write(reinterpret_cast<const char*>(bytes.data() + offset), size);
     }
 }
 }
@@ -121,12 +210,19 @@ Workspace Workspace::load(const fs::path& selected) {
         asset.monitored_inputs.emplace_back(asset.input, baseline);
         result.assets_.push_back(std::move(asset));
     };
-    for (const auto& record : document.value("Textures", json::array())) {
+    auto load_wtb_records = [&](const char* key, AssetKind kind, const char* default_subtype) {
+    for (const auto& record : document.value(key, json::array())) {
         const auto slots=record.value("Slots",json::array()); if(slots.empty()) continue;
-        const auto& first=slots.front(); append(AssetKind::texture,"WTB / "+std::to_string(slots.size())+" 槽",required_string(first,"Path"),required_string(record,"Source"),required_string(record,"Output"),required_string(first,"BaselineSha256"),record.value("SourceSha256",""));
+        const auto& first=slots.front(); append(kind,record.value("Category", std::string(default_subtype)) + " / " + std::to_string(slots.size()) + " 槽",required_string(first,"Path"),required_string(record,"Source"),required_string(record,"Output"),required_string(first,"BaselineSha256"),record.value("SourceSha256",""));
         auto& asset=result.assets_.back();
-        for(std::size_t i=1;i<slots.size();++i) asset.monitored_inputs.emplace_back(result.resolve(required_string(slots[i],"Path")),required_string(slots[i],"BaselineSha256"));
-    }
+        for(std::size_t slot_index=0;slot_index<slots.size();++slot_index) {
+            const auto& slot=slots[slot_index];
+            asset.wtb_slots.emplace_back(slot.value("Index",0u),result.resolve(required_string(slot,"Path")));
+            if(slot_index>0) asset.monitored_inputs.emplace_back(result.resolve(required_string(slot,"Path")),required_string(slot,"BaselineSha256"));
+        }
+    }};
+    load_wtb_records("Textures", AssetKind::texture, "WTB");
+    load_wtb_records("UIImages", AssetKind::ui_image, "UI-image");
     for (const auto& record : document.value("Materials", json::array()))
         append(AssetKind::material, "mmat", required_string(record, "Json"), required_string(record, "Source"), required_string(record, "Output"), required_string(record, "BaselineSha256"), record.value("SourceSha256", ""));
     for (const auto& record : document.value("ClothFiles", json::array()))
@@ -171,6 +267,15 @@ void Workspace::build_model(std::size_t index) {
     copy_atomic(asset.input, asset.output);
 }
 
+void Workspace::build_asset(std::size_t index) {
+    if (index >= assets_.size()) throw std::runtime_error("Selected asset is invalid");
+    if (assets_[index].kind == AssetKind::model) { build_model(index); return; }
+    auto& asset = assets_[index];
+    if (asset.wtb_slots.empty() || asset.source.empty()) throw std::runtime_error("Selected asset has no packable WTB source");
+    if (!fs::is_regular_file(asset.source) || sha256_file(asset.source) != asset.source_sha256) throw std::runtime_error("WTB source baseline is missing or changed");
+    write_wtb_from_slots(asset.source, asset.output, asset.wtb_slots);
+}
+
 void Workspace::restore_model(std::size_t index) {
     if (index >= assets_.size() || assets_[index].kind != AssetKind::model) throw std::runtime_error("Selected asset is not a native model file");
     auto& asset = assets_[index];
@@ -180,11 +285,22 @@ void Workspace::restore_model(std::size_t index) {
     refresh();
 }
 
+void Workspace::restore_asset(std::size_t index) {
+    if (index >= assets_.size()) throw std::runtime_error("Selected asset is invalid");
+    if (assets_[index].kind == AssetKind::model) { restore_model(index); return; }
+    auto& asset = assets_[index];
+    if (asset.wtb_slots.empty() || asset.source.empty()) throw std::runtime_error("Selected asset has no restorable WTB source");
+    if (!fs::is_regular_file(asset.source) || sha256_file(asset.source) != asset.source_sha256) throw std::runtime_error("WTB source baseline is missing or changed");
+    restore_wtb_slots(asset.source, asset.wtb_slots);
+    refresh();
+}
+
 std::size_t Workspace::missing_count() const noexcept { return std::count_if(assets_.begin(), assets_.end(), [](const auto& a) { return !a.available; }); }
 std::size_t Workspace::changed_count() const noexcept { return std::count_if(assets_.begin(), assets_.end(), [](const auto& a) { return a.changed; }); }
 const char* asset_kind_name(AssetKind kind) noexcept {
     switch (kind) {
     case AssetKind::texture: return "贴图槽";
+    case AssetKind::ui_image: return "UI-image";
     case AssetKind::material: return "mmat";
     case AssetKind::cloth: return "cloth";
     case AssetKind::model: return "模型";
