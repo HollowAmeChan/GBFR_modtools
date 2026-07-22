@@ -33,31 +33,37 @@ data/model/pl/pl1400/pl1400.minfo
 
 注意：再次从 minfo 生成会重建整个所选输出目录。需要同时保留多个角色或 Mod 方案时，应分别选择独立目录；不要把 Blender 工程或其他无关文件放进会被重建的工作区目录。
 
-## 2. 准备 Blender 导入文件
+## 2. 从工作区导入 Blender
 
-游戏的正式网格位于：
-
-```text
-data/model_streaming/lod0/pl1400.mmesh
-```
-
-而模型描述和骨架位于：
+在 Blender 插件中选择工作区 `unpack` 或 `source` 中已登记的 `.minfo`：
 
 ```text
-data/model/pl/pl1400/pl1400.minfo
-data/model/pl/pl1400/pl1400.skeleton
+unpack/data/model/pl/pl1400/pl1400.minfo
 ```
 
-当前 Blender 插件导入时要求 `.mmesh` 与 `.minfo` 放在同一目录，因此需要临时复制：
+插件会通过同级 `workspace.json` 自动找到：
 
 ```text
-工作目录/
-  pl1400.minfo
-  pl1400.mmesh       <- 从 model_streaming/lod0 临时复制
-  pl1400.skeleton
+unpack/data/model/pl/pl1400/pl1400.skeleton
+unpack/data/model_streaming/lod0/pl1400.mmesh
+unpack/data/model_streaming/lod1/pl1400.mmesh
+unpack/data/model_streaming/lod2/pl1400.mmesh
+unpack/data/model_streaming/lod3/pl1400.mmesh
 ```
 
-这份同目录 `.mmesh` 只是 Blender 导入辅助副本，不是游戏原始目录结构。角色探索器会静默忽略此类副本，正式网格始终以 `model_streaming/lod*` 为准。
+实际层级取决于原模型，存在 `shadowlod#` 时也会一起导入。Blender 中的结构为：
+
+```text
+pl1400                 <- 模型根对象；有骨架时就是 Armature
+  lod0                 <- LOD 空对象
+    body               <- 一个或多个 Mesh
+    equipment
+  lod1
+    body
+    equipment
+```
+
+不要再把 LOD0 `.mmesh` 手工复制到 `.minfo` 隔壁。工作区只认 `workspace.json/ModelFiles` 登记的正式路径；每个 minfo 会建立独立 Collection，会话之间的材质、动画、Cloth 和导出目标互不共享。
 
 ## 3. Blender 编辑注意事项
 
@@ -70,17 +76,19 @@ data/model/pl/pl1400/pl1400.skeleton
 
 ## 4. 插件导出结果
 
-在当前 minfo 会话中点击“导出到工作区”，然后选择目标工作区的 `workspace.json`。导出界面会在确认前显示当前模型 ID、即将覆盖的三条 `unpack` 路径、调试 JSON 路径，并明确提示不会写入 `build`。
+在当前 minfo 会话中点击“导出到工作区”，然后选择目标工作区的 `workspace.json`。导出界面会显示当前模型 ID，以及将覆盖的 `.minfo`、可选 `.skeleton` 和全部 LOD `.mmesh`；它不会写入 `build`。
 
 ```text
 workspace.json
 unpack/data/model/pl/pl1400/pl1400.minfo
 unpack/data/model/pl/pl1400/pl1400.skeleton
 unpack/data/model_streaming/lod0/pl1400.mmesh
-.gbfr/exports/pl1400.json
+unpack/data/model_streaming/lod1/pl1400.mmesh
+unpack/data/model_streaming/lod2/pl1400.mmesh
+unpack/data/model_streaming/lod3/pl1400.mmesh
 ```
 
-插件按当前会话的模型 ID 查询 `workspace.json/ModelFiles`，使用现有 `unpack` minfo（缺失时回退 `source`）作为描述模板，在临时目录完成全部转换。只有 `.minfo/.skeleton/.mmesh/.json` 都生成成功后才替换目标，因此不会再创建或要求用户管理 `_Exported_MInfo`。所选工作区必须登记同一模型 ID，且三个输出目标必须位于该工作区 `unpack` 内，否则导出会拒绝执行。
+插件复制当前会话的完整模型层级到临时场景，由 v2 FlatBuffers 构建器直接生成二进制。只有全部登记输出都成功后才原子替换目标，因此不会破坏当前 Blender 场景，也不会创建 `_Exported_MInfo`、调试 JSON 或调用 `flatc.exe`。所选工作区必须登记同一模型 ID，且所有输出都必须位于该工作区 `unpack` 内。
 
 各文件职责：
 
@@ -89,54 +97,21 @@ unpack/data/model_streaming/lod0/pl1400.mmesh
 | `.mmesh` | 顶点、索引、权重等网格数据 | 是 |
 | `.minfo` | LOD、chunk、子网格、材质索引、骨骼权重索引和包围盒等模型描述 | 是 |
 | `.skeleton` | 骨骼层级、名称与静止姿态 | 是 |
-| `.json` | 导出后 `.minfo` 的人类可读调试信息合集 | 否 |
-
-### 导出 JSON 的实际作用
-
-`pl1400.json` 不是游戏解包资源，也与 `.mmat` 封包无关。它是 Blender 插件生成和重建 `.minfo` 时使用的人类可读中间态，导出后保存在工作区 `.gbfr/exports/pl1400.json` 方便检查。
-
-它主要包含：
-
-- `lods[].mesh_buffers`：`.mmesh` 各缓冲区偏移和大小。
-- `lods[].chunks`：索引范围、子网格 ID 和材质 ID。
-- `vertex_count` / `poly_count_x3`：顶点和三角形索引数量。
-- `sub_meshes`：子网格名称与包围盒。
-- `materials`：`.minfo` 中的材质名称哈希和标志。
-- `bones_to_weight_indices`：骨骼到权重索引的映射。
-- `deform_bone_boundary_box`：变形骨骼包围盒。
-- 其他从原始 `.minfo` 保留下来的模型参数。
-
-插件内部流程可以概括为：
-
-```text
-Blender 网格
-  -> 生成新的 mmesh 与网格布局 JSON
-  -> 从 workspace.json 定位当前模型的 minfo 模板
-  -> flatc 将原始 minfo 解码为 JSON
-  -> 用 Blender 导出的网格布局替换原 minfo 对应字段
-  -> flatc 将合并后的 JSON 编码为新 minfo
-  -> 原子替换 unpack 中登记的三个二进制文件
-  -> 将最终 JSON 保存到 .gbfr/exports
-```
-
-因此：
-
-- 游戏最终只需要二进制 `.minfo`，不需要这个 JSON。
-- JSON 可以用于检查 chunk、材质索引、子网格和骨骼映射是否合理。
-- 删除 JSON 不影响最终 Mod，但保留它有助于以后排错。
-- `.mmat` 是独立材质配置，负责着色器参数和贴图引用，不会被这个 JSON 自动修改。
 
 ## 5. 最终 Mod 路径
 
-插件导出完成后，三个二进制文件已经位于当前工作区的 `unpack` 对应路径，不需要再次复制：
+插件导出完成后，全部模型二进制已位于当前工作区的 `unpack` 对应路径，不需要再次复制：
 
 ```text
 unpack/data/model/pl/pl1400/pl1400.minfo
 unpack/data/model/pl/pl1400/pl1400.skeleton
 unpack/data/model_streaming/lod0/pl1400.mmesh
+unpack/data/model_streaming/lod1/pl1400.mmesh
+unpack/data/model_streaming/lod2/pl1400.mmesh
+unpack/data/model_streaming/lod3/pl1400.mmesh
 ```
 
-返回编辑器点击“刷新”，三项会按 SHA-256 标记为已修改，预览器也会从 `unpack` 重新加载它们。选中每个模型项后，在 Inspector 使用“从 unpack 复制到 build”；需要撤销时使用“从 source 恢复 unpack”。`build` 是最终 Mod 输出，不参与预览。
+返回编辑器点击“刷新”，各项会按 SHA-256 标记为已修改；预览器当前固定显示 LOD0。选中需要发布的模型项后，在 Inspector 使用“从 unpack 复制到 build”；需要撤销时使用“从 source 恢复 unpack”。`build` 是最终 Mod 输出，不参与预览。
 
 ```text
 Mod目录/
@@ -149,16 +124,15 @@ Mod目录/
     model_streaming/
       lod0/
         pl1400.mmesh
+      lod1/
+        pl1400.mmesh
+      lod2/
+        pl1400.mmesh
+      lod3/
+        pl1400.mmesh
 ```
 
-不要将下列文件放进最终 Mod：
-
-```text
-.gbfr/exports/pl1400.json
-data/model/pl/pl1400/pl1400.mmesh
-```
-
-第二个路径中的 `.mmesh` 只是 Blender 同目录导入副本；正式 Mod 网格应放在 `data/model_streaming/lod0/`。
+不要把 `.mmesh` 放到 `data/model/...`。正式网格必须保持 `workspace.json` 登记的 `data/model_streaming/lod#` 或 `shadowlod#` 路径。
 
 ## 6. 材质与贴图何时需要一起修改
 
@@ -173,15 +147,14 @@ data/model/pl/pl1400/pl1400.mmesh
 
 `.minfo` JSON 中的 `materials[]` 只是模型侧的材质哈希和索引信息，不等同于完整 `.mmat` 内容。
 
-> 当前 C++ 版本尚未实现 WTB `.texture` 和 mmat JSON 的反向编码。因此涉及贴图或材质的 Mod 目前不能只依靠本仓库生成完整输出；编辑器会保留中间态供预览，但不会假装已构建成功。
+贴图、UI-image 与 mmat 使用编辑器各自的构建操作写入 `build`；模型导出不会自动改写 `.mmat` 或贴图内容。
 
 ## 7. 导出后检查清单
 
-- 导出界面显示的三个 `unpack` 目标与当前模型 ID、工作区一致。
-- `.gbfr/exports/<模型ID>.json` 中 `vertex_count`、`poly_count_x3` 与预期模型规模相符。
-- `chunks[].material_id` 没有超出 `materials[]` 范围。
-- `sub_meshes` 名称、数量和包围盒合理。
-- 修改骨架时，`bones_to_weight_indices` 与实际权重骨骼一致。
-- 最终 Mod 中 `.mmesh` 位于 `model_streaming/lod0`。
-- 最终 Mod 不包含 `.gbfr` 或调试 JSON。
+- 导出界面显示的全部 `unpack` 目标与当前模型 ID、工作区一致。
+- Root 下只放需要导出的 `lod#`/`shadowlod#`，每层可包含一个或多个 Mesh。
+- 每个 Mesh 最多有 2 个 UV；顶点权重最多 8 个且已归一化。
+- 材质 `MaterialID` 在所有 LOD 中保持一致，没有空材质槽或越界引用。
+- 修改骨架时保留游戏骨骼原名/`gbfr_bone_id`，并检查动画、SOP 与权重组。
+- 最终 Mod 中每个 `.mmesh` 位于对应的 `model_streaming/lod#` 或 `shadowlod#`。
 - 游戏内检查远近距离 LOD、动作变形、面部、武器、阴影和材质显示。
