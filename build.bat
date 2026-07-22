@@ -38,12 +38,12 @@ if not defined VSROOT (
   exit /b 1
 )
 
+set "VSLANG=1033"
 call "%VSROOT%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64 >nul
 if errorlevel 1 (
   echo [ERROR] Could not initialize the Visual Studio x64 environment.
   exit /b 1
 )
-set "VSLANG=1033"
 
 set "CMAKE=%VSROOT%\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
 set "NINJA=%VSROOT%\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe"
