@@ -112,7 +112,9 @@ try {
     }
 
     $inputs = @(Get-ChildItem -LiteralPath $temporaryRoot -Filter "*.dds" -File | Sort-Object Name | Select-Object -ExpandProperty FullName)
-    $convertOutput = @(& $texconv -nologo -y -m 1 -ft png -o $outputRoot @inputs 2>&1)
+    # The game stores color data in BC7_UNORM without an sRGB DXGI tag. Preserve the samples,
+    # but emit PNG metadata as sRGB instead of texconv's otherwise incorrect gAMA=1.0.
+    $convertOutput = @(& $texconv -nologo -y -m 1 -srgbi -f R8G8B8A8_UNORM_SRGB -ft png -o $outputRoot @inputs 2>&1)
     if ($LASTEXITCODE -ne 0) {
         throw "texconv PNG conversion failed:`n$($convertOutput -join [Environment]::NewLine)"
     }
@@ -132,6 +134,7 @@ $document.Add("")
 $document.Add("- 分辨率：$Resolution")
 $document.Add("- 只读取 ``cmn_imgchr_XXXX.wtb`` 的第 0 槽。")
 $document.Add("- ``cmn_imgchr_XXXX_glow.wtb`` 是白色遮罩，本次未提取。")
+$document.Add("- 原始 BC7_UNORM 颜色按 sRGB 写入 PNG，避免线性 gamma 元数据造成预览过亮。")
 $document.Add("- 有同号模型时，PNG 使用 ``plXXXX__cmn_imgchr_XXXX.png`` 命名。")
 $document.Add("- 无同号模型的纯数字 UI 立绘使用 ``ui_only__cmn_imgchr_XXXX.png`` 命名。")
 $document.Add("")
