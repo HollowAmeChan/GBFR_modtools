@@ -493,6 +493,10 @@ bool load_model_preview(std::size_t index,bool force) {
         if(!force&&g_loaded_model&&*g_loaded_model==key&&g_preview->has_model()) {g_preview_mode=PreviewMode::model;g_preview_error.clear();return true;}
         const auto info = gbfr::load_minfo(key.minfo);
         const auto skeleton=gbfr::load_skeleton(key.skeleton);
+        if(skeleton.bones.size()>gbfr::PreviewRenderer::max_skin_bones)
+            throw std::runtime_error("预览器无法显示此模型：骨骼数 "+std::to_string(skeleton.bones.size())+
+                                     " 超过预览上限 "+std::to_string(gbfr::PreviewRenderer::max_skin_bones)+
+                                     "；这不表示文件损坏，模型仍可继续用于导出和 Mod 构建。");
         const auto mesh = gbfr::load_mmesh(key.mesh, info, key.lod_index, key.shadow_lod);
         const auto lod_label=std::string(key.shadow_lod?"shadowlod":"lod")+std::to_string(key.lod_index);
         gbfr::SopAsset sop;

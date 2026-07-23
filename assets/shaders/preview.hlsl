@@ -1,4 +1,4 @@
-#define MAX_SKIN_BONES 512
+#define MAX_SKIN_BONES 1024
 
 cbuffer Scene : register(b0)
 {

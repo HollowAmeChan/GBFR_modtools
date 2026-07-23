@@ -33,5 +33,5 @@ struct BoneConstants {
 static_assert(sizeof(GpuVertex) == 104);
 static_assert(sizeof(DebugVertex) == 12);
 static_assert(sizeof(SceneConstants) == 128);
-static_assert(sizeof(BoneConstants) == 32768);
+static_assert(sizeof(BoneConstants) == 65536);
 }

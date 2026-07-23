@@ -34,6 +34,10 @@ int main() {
         if(FAILED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_WARP,nullptr,0,nullptr,0,D3D11_SDK_VERSION,&device,nullptr,&context)))return 82;
         gbfr::PreviewRenderer shader_smoke;
         if(!shader_smoke.initialize(device.Get(),context.Get(),fs::path(GBFR_ROOT_DIR)/L"assets/shaders/preview.hlsl"))return 83;
+        gbfr::SkeletonAsset large_skeleton;large_skeleton.bones.resize(640);
+        gbfr::MeshAsset large_skeleton_mesh;large_skeleton_mesh.vertices.resize(1);large_skeleton_mesh.indices={0,0,0};
+        large_skeleton_mesh.vertices[0].joints[0]=639;large_skeleton_mesh.vertices[0].weights[0]=1.0f;
+        if(!shader_smoke.load(large_skeleton_mesh,large_skeleton))return 86;
     }
 
     const fs::path test_temp = fs::current_path() / L".gbfr_test_temp";

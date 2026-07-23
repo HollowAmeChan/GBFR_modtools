@@ -30,7 +30,8 @@ struct TexturePreviewResource {
 
 class PreviewRenderer {
 public:
-    static constexpr std::size_t max_skin_bones = 512;
+    // D3D11 constant buffers are limited to 4096 float4 values: 1024 matrices.
+    static constexpr std::size_t max_skin_bones = 1024;
 
     bool initialize(ID3D11Device* device, ID3D11DeviceContext* context,
                     const std::filesystem::path& shader_file);
