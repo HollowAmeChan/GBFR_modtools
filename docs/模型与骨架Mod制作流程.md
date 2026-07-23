@@ -90,7 +90,22 @@ unpack/data/model_streaming/lod3/pl1400.mmesh
 
 插件复制当前会话的完整模型层级到临时场景，由 v2 FlatBuffers 构建器直接生成二进制。只有全部登记输出都成功后才原子替换目标，因此不会破坏当前 Blender 场景，也不会创建 `_Exported_MInfo`、调试 JSON 或调用 `flatc.exe`。所选工作区必须登记同一模型 ID，且所有输出都必须位于该工作区 `unpack` 内。
 
-官方 v2 导出器会把 `.minfo`、`.skeleton` 和全部 `.mmesh` 作为同一组结果生成；不要只手工复制新的 `.mmesh` 去搭配旧的 `.minfo`。其第二组骨骼索引/权重、顶点色和 UV1 属于可选顶点缓冲，长度可以小于该 LOD 的总顶点数；C++ 预览器按缓冲实际覆盖的顶点读取，未覆盖部分使用默认值。正式 `.mmesh` 路径始终是 `unpack/data/model_streaming/lod#/` 或 `shadowlod#/`，放到 `.minfo` 同目录的副本不会被工作区预览使用。
+### 融合骨架后的稳定顺序
+
+Blender 会维护自己的骨架层级顺序。即使融合操作没有删除或移动任何原骨，只是把新骨挂到已有父骨，退出编辑模式后，新骨也可能被插入 `Armature.data.bones` 的旧骨序列中间。这个顺序适合 Blender 层级求值，但不能直接当作游戏 skeleton 索引；否则 cloth、SOP、动作和权重可能引用错误骨骼，严重时会在游戏载入模型时崩溃。
+
+工作区导出会读取 `source` 中的原 `.skeleton`，按骨名建立稳定的二进制顺序：
+
+- source 原骨骼保持原索引和顺序。
+- 融合新增骨骼统一追加到全部原骨之后。
+- 每根骨的 `ParentId` 按稳定顺序重新计算，父子关系不会因为追加排序而丢失。
+- `.minfo` 的 deform bone 表与 `.mmesh` 权重索引使用相同映射。
+
+因此不需要为了排序重建 Armature，也不需要修改通用骨架融合工具。已经完成融合的 Blender 文件可以直接重新导出。必须保留 source 中的全部原骨名和原父级；不要为了清理旧头发等部件删除旧骨，cloth、SOP 或动作仍可能按固定索引引用它们。缺少原骨、重复导出骨名或改变原父级会使严格骨架检查或导出失败。
+
+已用 342 根原骨加 496 根新增骨的样本回归验证：Blender 内部出现中间插入后，导出的前 342 根名称和 `ParentId` 仍与 source 逐项一致，新增骨从索引 342 开始。
+
+官方 v2 导出器会把 `.minfo`、`.skeleton` 和全部 `.mmesh` 作为同一组结果生成；不要只手工复制新的 `.mmesh` 去搭配旧的 `.minfo/.skeleton`。其第二组骨骼索引/权重、顶点色和 UV1 属于可选顶点缓冲，长度可以小于该 LOD 的总顶点数；C++ 预览器按缓冲实际覆盖的顶点读取，未覆盖部分使用默认值。正式 `.mmesh` 路径始终是 `unpack/data/model_streaming/lod#/` 或 `shadowlod#/`，放到 `.minfo` 同目录的副本不会被工作区预览使用。
 
 各文件职责：
 
@@ -158,5 +173,7 @@ Mod目录/
 - 每个 Mesh 最多有 2 个 UV；顶点权重最多 8 个且已归一化。
 - 材质 `MaterialID` 在所有 LOD 中保持一致，没有空材质槽或越界引用。
 - 修改骨架时保留游戏骨骼原名/`gbfr_bone_id`，并检查动画、SOP 与权重组。
+- 融合时保留全部原骨和原父级；新增骨由导出器追加到 source 骨骼之后。
+- `.minfo`、`.skeleton` 和全部 `.mmesh` 必须来自同一次导出并整组进入最终 Mod。
 - 最终 Mod 中每个 `.mmesh` 位于对应的 `model_streaming/lod#` 或 `shadowlod#`。
 - 游戏内检查远近距离 LOD、动作变形、面部、武器、阴影和材质显示。
