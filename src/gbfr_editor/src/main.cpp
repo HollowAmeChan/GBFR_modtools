@@ -957,8 +957,9 @@ void draw_editor_shell() {
     }
     if(g_reset_layout) build_default_dock_layout(dockspace);
 
+    bool return_to_start_requested=false;
     ImGui::Begin("Workspace");
-    if (ImGui::Button("开始页")) return_to_start();
+    if (ImGui::Button("开始页")) { return_to_start(); return_to_start_requested=true; }
     ImGui::SameLine();
     if (ImGui::Button("打开工作区...")) choose_workspace();
     ImGui::SameLine();
@@ -1026,6 +1027,7 @@ void draw_editor_shell() {
         }
     }
     ImGui::End();
+    if(return_to_start_requested) return;
 
     draw_preview_controls();
     ImGui::Begin("Viewport");
