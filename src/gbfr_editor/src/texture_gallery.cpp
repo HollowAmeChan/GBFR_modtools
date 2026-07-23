@@ -23,7 +23,7 @@ std::string lower_ascii(std::string value) {
 }
 
 bool is_gallery_asset(const gbfr::WorkspaceAsset& asset) {
-    return asset.kind==gbfr::AssetKind::texture||asset.kind==gbfr::AssetKind::ui_image||asset.kind==gbfr::AssetKind::new_texture;
+    return asset.kind==gbfr::AssetKind::texture||asset.kind==gbfr::AssetKind::ui_image||asset.kind==gbfr::AssetKind::new_texture||asset.kind==gbfr::AssetKind::granite_texture;
 }
 
 struct GalleryItem {
@@ -31,7 +31,6 @@ struct GalleryItem {
     fs::path path;
     gbfr::AssetKind kind{};
     std::string subtype;
-    bool changed{};
 };
 
 }
@@ -59,8 +58,6 @@ void TextureGallery::draw(const Workspace& workspace,PreviewRenderer& renderer,s
     ImGui::SetNextItemWidth(180.0f);
     ImGui::Combo("类型",&kind_filter_,kinds,static_cast<int>(std::size(kinds)));
     ImGui::SameLine();
-    ImGui::Checkbox("只看修改",&changed_only_);
-    ImGui::SameLine();
     ImGui::SetNextItemWidth(150.0f);
     ImGui::SliderFloat("缩略图",&thumbnail_size_,96.0f,240.0f,"%.0f px");
     ImGui::SetNextItemWidth(-FLT_MIN);
@@ -71,9 +68,9 @@ void TextureGallery::draw(const Workspace& workspace,PreviewRenderer& renderer,s
     const auto& assets=workspace.assets();
     for(std::size_t asset_index=0;asset_index<assets.size();++asset_index){
         const auto& asset=assets[asset_index];
-        if(!is_gallery_asset(asset)||(changed_only_&&!asset.changed))continue;
+        if(!is_gallery_asset(asset))continue;
         if(kind_filter_==1&&asset.kind!=AssetKind::texture)continue;
-        if(kind_filter_==2&&asset.kind!=AssetKind::new_texture)continue;
+        if(kind_filter_==2&&asset.kind!=AssetKind::new_texture&&asset.kind!=AssetKind::granite_texture)continue;
         if(kind_filter_==3&&asset.kind!=AssetKind::ui_image)continue;
         std::vector<fs::path> paths;
         if(!asset.wtb_slots.empty())for(const auto& slot:asset.wtb_slots)paths.push_back(slot.second);
@@ -84,7 +81,7 @@ void TextureGallery::draw(const Workspace& workspace,PreviewRenderer& renderer,s
                 const auto haystack=lower_ascii(utf8(path.filename())+" "+utf8(path.lexically_relative(workspace.root()))+" "+asset.subtype+" "+asset_kind_name(asset.kind));
                 if(haystack.find(search)==std::string::npos)continue;
             }
-            items.push_back({asset_index,path,asset.kind,asset.subtype,asset.changed});
+            items.push_back({asset_index,path,asset.kind,asset.subtype});
         }
     }
     std::stable_sort(items.begin(),items.end(),[](const GalleryItem& left,const GalleryItem& right){return natural_less_case_insensitive(left.path.filename().wstring(),right.path.filename().wstring());});

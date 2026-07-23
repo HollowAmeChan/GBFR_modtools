@@ -44,7 +44,6 @@ std::string g_imgui_ini;
 std::optional<std::size_t> g_selected_asset;
 ImGuiSelectionBasicStorage g_asset_selection;
 std::vector<std::size_t> g_pending_a4_assets;
-bool g_changed_only = false;
 enum class AssetFunction { all, model, texture, ui_image, material, cloth };
 enum class PreviewMode { none, model, texture };
 struct ModelPreviewKey {
@@ -415,7 +414,8 @@ void run_asset_actions(const std::vector<std::size_t>& indices, bool restore) {
     std::size_t succeeded{},skipped{};
     for (const auto index : indices) {
         const auto kind=g_workspace->assets()[index].kind;
-        const bool supported=restore?(kind!=gbfr::AssetKind::new_texture&&kind!=gbfr::AssetKind::cloth):(kind!=gbfr::AssetKind::cloth);
+        const auto& asset = g_workspace->assets()[index];
+        const bool supported=restore?(kind!=gbfr::AssetKind::cloth&&(kind!=gbfr::AssetKind::new_texture||!asset.granite_hash.empty())):(kind!=gbfr::AssetKind::cloth);
         if(!supported){++skipped;continue;}
         try {
             if (restore) g_workspace->restore_asset(index);
@@ -431,16 +431,6 @@ void run_asset_actions(const std::vector<std::size_t>& indices, bool restore) {
         std::find(indices.begin(), indices.end(), *g_selected_asset) != indices.end() &&
         g_workspace->assets()[*g_selected_asset].kind == gbfr::AssetKind::model) load_model_preview(*g_selected_asset, true);
     gbfr::Log::write(gbfr::LogLevel::info, (restore ? "已恢复 " : "已构建 ") + std::to_string(succeeded) + "/" + std::to_string(indices.size()) + " 个资源，跳过不支持项 " + std::to_string(skipped));
-}
-
-void build_all_changed_assets() {
-    if (!g_workspace) return;
-    std::vector<std::size_t> indices;
-    for (std::size_t index = 0; index < g_workspace->assets().size(); ++index) {
-        const auto& asset = g_workspace->assets()[index];
-        if (asset.available && asset.changed && asset.kind!=gbfr::AssetKind::cloth) indices.push_back(index);
-    }
-    run_asset_actions(indices, false);
 }
 
 void remove_selected_material_a4(const std::vector<std::size_t>& indices) {
@@ -637,7 +627,7 @@ void preview_asset(std::size_t index) {
     if(!g_workspace||index>=g_workspace->assets().size()||!g_preview)return;
     const auto& asset=g_workspace->assets()[index];
     if(asset.kind==gbfr::AssetKind::model){load_model_preview(index);return;}
-    if(asset.kind==gbfr::AssetKind::texture||asset.kind==gbfr::AssetKind::ui_image||asset.kind==gbfr::AssetKind::new_texture){
+    if(asset.kind==gbfr::AssetKind::texture||asset.kind==gbfr::AssetKind::ui_image||asset.kind==gbfr::AssetKind::new_texture||asset.kind==gbfr::AssetKind::granite_texture){
         if(!asset.available||asset.input.extension()!=L".dds"){g_preview_mode=PreviewMode::none;return;}
         g_loaded_texture_is_ui = asset.kind == gbfr::AssetKind::ui_image;
         if(g_loaded_texture==asset.input&&g_preview->texture_image()){g_preview_mode=PreviewMode::texture;return;}
@@ -661,7 +651,7 @@ bool asset_matches_function(const gbfr::WorkspaceAsset& asset,AssetFunction func
     switch(function){
     case AssetFunction::all:return true;
     case AssetFunction::model:return asset.kind==gbfr::AssetKind::model;
-    case AssetFunction::texture:return asset.kind==gbfr::AssetKind::texture||asset.kind==gbfr::AssetKind::new_texture;
+    case AssetFunction::texture:return asset.kind==gbfr::AssetKind::texture||asset.kind==gbfr::AssetKind::new_texture||asset.kind==gbfr::AssetKind::granite_texture;
     case AssetFunction::ui_image:return asset.kind==gbfr::AssetKind::ui_image;
     case AssetFunction::material:return asset.kind==gbfr::AssetKind::material;
     case AssetFunction::cloth:return asset.kind==gbfr::AssetKind::cloth;
@@ -1053,17 +1043,13 @@ void draw_editor_shell() {
     ImGui::SameLine();
     if (g_workspace && ImGui::Button("刷新")) {g_workspace->refresh();g_texture_gallery.clear();}
         ImGui::SameLine();
-        ImGui::Checkbox("只看修改", &g_changed_only);
         ImGui::SameLine();
-        ImGui::BeginDisabled(g_workspace->changed_count() == 0);
-        if (ImGui::Button("构建全部修改项")) build_all_changed_assets();
-        ImGui::EndDisabled();
     if (!g_workspace) {
         ImGui::Separator();
         ImGui::TextUnformatted("请先选择 unpack 中的 .minfo 文件。");
     } else {
-        ImGui::Text("%s | 候选 %zu | 已修改 %zu | 缺失 %zu", g_workspace->character_id().c_str(),
-                g_workspace->assets().size(), g_workspace->changed_count(), g_workspace->missing_count());
+        ImGui::Text("%s | 候选 %zu | 缺失 %zu", g_workspace->character_id().c_str(),
+                g_workspace->assets().size(), g_workspace->missing_count());
         const struct {AssetFunction function;const char* label;} filters[]={
             {AssetFunction::all,"全部"},{AssetFunction::model,"模型"},{AssetFunction::texture,"贴图"},{AssetFunction::ui_image,"UI-image"},
             {AssetFunction::material,"mmat"},{AssetFunction::cloth,"cloth"}};
@@ -1076,7 +1062,7 @@ void draw_editor_shell() {
         ImGui::SetNextItemWidth(-FLT_MIN);
         ImGui::InputTextWithHint("##asset_search","按文件名、子类或输出路径过滤",g_asset_search.data(),g_asset_search.size());
         std::vector<std::size_t> visible_assets;
-        for(std::size_t index=0;index<g_workspace->assets().size();++index){const auto& asset=g_workspace->assets()[index];if(g_changed_only&&!asset.changed)continue;if(!asset_matches_function(asset,g_asset_function)||!asset_matches_search(asset))continue;visible_assets.push_back(index);}
+        for(std::size_t index=0;index<g_workspace->assets().size();++index){const auto& asset=g_workspace->assets()[index];if(!asset_matches_function(asset,g_asset_function)||!asset_matches_search(asset))continue;visible_assets.push_back(index);}
         std::size_t visible_selected{};
         for (const auto index : visible_assets) if (g_asset_selection.Contains(static_cast<ImGuiID>(index+1))) ++visible_selected;
         bool select_visible = !visible_assets.empty() && visible_selected == visible_assets.size();
@@ -1101,7 +1087,7 @@ void draw_editor_shell() {
             std::stable_sort(visible_assets.begin(),visible_assets.end(),[&](std::size_t left_index,std::size_t right_index){
                 const auto& left=g_workspace->assets()[left_index];const auto& right=g_workspace->assets()[right_index];
                 for(int spec_index=0;spec_index<specs->SpecsCount;++spec_index){const auto& spec=specs->Specs[spec_index];int order{};switch(spec.ColumnUserID){
-                    case 0:{const int a=left.changed?0:left.available?1:2,b=right.changed?0:right.available?1:2;order=a<b?-1:a>b?1:0;break;}
+                    case 0:{const int a=!left.output.empty()&&std::filesystem::is_regular_file(left.output)?0:left.available?1:2,b=!right.output.empty()&&std::filesystem::is_regular_file(right.output)?0:right.available?1:2;order=a<b?-1:a>b?1:0;break;}
                     case 1:order=compare_ascii_case_insensitive(gbfr::asset_kind_name(left.kind),gbfr::asset_kind_name(right.kind));break;
                     case 2:order=compare_ascii_case_insensitive(left.subtype,right.subtype);break;
                     case 3:order=compare_natural_path(left.input.filename(),right.input.filename());break;
@@ -1126,7 +1112,8 @@ void draw_editor_shell() {
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
             ImGui::SetNextItemSelectionUserData(static_cast<ImGuiSelectionUserData>(visible_index));
-            const std::string id = (asset.changed ? "已修改##" : asset.available ? "未修改##" : "缺失##") + std::to_string(index);
+            const bool built = !asset.output.empty() && std::filesystem::is_regular_file(asset.output);
+            const std::string id = (built ? "已构建##" : asset.available ? "可用##" : "缺失##") + std::to_string(index);
             if (ImGui::Selectable(id.c_str(), g_asset_selection.Contains(static_cast<ImGuiID>(index+1)), ImGuiSelectableFlags_SpanAllColumns)) {g_selected_asset = index;preview_asset(index);}
             ImGui::TableNextColumn(); ImGui::TextUnformatted(gbfr::asset_kind_name(asset.kind));
             ImGui::TableNextColumn(); ImGui::TextUnformatted(asset.subtype.c_str());
@@ -1195,17 +1182,14 @@ void draw_editor_shell() {
 
     ImGui::Begin("Inspector");
     if(g_workspace){
-        ImGui::BeginDisabled(g_workspace->changed_count()==0);
-        if(ImGui::Button("构建全部修改项"))build_all_changed_assets();
-        ImGui::EndDisabled();
         ImGui::Separator();
     }
     const auto inspector_indices=selected_asset_indices();
     if(g_workspace&&g_asset_selection.Size>1){
-        std::size_t changed{},available_count{},materials{},a4_files{};
-        for(const auto index:inspector_indices){const auto& item=g_workspace->assets()[index];if(item.changed)++changed;if(item.available)++available_count;if(item.kind==gbfr::AssetKind::material){++materials;try{if(g_workspace->material_a4_count(index))++a4_files;}catch(...){}}}
+        std::size_t available_count{},materials{},a4_files{};
+        for(const auto index:inspector_indices){const auto& item=g_workspace->assets()[index];if(item.available)++available_count;if(item.kind==gbfr::AssetKind::material){++materials;try{if(g_workspace->material_a4_count(index))++a4_files;}catch(...){}}}
         ImGui::Text("多选 / %zu 个资源",inspector_indices.size());
-        ImGui::Text("可用 %zu  |  已修改 %zu  |  mmat %zu",available_count,changed,materials);
+        ImGui::Text("可用 %zu  |  mmat %zu",available_count,materials);
         ImGui::SeparatorText("批量操作");
         ImGui::BeginDisabled(available_count==0);
         if(ImGui::Button("构建选中项"))run_asset_actions(inspector_indices,false);
@@ -1281,11 +1265,13 @@ void draw_editor_shell() {
         const auto index=g_selected_asset?*g_selected_asset:batch_indices.front();
         const auto& asset=g_workspace->assets()[index];
         ImGui::Text("%s / %s",gbfr::asset_kind_name(asset.kind),asset.subtype.c_str());
-        ImGui::TextColored(asset.changed?ImVec4(.95f,.72f,.25f,1):asset.available?ImVec4(.35f,.8f,.5f,1):ImVec4(.95f,.35f,.35f,1),
-                           "%s",asset.changed?"unpack 已修改":asset.available?"unpack 未修改":"unpack 输入缺失");
+        const bool built = !asset.output.empty() && std::filesystem::is_regular_file(asset.output);
+        ImGui::TextColored(built?ImVec4(.35f,.8f,.5f,1):asset.available?ImVec4(.35f,.8f,.5f,1):ImVec4(.95f,.35f,.35f,1),
+                           "%s",built?"build 已构建":asset.available?"unpack 可用":"unpack 输入缺失");
         ImGui::Separator();
         ImGui::BeginDisabled(!asset.available);
         if(asset.kind==gbfr::AssetKind::model){
+            ImGui::TextWrapped("模型通常由 minfo、skeleton 和多个 mmesh 组成；要完整封回，请在列表中多选相关模型文件后执行构建选中项。\n");
             if(ImGui::Button("重新加载模型预览"))load_model_preview(index,true);
             if(ImGui::Button("复制模型到 build"))run_selected_asset_action(false);
             if(ImGui::Button("从 source 恢复模型"))run_selected_asset_action(true);
@@ -1293,7 +1279,13 @@ void draw_editor_shell() {
             if(ImGui::Button("重新加载 DDS 预览"))preview_asset(index);
             if(ImGui::Button("封回 WTB 到 build"))run_selected_asset_action(false);
             if(ImGui::Button("从 source 恢复 DDS")){run_selected_asset_action(true);preview_asset(index);}
+        }else if(asset.kind==gbfr::AssetKind::granite_texture){
+            if(ImGui::Button("重新加载 DDS 预览"))preview_asset(index);
+            if(ImGui::Button("生成 .texture 到 build"))run_selected_asset_action(false);
+            if(ImGui::Button("从原始 Granite 恢复 DDS")){run_selected_asset_action(true);preview_asset(index);}
+            ImGui::TextWrapped("该文件来自 Granite GTS/GTP 解码，恢复会重新提取原始层，不会写入 source。\n");
         }else if(asset.kind==gbfr::AssetKind::new_texture){
+            if(!asset.granite_hash.empty()&&ImGui::Button("从原始 Granite 恢复 DDS")){run_selected_asset_action(true);preview_asset(index);}
             if(ImGui::Button("重新加载 DDS 预览"))preview_asset(index);
             if(ImGui::Button("生成 .texture 到 build"))run_selected_asset_action(false);
             ImGui::TextWrapped("该贴图没有原始 .texture 模板，将使用 nier_cli_mgrr 新建单槽 WTB。");

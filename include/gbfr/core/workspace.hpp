@@ -10,7 +10,7 @@
 namespace gbfr {
 bool natural_less_case_insensitive(std::wstring_view left, std::wstring_view right);
 
-enum class AssetKind { texture, ui_image, material, cloth, model, new_texture };
+enum class AssetKind { texture, ui_image, material, cloth, model, new_texture, granite_texture };
 
 struct WorkspaceAsset {
     AssetKind kind{};
@@ -25,6 +25,8 @@ struct WorkspaceAsset {
     std::uint32_t texture_id{};
     std::vector<std::pair<std::filesystem::path, std::string>> monitored_inputs;
     std::vector<std::pair<unsigned, std::filesystem::path>> wtb_slots;
+    std::string granite_hash;
+    std::filesystem::path granite_gts;
 };
 
 class Workspace {
@@ -45,7 +47,9 @@ public:
 
 private:
     std::filesystem::path resolve(const std::string& relative) const;
+    void restore_granite_texture(std::size_t index);
     std::filesystem::path root_;
+    std::filesystem::path game_data_root_;
     std::string character_id_;
     std::vector<WorkspaceAsset> assets_;
 };

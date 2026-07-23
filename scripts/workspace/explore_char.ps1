@@ -620,6 +620,7 @@ function Expand-GraniteTextures {
                         $ddsDir = Join-Path $unpackRoot "data\granite\$res"
                         New-Item -ItemType Directory -Force -Path $ddsDir | Out-Null
                         $groupFiles = [System.Collections.Generic.List[string]]::new()
+                        $groupBaselines = @{}
                         foreach ($tga in $tgaFiles) {
                             $slot = [regex]::Match($tga.BaseName, "_(albd|msk1|msk2|nrml|conj|iris|eyeh)$").Groups[1].Value
                             $format = switch ($slot) {
@@ -639,6 +640,7 @@ function Expand-GraniteTextures {
                             }
                             $relativeDds = ConvertTo-WorkspacePath ($ddsPath.Substring($outDir.Length + 1))
                             $groupFiles.Add($relativeDds)
+                            $groupBaselines[$relativeDds] = Get-WorkspaceSha256 $ddsPath
                             $decodedFiles.Add($relativeDds) | Out-Null
                         }
 
@@ -649,6 +651,7 @@ function Expand-GraniteTextures {
                             Expected = @($reference.Names | Sort-Object)
                             Sources = @($reference.Sources | Sort-Object)
                             Files = @($groupFiles | Sort-Object -Unique)
+                            BaselineSha256 = $groupBaselines
                         })
                     } catch {
                         $decodeErrors.Add("$res/$($reference.Hash): $($_.Exception.Message)")

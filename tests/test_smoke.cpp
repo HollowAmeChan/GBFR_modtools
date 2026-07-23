@@ -135,6 +135,26 @@ int main() {
     if (gbfr::sha256_file(wtb_root / L"unpack/ui_0.dds") != dds_hash) return 75;
     fs::remove_all(wtb_root);
 
+    const fs::path granite_root = test_temp / L"granite_workspace";
+    fs::create_directories(granite_root / L"unpack/data/granite/2k");
+    fs::create_directories(granite_root / L"game/granite/2k/gts");
+    const auto granite_dds = granite_root / L"unpack/data/granite/2k/example_albd.dds";
+    std::ofstream(granite_dds, std::ios::binary).write(reinterpret_cast<const char*>(baseline_dds.data()), static_cast<std::streamsize>(baseline_dds.size()));
+    std::ofstream(granite_root / L"game/granite/2k/gts/1.gts", std::ios::binary) << "gts";
+    const auto granite_hash = gbfr::sha256_file(granite_dds);
+    {
+        std::ofstream json(granite_root / L"workspace.json");
+        json << "{\"Version\":1,\"CharacterId\":\"granite\",\"GameDataRoot\":\"" << (granite_root / L"game").generic_string() << "\",\"GraniteTextures\":[{"
+                "\"Hash\":\"0123456789abcdef\",\"Resolution\":\"2k\",\"Gts\":\"granite/2k/gts/1.gts\","
+                "\"Files\":[\"unpack/data/granite/2k/example_albd.dds\"],\"BaselineSha256\":{\"unpack/data/granite/2k/example_albd.dds\":\"" << granite_hash << "\"}}]}";
+    }
+    auto granite_workspace = gbfr::Workspace::load(granite_root / L"workspace.json");
+    if (granite_workspace.assets().size() != 1 || granite_workspace.assets()[0].kind != gbfr::AssetKind::granite_texture || granite_workspace.changed_count() != 0) return 78;
+    std::ofstream(granite_dds, std::ios::binary | std::ios::trunc) << "DDS edited Granite payload";
+    granite_workspace.refresh();
+    if (!granite_workspace.assets()[0].changed) return 79;
+    fs::remove_all(granite_root);
+
     const fs::path material_root = test_temp / L"material_workspace";
     fs::create_directories(material_root / L"unpack");
     nlohmann::json material_fixture={{"Magic",20230727},{"Entries1",nlohmann::json::array({{{"A4",{{"Unk",nlohmann::json::array({"hash"})}}}}})}};

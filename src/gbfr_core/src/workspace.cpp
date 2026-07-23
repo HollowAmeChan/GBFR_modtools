@@ -243,6 +243,49 @@ void build_new_texture(const fs::path& input, const fs::path& output, std::uint3
     copy_atomic(packed, output);
 }
 
+std::wstring slot_format(const fs::path& path) {
+    const auto stem = path.stem().wstring();
+    const auto separator = stem.rfind(L'_');
+    const auto slot = separator == std::wstring::npos ? std::wstring{} : stem.substr(separator + 1);
+    if (slot == L"albd" || slot == L"conj" || slot == L"iris" || slot == L"eyeh") return L"BC7_UNORM_SRGB";
+    if (slot == L"nrml") return L"BC5_UNORM";
+    return L"BC7_UNORM";
+}
+
+void restore_granite_dds(const fs::path& input, const fs::path& gts,
+                         const std::string& granite_hash) {
+    if (!fs::is_regular_file(gts)) throw std::runtime_error("Granite GTS source is missing: " + gts.string());
+    if (granite_hash.empty()) throw std::runtime_error("Granite texture has no source hash");
+
+    TemporaryDirectory temporary(L"gbfr_granite_restore_");
+    const auto extracted = temporary.path() / L"extracted";
+    const auto converted = temporary.path() / L"converted";
+    fs::create_directories(extracted);
+    fs::create_directories(converted);
+    run_process(locate_repo_file(L"_lib/tools/GraniteTextureReader.exe"),
+                {L"extract", L"-t", gts.wstring(), L"-f", fs::u8path(granite_hash).wstring(),
+                 L"-o", extracted.wstring(), L"-l", L"-1"});
+
+    fs::path layer;
+    const auto expected_stem = input.stem().wstring();
+    for (const auto& entry : fs::recursive_directory_iterator(extracted)) {
+        if (!entry.is_regular_file() || _wcsicmp(entry.path().extension().c_str(), L".tga") != 0) continue;
+        if (_wcsicmp(entry.path().stem().c_str(), expected_stem.c_str()) == 0) {
+            layer = entry.path();
+            break;
+        }
+    }
+    if (layer.empty()) throw std::runtime_error("Granite extraction did not contain layer: " + input.filename().string());
+
+    run_process(locate_repo_file(L"_lib/tools/texconv.exe"),
+                {L"-nologo", L"-y", L"-m", L"0", L"-dx10", L"-f", slot_format(input),
+                 L"-o", converted.wstring(), layer.wstring()});
+    const auto decoded = converted / (layer.stem().wstring() + L".dds");
+    if (!fs::is_regular_file(decoded)) throw std::runtime_error("texconv did not restore Granite DDS: " + input.string());
+    validate_dds(decoded);
+    copy_atomic(decoded, input);
+}
+
 void encode_material(const fs::path& input, const fs::path& output) {
     json document;
     { std::ifstream stream(input); if (!stream) throw std::runtime_error("Material JSON is missing"); stream >> document; }
@@ -350,6 +393,8 @@ Workspace Workspace::load(const fs::path& selected) {
     Workspace result;
     result.root_ = fs::weakly_canonical(root);
     result.character_id_ = document.value("CharacterId", std::string{});
+    if (document.contains("GameDataRoot") && document["GameDataRoot"].is_string())
+        result.game_data_root_ = fs::u8path(document["GameDataRoot"].get<std::string>());
     auto append = [&](AssetKind kind, std::string subtype, const std::string& input, const std::string& source,
                       const std::string& output, const std::string& baseline, const std::string& source_hash) {
         WorkspaceAsset asset{kind, std::move(subtype), result.resolve(input), source.empty() ? fs::path{} : result.resolve(source),
@@ -377,8 +422,38 @@ Workspace Workspace::load(const fs::path& selected) {
     for (const auto& record : document.value("ModelFiles", json::array()))
         append(AssetKind::model, record.value("FileType", "model"), required_string(record, "Input"), required_string(record, "Source"), required_string(record, "Output"), required_string(record, "BaselineSha256"), required_string(record, "SourceSha256"));
     for (const auto& record : document.value("NewTextures", json::array())) {
-        append(AssetKind::new_texture, "texture", required_string(record, "Input"), "", required_string(record, "Output"), required_string(record, "BaselineSha256"), "");
-        result.assets_.back().texture_id = record.value("TextureId", 0u);
+        append(AssetKind::new_texture, record.value("GraniteHash", std::string{}).empty() ? "texture" : "Granite / 解码贴图",
+               required_string(record, "Input"), "", required_string(record, "Output"), required_string(record, "BaselineSha256"), "");
+        auto& asset = result.assets_.back();
+        asset.texture_id = record.value("TextureId", 0u);
+        asset.granite_hash = record.value("GraniteHash", std::string{});
+        if (record.contains("GraniteGts") && record["GraniteGts"].is_string() && !result.game_data_root_.empty())
+            asset.granite_gts = result.game_data_root_ / fs::u8path(record["GraniteGts"].get<std::string>());
+    }
+    for (const auto& record : document.value("GraniteTextures", json::array())) {
+        const auto hash = required_string(record, "Hash");
+        const auto resolution = record.value("Resolution", std::string{});
+        const auto gts_relative = required_string(record, "Gts");
+        const auto baselines = record.value("BaselineSha256", json::object());
+        for (const auto& file : record.value("Files", json::array())) {
+            if (!file.is_string()) continue;
+            const auto relative = file.get<std::string>();
+            const auto input = result.resolve(relative);
+            const bool already_registered = std::any_of(result.assets_.begin(), result.assets_.end(),
+                [&](const auto& asset) { return asset.kind == AssetKind::new_texture && asset.input == input; });
+            if (already_registered) continue;
+            const auto output = result.root_ / L"build/data/texture" / fs::u8path(resolution) /
+                (input.stem().wstring() + L".texture");
+            WorkspaceAsset asset{AssetKind::granite_texture, "Granite / " + resolution,
+                                 input, {}, output, baselines.value(relative, std::string{}), ""};
+            asset.granite_hash = hash;
+            asset.granite_gts = result.game_data_root_.empty() ? fs::path{} :
+                result.game_data_root_ / fs::u8path(gts_relative);
+            if (asset.baseline_sha256.empty() && fs::is_regular_file(asset.input))
+                asset.baseline_sha256 = sha256_file(asset.input);
+            asset.monitored_inputs.emplace_back(asset.input, asset.baseline_sha256);
+            result.assets_.push_back(std::move(asset));
+        }
     }
     std::stable_sort(result.assets_.begin(), result.assets_.end(), [](const auto& left, const auto& right) {
         const auto left_name = left.input.filename().native();
@@ -421,11 +496,22 @@ void Workspace::build_asset(std::size_t index) {
     if (assets_[index].kind == AssetKind::model) { build_model(index); return; }
     auto& asset = assets_[index];
     if (!fs::is_regular_file(asset.input)) throw std::runtime_error("Selected input is missing");
-    if (asset.kind == AssetKind::new_texture) { build_new_texture(asset.input, asset.output, asset.texture_id); return; }
+    if (asset.kind == AssetKind::new_texture || asset.kind == AssetKind::granite_texture) { build_new_texture(asset.input, asset.output, asset.texture_id); return; }
     if (asset.kind == AssetKind::material) { encode_material(asset.input, asset.output); return; }
     if (asset.wtb_slots.empty() || asset.source.empty()) throw std::runtime_error("Selected asset has no packable WTB source");
     if (!fs::is_regular_file(asset.source) || sha256_file(asset.source) != asset.source_sha256) throw std::runtime_error("WTB source baseline is missing or changed");
     write_wtb_from_slots(asset.source, asset.output, asset.wtb_slots);
+}
+
+void Workspace::restore_granite_texture(std::size_t index) {
+    if (index >= assets_.size() || assets_[index].kind != AssetKind::granite_texture)
+        throw std::runtime_error("Selected asset is not a Granite DDS");
+    auto& asset = assets_[index];
+    restore_granite_dds(asset.input, asset.granite_gts, asset.granite_hash);
+    asset.baseline_sha256 = sha256_file(asset.input);
+    for (auto& monitored : asset.monitored_inputs)
+        if (monitored.first == asset.input) monitored.second = asset.baseline_sha256;
+    refresh();
 }
 
 void Workspace::restore_model(std::size_t index) {
@@ -440,8 +526,18 @@ void Workspace::restore_model(std::size_t index) {
 void Workspace::restore_asset(std::size_t index) {
     if (index >= assets_.size()) throw std::runtime_error("Selected asset is invalid");
     if (assets_[index].kind == AssetKind::model) { restore_model(index); return; }
+    if (assets_[index].kind == AssetKind::granite_texture) { restore_granite_texture(index); return; }
     auto& asset = assets_[index];
-    if (asset.kind == AssetKind::new_texture) throw std::runtime_error("A new texture has no source baseline to restore");
+    if (asset.kind == AssetKind::new_texture) {
+        if (asset.granite_hash.empty() || asset.granite_gts.empty())
+            throw std::runtime_error("A new texture has no Granite source baseline to restore");
+        restore_granite_dds(asset.input, asset.granite_gts, asset.granite_hash);
+        asset.baseline_sha256 = sha256_file(asset.input);
+        for (auto& monitored : asset.monitored_inputs)
+            if (monitored.first == asset.input) monitored.second = asset.baseline_sha256;
+        refresh();
+        return;
+    }
     if (asset.kind == AssetKind::material) {
         if (!fs::is_regular_file(asset.source) || sha256_file(asset.source) != asset.source_sha256) throw std::runtime_error("mmat source baseline is missing or changed");
         decode_material(asset.source, asset.input);
@@ -493,7 +589,8 @@ const char* asset_kind_name(AssetKind kind) noexcept {
     case AssetKind::material: return "mmat";
     case AssetKind::cloth: return "cloth";
     case AssetKind::model: return "模型";
-    case AssetKind::new_texture: return "新贴图";
+    case AssetKind::new_texture: return "解码贴图";
+    case AssetKind::granite_texture: return "Granite DDS";
     }
     return "未知";
 }

@@ -33,7 +33,6 @@ private:
     std::unordered_map<std::filesystem::path, CacheEntry> cache_;
     float thumbnail_size_{160.0f};
     int kind_filter_{};
-    bool changed_only_{};
 };
 
 }
