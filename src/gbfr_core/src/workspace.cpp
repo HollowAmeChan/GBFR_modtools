@@ -225,11 +225,18 @@ void validate_generated_wtb(const fs::path& path) {
 void build_new_texture(const fs::path& input, const fs::path& output, std::uint32_t texture_id) {
     validate_dds(input);
     TemporaryDirectory temporary(L"gbfr_texture_");
+    const auto flipped_directory = temporary.path() / L"flipped";
+    fs::create_directories(flipped_directory);
+    run_process(locate_repo_file(L"_lib/tools/texconv.exe"),
+                {L"-nologo", L"-y", L"-vflip", L"-o", flipped_directory.wstring(), L"--", input.wstring()});
+    const auto flipped = flipped_directory / input.filename();
+    validate_dds(flipped);
+
     const auto extracted = temporary.path() / L"texture.wtb_extracted";
     fs::create_directories(extracted);
     std::wostringstream name;
     name << L"0_" << std::hex << std::setw(8) << std::setfill(L'0') << texture_id << L".dds";
-    fs::copy_file(input, extracted / name.str(), fs::copy_options::overwrite_existing);
+    fs::copy_file(flipped, extracted / name.str(), fs::copy_options::overwrite_existing);
     run_process(locate_repo_file(L"_lib/tools/nier_cli_mgrr.exe"), {extracted.wstring()});
     const auto packed = temporary.path() / L"texture.wtb";
     validate_generated_wtb(packed);
