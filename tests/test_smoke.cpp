@@ -59,6 +59,21 @@ int main() {
            std::abs(mesh.vertices[0].color.y-128.0f/255.0f)>1e-6f||mesh.vertices[0].uv1.x!=1.0f||mesh.vertices[0].uv1.y!=2.0f)return 84;
     }
     {
+        std::vector<unsigned char> bytes(128,0);
+        const auto put_u16=[&](std::size_t offset,std::uint16_t value){bytes[offset]=static_cast<unsigned char>(value);bytes[offset+1]=static_cast<unsigned char>(value>>8);};
+        for(std::size_t i=0;i<4;++i)put_u16(80+i*2,1);
+        put_u16(112,0x3c00);put_u16(114,0x4000);
+        const auto path=test_temp/L"v2_partial_channels.mmesh";
+        std::ofstream(path,std::ios::binary).write(reinterpret_cast<const char*>(bytes.data()),static_cast<std::streamsize>(bytes.size()));
+        gbfr::ModelInfoAsset info;info.bones_to_weight_indices={10,11};
+        gbfr::ModelLodAsset lod;lod.vertex_count=2;lod.index_count=3;lod.buffer_types=95;
+        lod.buffers={{0,64},{64,16},{80,8},{88,16},{104,8},{112,4},{116,12}};info.lods.push_back(lod);
+        const auto mesh=gbfr::load_mmesh(path,info);
+        if(mesh.vertices.size()!=2||mesh.vertices[0].joints[4]!=11||mesh.vertices[1].joints[4]!=0||
+           !mesh.has_uv1||mesh.vertices[0].uv1.x!=1.0f||mesh.vertices[0].uv1.y!=2.0f||
+           mesh.vertices[1].uv1.x!=0.0f||mesh.vertices[1].uv1.y!=0.0f)return 85;
+    }
+    {
         std::ofstream(root / L"source/model.mmesh", std::ios::binary) << "baseline";
         std::ofstream(root / L"unpack/model.mmesh", std::ios::binary) << "baseline";
     }

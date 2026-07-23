@@ -63,6 +63,7 @@ struct ModelPreviewStats {
 AssetFunction g_asset_function = AssetFunction::all;
 std::array<char,256> g_asset_search{};
 PreviewMode g_preview_mode = PreviewMode::none;
+std::string g_preview_error;
 std::optional<ModelPreviewKey> g_loaded_model;
 ModelPreviewStats g_loaded_model_stats;
 std::filesystem::path g_loaded_texture;
@@ -228,7 +229,7 @@ bool load_workspace(const std::filesystem::path& path) {
         g_selected_asset.reset();
         g_texture_gallery.clear();
         g_asset_function=AssetFunction::all;g_asset_search.fill('\0');
-        g_preview_mode=PreviewMode::none;g_loaded_model.reset();g_loaded_texture.clear();g_loaded_texture_is_ui=false;g_loaded_material.clear();g_loaded_sop.clear();
+        g_preview_mode=PreviewMode::none;g_preview_error.clear();g_loaded_model.reset();g_loaded_texture.clear();g_loaded_texture_is_ui=false;g_loaded_material.clear();g_loaded_sop.clear();
         g_skeleton.bones.clear(); g_clh_files.clear(); g_clp_files.clear();g_sop_inspector.clear();
         if(g_preview) g_preview->clear();
         const auto settings_directory=g_workspace->root()/L".gbfr";
@@ -489,7 +490,7 @@ bool load_model_preview(std::size_t index,bool force) {
     if (selected.kind != gbfr::AssetKind::model) return false;
     try {
         const auto key=resolve_model_preview_key(selected);
-        if(!force&&g_loaded_model&&*g_loaded_model==key&&g_preview->has_model()) {g_preview_mode=PreviewMode::model;return true;}
+        if(!force&&g_loaded_model&&*g_loaded_model==key&&g_preview->has_model()) {g_preview_mode=PreviewMode::model;g_preview_error.clear();return true;}
         const auto info = gbfr::load_minfo(key.minfo);
         const auto skeleton=gbfr::load_skeleton(key.skeleton);
         const auto mesh = gbfr::load_mmesh(key.mesh, info, key.lod_index, key.shadow_lod);
@@ -528,7 +529,7 @@ bool load_model_preview(std::size_t index,bool force) {
         g_sop_inspector.set_asset(sop,sop_path);
         g_loaded_material=material_json;
         g_loaded_sop=std::filesystem::is_regular_file(sop_path)?sop_path:std::filesystem::path{};
-        g_skeleton=skeleton;g_loaded_model=key;g_loaded_texture.clear();g_preview_mode=PreviewMode::model;
+        g_skeleton=skeleton;g_loaded_model=key;g_loaded_texture.clear();g_preview_mode=PreviewMode::model;g_preview_error.clear();
         g_loaded_model_stats={info.lods.size(),info.shadow_lods.size(),info.submesh_names.size(),mesh.chunks.size(),mesh.vertices.size(),mesh.indices.size()/3,mesh.influence_count,mesh.has_uv1,mesh.has_color};
         discover_motions(key);
         g_preview->frame(g_camera);
@@ -544,7 +545,7 @@ bool load_model_preview(std::size_t index,bool force) {
         update_collision_debug();
         gbfr::Log::write(gbfr::LogLevel::info, "预览已加载："+lod_label+"，" + std::to_string(mesh.vertices.size()) + " 顶点，" + std::to_string(mesh.indices.size()/3) + " 三角形，" + std::to_string(mesh.chunks.size()) + " 材质分段，"+std::to_string(mesh.influence_count)+" 权重，UV1 "+(mesh.has_uv1?"有":"无")+"，顶点色 "+(mesh.has_color?"有":"无")+"，SOP " + std::to_string(sop.operations.size()) + " 操作，0.mmat 可见材质 " + std::to_string(resolved_materials) + "/" + std::to_string(materials.entries.size()));
         return true;
-    } catch (const std::exception& error) { gbfr::Log::write(gbfr::LogLevel::error, std::string("预览加载失败：") + error.what());return false; }
+    } catch (const std::exception& error) { g_preview_mode=PreviewMode::none;g_loaded_model.reset();if(g_preview)g_preview->clear();g_preview_error=std::string("模型预览失败：")+error.what();gbfr::Log::write(gbfr::LogLevel::error,g_preview_error);return false; }
 }
 
 void preview_asset(std::size_t index) {
@@ -871,7 +872,7 @@ void draw_preview_controls() {
 void return_to_start() {
     if(!g_imgui_ini.empty()) ImGui::SaveIniSettingsToDisk(g_imgui_ini.c_str());
     g_workspace.reset(); g_selected_asset.reset(); g_skeleton.bones.clear(); g_clh_files.clear(); g_clp_files.clear();g_sop_inspector.clear();
-    g_preview_mode=PreviewMode::none;g_loaded_model.reset();g_loaded_texture.clear();g_loaded_texture_is_ui=false;g_loaded_material.clear();g_loaded_sop.clear();clear_motion_state();
+    g_preview_mode=PreviewMode::none;g_preview_error.clear();g_loaded_model.reset();g_loaded_texture.clear();g_loaded_texture_is_ui=false;g_loaded_material.clear();g_loaded_sop.clear();clear_motion_state();
     g_imgui_ini.clear(); ImGui::GetIO().IniFilename=nullptr; g_start_layout_built=false;
     g_texture_gallery.clear();
     if(g_preview) g_preview->clear();
@@ -1068,6 +1069,12 @@ void draw_editor_shell() {
         const ImVec2 uv_min = g_loaded_texture_is_ui ? ImVec2(0,0) : ImVec2(0,1);
         const ImVec2 uv_max = g_loaded_texture_is_ui ? ImVec2(1,1) : ImVec2(1,0);
         ImGui::Image(reinterpret_cast<ImTextureID>(g_preview->texture_image()),image_size,uv_min,uv_max);
+    }else if(!g_preview_error.empty()){
+        ImGui::PushStyleColor(ImGuiCol_Text,ImVec4(1.0f,.38f,.32f,1.0f));
+        ImGui::TextWrapped("%s",g_preview_error.c_str());
+        ImGui::PopStyleColor();
+        ImGui::Spacing();
+        ImGui::TextWrapped("请按上面的具体错误检查工作区输入；详情已同时写入 Log。");
     }else{
         ImGui::TextUnformatted("当前对象没有可用预览");
     }
@@ -1079,6 +1086,11 @@ void draw_editor_shell() {
     if (g_workspace && g_selected_asset) {
         const auto& asset = g_workspace->assets()[*g_selected_asset];
         ImGui::Text("%s / %s", gbfr::asset_kind_name(asset.kind), asset.subtype.c_str());
+        if(asset.kind==gbfr::AssetKind::model&&!g_preview_error.empty()){
+            ImGui::PushStyleColor(ImGuiCol_Text,ImVec4(1.0f,.38f,.32f,1.0f));
+            ImGui::TextWrapped("%s",g_preview_error.c_str());
+            ImGui::PopStyleColor();
+        }
         ImGui::SeparatorText("文件路径");
         ImGui::TextColored(workspace_area_color(WorkspaceArea::unpack),"编辑输入 (unpack)");
         ImGui::TextWrapped("%s",utf8(asset.input.wstring()).c_str());

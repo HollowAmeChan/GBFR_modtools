@@ -90,6 +90,8 @@ unpack/data/model_streaming/lod3/pl1400.mmesh
 
 插件复制当前会话的完整模型层级到临时场景，由 v2 FlatBuffers 构建器直接生成二进制。只有全部登记输出都成功后才原子替换目标，因此不会破坏当前 Blender 场景，也不会创建 `_Exported_MInfo`、调试 JSON 或调用 `flatc.exe`。所选工作区必须登记同一模型 ID，且所有输出都必须位于该工作区 `unpack` 内。
 
+官方 v2 导出器会把 `.minfo`、`.skeleton` 和全部 `.mmesh` 作为同一组结果生成；不要只手工复制新的 `.mmesh` 去搭配旧的 `.minfo`。其第二组骨骼索引/权重、顶点色和 UV1 属于可选顶点缓冲，长度可以小于该 LOD 的总顶点数；C++ 预览器按缓冲实际覆盖的顶点读取，未覆盖部分使用默认值。正式 `.mmesh` 路径始终是 `unpack/data/model_streaming/lod#/` 或 `shadowlod#/`，放到 `.minfo` 同目录的副本不会被工作区预览使用。
+
 各文件职责：
 
 | 文件 | 作用 | 游戏是否直接读取 |
