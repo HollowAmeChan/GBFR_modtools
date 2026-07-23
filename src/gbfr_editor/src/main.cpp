@@ -99,6 +99,7 @@ gbfr::editor::TextureGallery g_texture_gallery;
 int g_selected_clh = 0;
 int g_selected_clp = 0;
 int g_selected_bone = -1;
+int g_selected_bone_index = -1;
 int g_selected_collision = -1;
 bool g_all_clp_groups = false;
 bool g_all_bones = false;
@@ -619,7 +620,7 @@ bool load_model_preview(std::size_t index,bool force) {
         g_loaded_model_stats={info.lods.size(),info.shadow_lods.size(),info.submesh_names.size(),mesh.chunks.size(),mesh.vertices.size(),mesh.indices.size()/3,mesh.influence_count,mesh.has_uv1,mesh.has_color};
         discover_motions(key);
         g_preview->frame(g_camera);
-        g_clh_files.clear(); g_clp_files.clear(); g_selected_collision=-1; g_selected_bone=-1; g_selected_clh=0;g_selected_clp=0;g_all_clp_groups=false;
+        g_clh_files.clear(); g_clp_files.clear(); g_selected_collision=-1; g_selected_bone=-1; g_selected_bone_index=-1; g_selected_clh=0;g_selected_clp=0;g_all_clp_groups=false;
         const auto model_id=key.minfo.stem().wstring();
         const auto cloth_prefix=model_id+L"_";
         for(const auto& asset:g_workspace->assets()) if(asset.kind==gbfr::AssetKind::cloth&&asset.available&&asset.input.filename().wstring().starts_with(cloth_prefix)) {
@@ -774,8 +775,9 @@ void update_collision_debug() {
         for(const auto& collision:collisions){
             const auto endpoint=endpoints.find(collision.id);if(endpoint==endpoints.end())continue;
             const auto linked=collision.capsule>=0?endpoints.find(collision.capsule):endpoints.end();
-            bool visible=g_all_bones||g_selected_bone<0||collision.p1==g_selected_bone||collision.p2==g_selected_bone;
-            if(!visible&&linked!=endpoints.end())visible=linked->second.source->p1==g_selected_bone||linked->second.source->p2==g_selected_bone;
+            const bool bone_filter=!g_all_bones&&g_selected_bone_index>=0;
+            bool visible=!bone_filter||(g_selected_bone>=0&&(collision.p1==g_selected_bone||collision.p2==g_selected_bone));
+            if(!visible&&linked!=endpoints.end()&&g_selected_bone>=0)visible=linked->second.source->p1==g_selected_bone||linked->second.source->p2==g_selected_bone;
             if(!visible)continue;
             append_sphere(collision_lines,endpoint->second.center,endpoint->second.radius);
             if(linked!=endpoints.end()){
@@ -790,7 +792,7 @@ void update_collision_debug() {
         for(const auto& node:file.data.nodes)if(const auto point=bone_point(node.bone))positions.emplace(node.bone,*point);
         const auto append_edge=[&](std::vector<gbfr::Vec3>& lines,const gbfr::ClothNode& node,int target){
             if(target<0||target==4095)return;const auto from=positions.find(node.bone),to=positions.find(target);if(from==positions.end()||to==positions.end())return;
-            if(!g_all_bones&&g_selected_bone>=0&&node.bone!=g_selected_bone&&target!=g_selected_bone)return;
+            if(!g_all_bones&&g_selected_bone_index>=0&&(g_selected_bone<0||(node.bone!=g_selected_bone&&target!=g_selected_bone)))return;
             lines.push_back(from->second);lines.push_back(to->second);
         };
         for(const auto& node:file.data.nodes){append_edge(longitudinal_lines,node,node.down);append_edge(lateral_lines,node,node.side);if(node.poly!=node.side)append_edge(polygon_lines,node,node.poly);}
@@ -1176,8 +1178,8 @@ void draw_editor_shell() {
             }
             if (g_show_skeleton && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
                 const float mx=io.MousePos.x-image_origin.x,my=io.MousePos.y-image_origin.y;float best=144.0f;int picked=-1;
-                const auto& pose=g_preview->bone_positions();for(std::size_t i=0;i<g_skeleton.bones.size();++i){const auto& bone=g_skeleton.bones[i];const auto world=i<pose.size()?pose[i]:bone.world_position;gbfr::Vec2 point{};if(!g_preview->project(world,g_camera,point))continue;const float dx=point.x-mx,dy=point.y-my,distance=dx*dx+dy*dy;if(distance<best){best=distance;picked=cloth_bone_id(bone.name);}}
-                if(picked>=0){g_selected_bone=picked;g_all_bones=false;update_collision_debug();}
+                const auto& pose=g_preview->bone_positions();for(std::size_t i=0;i<g_skeleton.bones.size();++i){const auto& bone=g_skeleton.bones[i];const auto world=i<pose.size()?pose[i]:bone.world_position;gbfr::Vec2 point{};if(!g_preview->project(world,g_camera,point))continue;const float dx=point.x-mx,dy=point.y-my,distance=dx*dx+dy*dy;if(distance<best){best=distance;picked=static_cast<int>(i);}}
+                if(picked>=0){g_selected_bone_index=picked;g_selected_bone=cloth_bone_id(g_skeleton.bones[static_cast<std::size_t>(picked)].name);g_all_bones=false;update_collision_debug();}
             }
         }
     }else if(g_preview&&g_preview_mode==PreviewMode::texture&&g_preview->texture_image()&&available.x>1&&available.y>1){
@@ -1334,7 +1336,7 @@ void draw_editor_shell() {
         const float left=std::max(220.0f,ImGui::GetContentRegionAvail().x*.34f);
         ImGui::BeginChild("bones",ImVec2(left,0),ImGuiChildFlags_Borders|ImGuiChildFlags_ResizeX);
         ImGui::Text("骨骼 %zu",g_skeleton.bones.size());
-        for(const auto& bone:g_skeleton.bones){const int id=cloth_bone_id(bone.name);const auto label=bone_display(bone.name)+"##bone"+std::to_string(id);if(ImGui::Selectable(label.c_str(),g_selected_bone==id)){g_selected_bone=id;g_all_bones=false;update_collision_debug();}}
+        for(std::size_t i=0;i<g_skeleton.bones.size();++i){const auto& bone=g_skeleton.bones[i];const int id=cloth_bone_id(bone.name);const auto label=bone_display(bone.name)+"##bone"+std::to_string(i);if(ImGui::Selectable(label.c_str(),g_selected_bone_index==static_cast<int>(i))){g_selected_bone_index=static_cast<int>(i);g_selected_bone=id;g_all_bones=false;update_collision_debug();}}
         ImGui::EndChild();ImGui::SameLine();
         ImGui::BeginChild("cloth",ImVec2(0,0));
         if(ImGui::BeginTabBar("skeleton_details")){
@@ -1362,12 +1364,12 @@ void draw_editor_shell() {
             const auto capsule_count=std::count_if(collisions.begin(),collisions.end(),[](const auto& collision){return collision.capsule>=0;});
             const auto invalid_capsules=std::count_if(collisions.begin(),collisions.end(),[&](const auto& collision){return collision.capsule>=0&&std::none_of(collisions.begin(),collisions.end(),[&](const auto& other){return other.id==collision.capsule;});});
             ImGui::Text("端点 %zu | 胶囊连接 %zu | 无效引用 %zu",collisions.size(),static_cast<std::size_t>(capsule_count),static_cast<std::size_t>(invalid_capsules));
-            if(ImGui::BeginTable("collisions",6,ImGuiTableFlags_RowBg|ImGuiTableFlags_BordersInnerV|ImGuiTableFlags_ScrollY,ImVec2(0,220))){ImGui::TableSetupColumn("ID");ImGui::TableSetupColumn("附着 P1");ImGui::TableSetupColumn("附着 P2");ImGui::TableSetupColumn("半径");ImGui::TableSetupColumn("权重");ImGui::TableSetupColumn("形状");ImGui::TableHeadersRow();for(int i=0;i<static_cast<int>(collisions.size());++i){const auto& c=collisions[i];if(!g_all_bones&&g_selected_bone>=0&&c.p1!=g_selected_bone&&c.p2!=g_selected_bone)continue;ImGui::TableNextRow();ImGui::TableNextColumn();if(ImGui::Selectable((std::to_string(c.id)+"##collision"+std::to_string(i)).c_str(),g_selected_collision==i,ImGuiSelectableFlags_SpanAllColumns))g_selected_collision=i;ImGui::TableNextColumn();ImGui::Text("%d",c.p1);ImGui::TableNextColumn();ImGui::Text("%d",c.p2);ImGui::TableNextColumn();ImGui::Text("%.4f",c.radius);ImGui::TableNextColumn();ImGui::Text("%.3f",c.weight);ImGui::TableNextColumn();if(c.capsule<0)ImGui::TextUnformatted("球");else if(std::any_of(collisions.begin(),collisions.end(),[&](const auto& other){return other.id==c.capsule;}))ImGui::Text("胶囊 -> %d",c.capsule);else ImGui::Text("无效 -> %d",c.capsule);}ImGui::EndTable();}
+            if(ImGui::BeginTable("collisions",6,ImGuiTableFlags_RowBg|ImGuiTableFlags_BordersInnerV|ImGuiTableFlags_ScrollY,ImVec2(0,220))){ImGui::TableSetupColumn("ID");ImGui::TableSetupColumn("附着 P1");ImGui::TableSetupColumn("附着 P2");ImGui::TableSetupColumn("半径");ImGui::TableSetupColumn("权重");ImGui::TableSetupColumn("形状");ImGui::TableHeadersRow();for(int i=0;i<static_cast<int>(collisions.size());++i){const auto& c=collisions[i];if(!g_all_bones&&g_selected_bone_index>=0&&(g_selected_bone<0||(c.p1!=g_selected_bone&&c.p2!=g_selected_bone)))continue;ImGui::TableNextRow();ImGui::TableNextColumn();if(ImGui::Selectable((std::to_string(c.id)+"##collision"+std::to_string(i)).c_str(),g_selected_collision==i,ImGuiSelectableFlags_SpanAllColumns))g_selected_collision=i;ImGui::TableNextColumn();ImGui::Text("%d",c.p1);ImGui::TableNextColumn();ImGui::Text("%d",c.p2);ImGui::TableNextColumn();ImGui::Text("%.4f",c.radius);ImGui::TableNextColumn();ImGui::Text("%.3f",c.weight);ImGui::TableNextColumn();if(c.capsule<0)ImGui::TextUnformatted("球");else if(std::any_of(collisions.begin(),collisions.end(),[&](const auto& other){return other.id==c.capsule;}))ImGui::Text("胶囊 -> %d",c.capsule);else ImGui::Text("无效 -> %d",c.capsule);}ImGui::EndTable();}
             if(g_selected_collision>=0&&g_selected_collision<static_cast<int>(collisions.size())){auto& c=collisions[g_selected_collision];ImGui::SeparatorText("碰撞属性");ImGui::DragFloat("半径",&c.radius,.001f,.0f,10.f,"%.4f");ImGui::DragFloat("权重",&c.weight,.01f,-100.f,100.f,"%.3f");ImGui::DragFloat4("Offset 1",&c.offset1.x,.001f);ImGui::DragFloat4("Offset 2",&c.offset2.x,.001f);if(ImGui::Button("保存到 unpack"))save_selected_collision();ImGui::SameLine();if(ImGui::Button("刷新预览"))update_collision_debug();}
         } else ImGui::TextUnformatted("工作区没有可用 CLH XML。");
         if(!g_clp_files.empty()&&ImGui::CollapsingHeader("CLP 节点",ImGuiTreeNodeFlags_DefaultOpen)){
             ImGui::TextColored(ImVec4(.3f,1.f,.22f,1),"Down 纵向");ImGui::SameLine();ImGui::TextColored(ImVec4(1.f,.25f,.8f,1),"Side 横向");ImGui::SameLine();ImGui::TextColored(ImVec4(1.f,.72f,.1f,1),"Poly 独立关系");
-            if(ImGui::BeginTable("clp_nodes",10,ImGuiTableFlags_RowBg|ImGuiTableFlags_BordersInnerV|ImGuiTableFlags_ScrollY,ImVec2(0,180))){const char* columns[]={"组","骨骼","Up","Down","Side","Poly","旋转限制","摩擦","重量","厚度"};for(const char* column:columns)ImGui::TableSetupColumn(column);ImGui::TableHeadersRow();for(std::size_t file_index=0;file_index<g_clp_files.size();++file_index){if(!solver_group_visible(file_index))continue;const auto& file=g_clp_files[file_index];for(const auto& node:file.data.nodes){if(!g_all_bones&&g_selected_bone>=0&&node.bone!=g_selected_bone&&node.up!=g_selected_bone&&node.down!=g_selected_bone&&node.side!=g_selected_bone&&node.poly!=g_selected_bone)continue;ImGui::TableNextRow();ImGui::TableNextColumn();ImGui::Text("%d",file.data.id);ImGui::TableNextColumn();ImGui::Text("%d",node.bone);ImGui::TableNextColumn();ImGui::Text("%d",node.up);ImGui::TableNextColumn();ImGui::Text("%d",node.down);ImGui::TableNextColumn();ImGui::Text("%d",node.side);ImGui::TableNextColumn();ImGui::Text("%d",node.poly);ImGui::TableNextColumn();ImGui::Text("%.3f",node.rotation_limit);ImGui::TableNextColumn();ImGui::Text("%.3f",node.friction);ImGui::TableNextColumn();ImGui::Text("%.3f",node.weight);ImGui::TableNextColumn();ImGui::Text("%.3f",node.thickness);}}ImGui::EndTable();}
+            if(ImGui::BeginTable("clp_nodes",10,ImGuiTableFlags_RowBg|ImGuiTableFlags_BordersInnerV|ImGuiTableFlags_ScrollY,ImVec2(0,180))){const char* columns[]={"组","骨骼","Up","Down","Side","Poly","旋转限制","摩擦","重量","厚度"};for(const char* column:columns)ImGui::TableSetupColumn(column);ImGui::TableHeadersRow();for(std::size_t file_index=0;file_index<g_clp_files.size();++file_index){if(!solver_group_visible(file_index))continue;const auto& file=g_clp_files[file_index];for(const auto& node:file.data.nodes){if(!g_all_bones&&g_selected_bone_index>=0&&(g_selected_bone<0||(node.bone!=g_selected_bone&&node.up!=g_selected_bone&&node.down!=g_selected_bone&&node.side!=g_selected_bone&&node.poly!=g_selected_bone)))continue;ImGui::TableNextRow();ImGui::TableNextColumn();ImGui::Text("%d",file.data.id);ImGui::TableNextColumn();ImGui::Text("%d",node.bone);ImGui::TableNextColumn();ImGui::Text("%d",node.up);ImGui::TableNextColumn();ImGui::Text("%d",node.down);ImGui::TableNextColumn();ImGui::Text("%d",node.side);ImGui::TableNextColumn();ImGui::Text("%d",node.poly);ImGui::TableNextColumn();ImGui::Text("%.3f",node.rotation_limit);ImGui::TableNextColumn();ImGui::Text("%.3f",node.friction);ImGui::TableNextColumn();ImGui::Text("%.3f",node.weight);ImGui::TableNextColumn();ImGui::Text("%.3f",node.thickness);}}ImGui::EndTable();}
         }
         ImGui::EndTabItem();
         }
