@@ -199,11 +199,24 @@ bool PreviewRenderer::transform_bone_point(std::size_t bone_index,Vec3 local,Vec
 }
 
 bool PreviewRenderer::load_dds(const fs::path& path,ComPtr<ID3D11ShaderResourceView>& output,unsigned* output_width,unsigned* output_height,bool display_encoded,unsigned maximum_dimension) {
-    std::ifstream stream(path,std::ios::binary|std::ios::ate); if(!stream) return false; const auto file_size=stream.tellg(); if(file_size<148) return false;
+    std::ifstream stream(path,std::ios::binary|std::ios::ate); if(!stream) return false; const auto file_size=stream.tellg(); if(file_size<128) return false;
     std::vector<std::byte> bytes(static_cast<std::size_t>(file_size));stream.seekg(0);stream.read(reinterpret_cast<char*>(bytes.data()),file_size);
     auto u32=[&](std::size_t p){std::uint32_t v{};std::memcpy(&v,bytes.data()+p,4);return v;};
-    if(std::memcmp(bytes.data(),"DDS ",4)!=0||std::memcmp(bytes.data()+84,"DX10",4)!=0) return false;
-    const UINT height=u32(12),width=u32(16),mips=std::max(1u,u32(28)); const auto format=static_cast<DXGI_FORMAT>(u32(128));
+    if(std::memcmp(bytes.data(),"DDS ",4)!=0||u32(4)!=124||u32(76)!=32) return false;
+    const UINT height=u32(12),width=u32(16),mips=std::max(1u,u32(28));
+    if(!width||!height)return false;
+    DXGI_FORMAT format=DXGI_FORMAT_UNKNOWN;
+    std::size_t data_offset=128;
+    const auto fourcc=u32(84);
+    const auto make_fourcc=[](char a,char b,char c,char d){return static_cast<std::uint32_t>(static_cast<unsigned char>(a))|
+        (static_cast<std::uint32_t>(static_cast<unsigned char>(b))<<8)|(static_cast<std::uint32_t>(static_cast<unsigned char>(c))<<16)|
+        (static_cast<std::uint32_t>(static_cast<unsigned char>(d))<<24);};
+    if(fourcc==make_fourcc('D','X','1','0')){
+        if(bytes.size()<148)return false;
+        format=static_cast<DXGI_FORMAT>(u32(128));data_offset=148;
+    }else if(fourcc==make_fourcc('B','C','5','U')||fourcc==make_fourcc('A','T','I','2'))format=DXGI_FORMAT_BC5_UNORM;
+    else if(fourcc==make_fourcc('B','C','5','S'))format=DXGI_FORMAT_BC5_SNORM;
+    else return false;
     UINT block_bytes{};
     switch(format){
     case DXGI_FORMAT_BC1_UNORM:case DXGI_FORMAT_BC1_UNORM_SRGB:case DXGI_FORMAT_BC4_UNORM:case DXGI_FORMAT_BC4_SNORM:block_bytes=8;break;
@@ -216,7 +229,7 @@ bool PreviewRenderer::load_dds(const fs::path& path,ComPtr<ID3D11ShaderResourceV
     else if(format==DXGI_FORMAT_BC2_UNORM_SRGB){resource_format=DXGI_FORMAT_BC2_TYPELESS;if(display_encoded)view_format=DXGI_FORMAT_BC2_UNORM;}
     else if(format==DXGI_FORMAT_BC3_UNORM_SRGB){resource_format=DXGI_FORMAT_BC3_TYPELESS;if(display_encoded)view_format=DXGI_FORMAT_BC3_UNORM;}
     else if(format==DXGI_FORMAT_BC7_UNORM_SRGB){resource_format=DXGI_FORMAT_BC7_TYPELESS;if(display_encoded)view_format=DXGI_FORMAT_BC7_UNORM;}
-    std::size_t offset=148;UINT selected_width=width,selected_height=height,first_mip=0;
+    std::size_t offset=data_offset;UINT selected_width=width,selected_height=height,first_mip=0;
     while(maximum_dimension&&first_mip+1<mips&&std::max(selected_width,selected_height)>maximum_dimension){const UINT row=std::max(1u,(selected_width+3)/4)*block_bytes;offset+=row*std::max(1u,(selected_height+3)/4);selected_width=std::max(1u,selected_width/2);selected_height=std::max(1u,selected_height/2);++first_mip;}
     const UINT selected_mips=maximum_dimension?1u:mips-first_mip;
     D3D11_TEXTURE2D_DESC desc{};desc.Width=selected_width;desc.Height=selected_height;desc.MipLevels=selected_mips;desc.ArraySize=1;desc.Format=resource_format;desc.SampleDesc.Count=1;desc.BindFlags=D3D11_BIND_SHADER_RESOURCE;

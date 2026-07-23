@@ -47,6 +47,20 @@ int main() {
     fs::create_directories(root / L"source");
     fs::create_directories(root / L"unpack");
     {
+        std::vector<unsigned char> legacy_bc5(128+16,0);
+        const auto put_u32=[&](std::size_t offset,std::uint32_t value){for(unsigned shift=0;shift<32;shift+=8)legacy_bc5[offset+shift/8]=static_cast<unsigned char>((value>>shift)&0xff);};
+        legacy_bc5[0]='D';legacy_bc5[1]='D';legacy_bc5[2]='S';legacy_bc5[3]=' ';
+        put_u32(4,124);put_u32(8,0x00081007);put_u32(12,4);put_u32(16,4);put_u32(20,16);put_u32(28,1);
+        put_u32(76,32);put_u32(80,4);legacy_bc5[84]='B';legacy_bc5[85]='C';legacy_bc5[86]='5';legacy_bc5[87]='U';put_u32(108,0x1000);
+        const auto path=test_temp/L"legacy_bc5u.dds";
+        std::ofstream(path,std::ios::binary).write(reinterpret_cast<const char*>(legacy_bc5.data()),static_cast<std::streamsize>(legacy_bc5.size()));
+        Microsoft::WRL::ComPtr<ID3D11Device> device;Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
+        if(FAILED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_WARP,nullptr,0,nullptr,0,D3D11_SDK_VERSION,&device,nullptr,&context)))return 92;
+        gbfr::PreviewRenderer preview;
+        if(!preview.initialize(device.Get(),context.Get(),fs::path(GBFR_ROOT_DIR)/L"assets/shaders/preview.hlsl")||
+           !preview.load_texture_preview(path)||!preview.texture_image()||preview.texture_width()!=4||preview.texture_height()!=4)return 93;
+    }
+    {
         std::vector<unsigned char> bytes(84,0);
         const auto put_u16=[&](std::size_t offset,std::uint16_t value){bytes[offset]=static_cast<unsigned char>(value);bytes[offset+1]=static_cast<unsigned char>(value>>8);};
         for(std::uint16_t i=0;i<8;++i)put_u16(32+i*2,i);
