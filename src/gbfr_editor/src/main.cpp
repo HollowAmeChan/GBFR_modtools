@@ -232,7 +232,7 @@ bool load_workspace(const std::filesystem::path& path) {
         if(g_preview) g_preview->clear();
         const auto settings_directory=g_workspace->root()/L".gbfr";
         std::filesystem::create_directories(settings_directory);
-        const auto settings_file=settings_directory/L"imgui_v4.ini";
+        const auto settings_file=settings_directory/L"imgui_v5.ini";
         g_imgui_ini=utf8(settings_file.wstring());
         ImGui::GetIO().IniFilename=g_imgui_ini.c_str();
         if(std::filesystem::is_regular_file(settings_file)) {
@@ -751,6 +751,7 @@ void build_default_dock_layout(ImGuiID dockspace) {
     ImGui::DockBuilderDockWindow("Inspector",right_top);
     ImGui::DockBuilderDockWindow("Skeleton & Cloth",right_bottom);
     ImGui::DockBuilderDockWindow("Log",bottom);
+    ImGui::DockBuilderDockWindow("预览控制",bottom);
     ImGui::DockBuilderFinish(dockspace);
     g_reset_layout=false;
 }
@@ -824,6 +825,45 @@ void draw_motion_controls() {
             ImGui::EndTable();
         }
     }
+}
+
+void draw_preview_controls() {
+    ImGui::Begin("预览控制");
+    if(g_preview_mode==PreviewMode::model){
+        if(g_loaded_model){
+            const auto lod_label=std::string(g_loaded_model->shadow_lod?"shadowlod":"lod")+std::to_string(g_loaded_model->lod_index);
+            ImGui::Text("当前预览：%s",utf8(g_loaded_model->minfo.stem().wstring()).c_str());
+            ImGui::SameLine(0.0f,12.0f);ImGui::TextColored({0.38f,0.78f,1.0f,1.0f},"[%s]",lod_label.c_str());
+            ImGui::TextDisabled("LOD %zu + shadow %zu | Mesh %zu | 分段 %zu | %zu 顶点 / %zu 三角形 | %u 权重 | UV1 %s | COLOR %s",
+                g_loaded_model_stats.lod_count,g_loaded_model_stats.shadow_lod_count,g_loaded_model_stats.mesh_count,g_loaded_model_stats.chunk_count,
+                g_loaded_model_stats.vertex_count,g_loaded_model_stats.triangle_count,g_loaded_model_stats.influence_count,
+                g_loaded_model_stats.has_uv1?"有":"无",g_loaded_model_stats.has_color?"有":"无");
+            draw_preview_source_inline("模型",g_loaded_model->minfo);
+            draw_preview_source_inline("材质 JSON",g_loaded_material);
+            draw_preview_source("DDS",g_workspace->root()/L"unpack/data");
+            if(!g_loaded_sop.empty())draw_preview_source_inline("SOP",g_loaded_sop);
+            else {ImGui::TextDisabled("SOP [无]");ImGui::SameLine(0.0f,12.0f);}
+            if(!g_clp_files.empty())draw_preview_source("cloth",g_clp_files.front().path);
+            else ImGui::TextDisabled("cloth [无]");
+            ImGui::TextDisabled("预览不读取 build；build 仅作为最终 Mod 输出。");
+        }
+        ImGui::Checkbox("模型", &g_show_mesh); ImGui::SameLine();
+        const char* modes[]={"无光照","柔和光照","线框"};int mode=static_cast<int>(g_preview_shading);ImGui::SetNextItemWidth(120);
+        if(ImGui::Combo("显示模式",&mode,modes,3))g_preview_shading=static_cast<gbfr::PreviewShadingMode>(mode);ImGui::SameLine();
+        ImGui::Checkbox("骨架", &g_show_skeleton); ImGui::SameLine();
+        if(ImGui::Checkbox("碰撞体", &g_show_collisions)&&g_show_collisions)update_collision_debug(); ImGui::SameLine();
+        if(ImGui::Checkbox("Cloth 连接", &g_show_cloth_links)&&g_show_cloth_links)update_collision_debug(); ImGui::SameLine();
+        ImGui::Checkbox("透明覆盖",&g_show_alpha_overlays);ImGui::SameLine();
+        if (g_preview && g_preview->has_model() && ImGui::Button("取景")) g_preview->frame(g_camera);
+        if(!g_motion_files.empty())draw_motion_controls();
+    }else if(g_preview_mode==PreviewMode::texture&&g_preview&&g_preview->texture_image()){
+        ImGui::Text("当前预览：%s  |  %u x %u",utf8(g_loaded_texture.filename().wstring()).c_str(),g_preview->texture_width(),g_preview->texture_height());
+        ImGui::SameLine(0.0f,16.0f);draw_preview_source("贴图",g_loaded_texture);
+        ImGui::TextDisabled("预览不读取 build；build 仅作为最终 Mod 输出。");
+    }else{
+        ImGui::TextDisabled("当前没有可调整的预览对象。");
+    }
+    ImGui::End();
 }
 
 void return_to_start() {
@@ -985,39 +1025,8 @@ void draw_editor_shell() {
     }
     ImGui::End();
 
+    draw_preview_controls();
     ImGui::Begin("Viewport");
-    if(g_preview_mode==PreviewMode::model){
-        if(g_loaded_model){
-            const auto lod_label=std::string(g_loaded_model->shadow_lod?"shadowlod":"lod")+std::to_string(g_loaded_model->lod_index);
-            ImGui::Text("当前预览：%s",utf8(g_loaded_model->minfo.stem().wstring()).c_str());
-            ImGui::SameLine(0.0f,12.0f);ImGui::TextColored({0.38f,0.78f,1.0f,1.0f},"[%s]",lod_label.c_str());
-            ImGui::TextDisabled("LOD %zu + shadow %zu | Mesh %zu | 分段 %zu | %zu 顶点 / %zu 三角形 | %u 权重 | UV1 %s | COLOR %s",
-                g_loaded_model_stats.lod_count,g_loaded_model_stats.shadow_lod_count,g_loaded_model_stats.mesh_count,g_loaded_model_stats.chunk_count,
-                g_loaded_model_stats.vertex_count,g_loaded_model_stats.triangle_count,g_loaded_model_stats.influence_count,
-                g_loaded_model_stats.has_uv1?"有":"无",g_loaded_model_stats.has_color?"有":"无");
-            draw_preview_source_inline("模型",g_loaded_model->minfo);
-            draw_preview_source_inline("材质 JSON",g_loaded_material);
-            draw_preview_source("DDS",g_workspace->root()/L"unpack/data");
-            if(!g_loaded_sop.empty())draw_preview_source_inline("SOP",g_loaded_sop);
-            else {ImGui::TextDisabled("SOP [无]");ImGui::SameLine(0.0f,12.0f);}
-            if(!g_clp_files.empty())draw_preview_source("cloth",g_clp_files.front().path);
-            else ImGui::TextDisabled("cloth [无]");
-            ImGui::TextDisabled("预览不读取 build；build 仅作为最终 Mod 输出。");
-        }
-        ImGui::Checkbox("模型", &g_show_mesh); ImGui::SameLine();
-        const char* modes[]={"无光照","柔和光照","线框"};int mode=static_cast<int>(g_preview_shading);ImGui::SetNextItemWidth(120);
-        if(ImGui::Combo("显示模式",&mode,modes,3))g_preview_shading=static_cast<gbfr::PreviewShadingMode>(mode);ImGui::SameLine();
-        ImGui::Checkbox("骨架", &g_show_skeleton); ImGui::SameLine();
-        if(ImGui::Checkbox("碰撞体", &g_show_collisions)&&g_show_collisions)update_collision_debug(); ImGui::SameLine();
-        if(ImGui::Checkbox("Cloth 连接", &g_show_cloth_links)&&g_show_cloth_links)update_collision_debug(); ImGui::SameLine();
-        ImGui::Checkbox("透明覆盖",&g_show_alpha_overlays);ImGui::SameLine();
-        if (g_preview && g_preview->has_model() && ImGui::Button("取景")) g_preview->frame(g_camera);
-        if(!g_motion_files.empty())draw_motion_controls();
-    }else if(g_preview_mode==PreviewMode::texture&&g_preview&&g_preview->texture_image()){
-        ImGui::Text("当前预览：%s  |  %u x %u",utf8(g_loaded_texture.filename().wstring()).c_str(),g_preview->texture_width(),g_preview->texture_height());
-        ImGui::SameLine(0.0f,16.0f);draw_preview_source("贴图",g_loaded_texture);
-        ImGui::TextDisabled("预览不读取 build；build 仅作为最终 Mod 输出。");
-    }
     ImVec2 available = ImGui::GetContentRegionAvail();
     if (g_preview&&g_preview_mode==PreviewMode::model&&available.x > 1 && available.y > 1) {
         g_preview->resize(static_cast<unsigned>(available.x), static_cast<unsigned>(available.y));
