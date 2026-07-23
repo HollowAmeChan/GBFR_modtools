@@ -42,7 +42,8 @@ gbfr::PreviewRenderer* g_preview = nullptr;
 std::unique_ptr<gbfr::Workspace> g_workspace;
 std::string g_imgui_ini;
 std::optional<std::size_t> g_selected_asset;
-std::optional<std::size_t> g_pending_a4_asset;
+ImGuiSelectionBasicStorage g_asset_selection;
+std::vector<std::size_t> g_pending_a4_assets;
 bool g_changed_only = false;
 enum class AssetFunction { all, model, texture, ui_image, material, cloth };
 enum class PreviewMode { none, model, texture };
@@ -227,6 +228,7 @@ bool load_workspace(const std::filesystem::path& path) {
         g_workspace = std::make_unique<gbfr::Workspace>(gbfr::Workspace::load(path));
         clear_motion_state();
         g_selected_asset.reset();
+        g_asset_selection.Clear();
         g_texture_gallery.clear();
         g_asset_function=AssetFunction::all;g_asset_search.fill('\0');
         g_preview_mode=PreviewMode::none;g_preview_error.clear();g_loaded_model.reset();g_loaded_texture.clear();g_loaded_texture_is_ui=false;g_loaded_material.clear();g_loaded_sop.clear();
@@ -394,6 +396,85 @@ void run_selected_asset_action(bool restore) {
     } catch (const std::exception& error) {
         gbfr::Log::write(gbfr::LogLevel::error, error.what());
     }
+}
+
+std::vector<std::size_t> selected_asset_indices() {
+    std::vector<std::size_t> result;
+    if (!g_workspace) return result;
+    void* iterator{};ImGuiID id{};
+    while(g_asset_selection.GetNextSelectedItem(&iterator,&id)){
+        if(!id)continue;const auto index=static_cast<std::size_t>(id-1);
+        if(index<g_workspace->assets().size())result.push_back(index);
+    }
+    if (result.empty() && g_selected_asset && *g_selected_asset < g_workspace->assets().size()) result.push_back(*g_selected_asset);
+    return result;
+}
+
+void run_asset_actions(const std::vector<std::size_t>& indices, bool restore) {
+    if (!g_workspace || indices.empty()) return;
+    std::size_t succeeded{},skipped{};
+    for (const auto index : indices) {
+        const auto kind=g_workspace->assets()[index].kind;
+        const bool supported=restore?(kind!=gbfr::AssetKind::new_texture&&kind!=gbfr::AssetKind::cloth):(kind!=gbfr::AssetKind::cloth);
+        if(!supported){++skipped;continue;}
+        try {
+            if (restore) g_workspace->restore_asset(index);
+            else g_workspace->build_asset(index);
+            ++succeeded;
+        } catch (const std::exception& error) {
+            gbfr::Log::write(gbfr::LogLevel::error, "资源操作失败：" + std::string(error.what()));
+        }
+    }
+    g_workspace->refresh();
+    if (restore) g_texture_gallery.clear();
+    if (restore && g_selected_asset &&
+        std::find(indices.begin(), indices.end(), *g_selected_asset) != indices.end() &&
+        g_workspace->assets()[*g_selected_asset].kind == gbfr::AssetKind::model) load_model_preview(*g_selected_asset, true);
+    gbfr::Log::write(gbfr::LogLevel::info, (restore ? "已恢复 " : "已构建 ") + std::to_string(succeeded) + "/" + std::to_string(indices.size()) + " 个资源，跳过不支持项 " + std::to_string(skipped));
+}
+
+void build_all_changed_assets() {
+    if (!g_workspace) return;
+    std::vector<std::size_t> indices;
+    for (std::size_t index = 0; index < g_workspace->assets().size(); ++index) {
+        const auto& asset = g_workspace->assets()[index];
+        if (asset.available && asset.changed && asset.kind!=gbfr::AssetKind::cloth) indices.push_back(index);
+    }
+    run_asset_actions(indices, false);
+}
+
+void remove_selected_material_a4(const std::vector<std::size_t>& indices) {
+    if (!g_workspace) return;
+    std::size_t files{}, removed{};
+    for (const auto index : indices) {
+        if (index >= g_workspace->assets().size() || g_workspace->assets()[index].kind != gbfr::AssetKind::material) continue;
+        try {
+            const auto count = g_workspace->remove_material_a4(index);
+            if (count) { ++files; removed += count; }
+        } catch (const std::exception& error) {
+            gbfr::Log::write(gbfr::LogLevel::error, "A4 清除失败：" + std::string(error.what()));
+        }
+    }
+    gbfr::Log::write(gbfr::LogLevel::info, "已从 " + std::to_string(files) + " 个 mmat 清除 " + std::to_string(removed) + " 个 A4 引用");
+    g_workspace->refresh();
+}
+
+void draw_material_a4_confirmation_popup() {
+    if(!ImGui::BeginPopupModal("确认清除 mmat A4",nullptr,ImGuiWindowFlags_AlwaysAutoResize))return;
+    if(g_workspace&&!g_pending_a4_assets.empty()){
+        std::size_t count{},files{};
+        for(const auto index:g_pending_a4_assets) if(index<g_workspace->assets().size()&&g_workspace->assets()[index].kind==gbfr::AssetKind::material){
+            try{const auto current=g_workspace->material_a4_count(index);if(current){++files;count+=current;}}catch(...){}}
+        ImGui::Text("将处理 %zu 个 mmat，删除 %zu 个 A4 流式贴图引用。",files,count);
+        ImGui::TextWrapped("删除后材质会改查 A2.Name 对应的普通 .texture；请同时构建所需的 2k/4k 贴图。");
+        if(ImGui::Button("确认清除")){
+            remove_selected_material_a4(g_pending_a4_assets);
+            g_pending_a4_assets.clear();ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if(ImGui::Button("取消")){g_pending_a4_assets.clear();ImGui::CloseCurrentPopup();}
+    }else{g_pending_a4_assets.clear();ImGui::CloseCurrentPopup();}
+    ImGui::EndPopup();
 }
 
 void update_collision_debug();
@@ -875,7 +956,7 @@ void draw_preview_controls() {
 
 void return_to_start() {
     if(!g_imgui_ini.empty()) ImGui::SaveIniSettingsToDisk(g_imgui_ini.c_str());
-    g_workspace.reset(); g_selected_asset.reset(); g_skeleton.bones.clear(); g_clh_files.clear(); g_clp_files.clear();g_sop_inspector.clear();
+    g_workspace.reset(); g_selected_asset.reset(); g_asset_selection.Clear(); g_skeleton.bones.clear(); g_clh_files.clear(); g_clp_files.clear();g_sop_inspector.clear();
     g_preview_mode=PreviewMode::none;g_preview_error.clear();g_loaded_model.reset();g_loaded_texture.clear();g_loaded_texture_is_ui=false;g_loaded_material.clear();g_loaded_sop.clear();clear_motion_state();
     g_imgui_ini.clear(); ImGui::GetIO().IniFilename=nullptr; g_start_layout_built=false;
     g_texture_gallery.clear();
@@ -971,8 +1052,12 @@ void draw_editor_shell() {
     if (ImGui::Button("重置布局")) g_reset_layout=true;
     ImGui::SameLine();
     if (g_workspace && ImGui::Button("刷新")) {g_workspace->refresh();g_texture_gallery.clear();}
-    ImGui::SameLine();
-    ImGui::Checkbox("只看修改", &g_changed_only);
+        ImGui::SameLine();
+        ImGui::Checkbox("只看修改", &g_changed_only);
+        ImGui::SameLine();
+        ImGui::BeginDisabled(g_workspace->changed_count() == 0);
+        if (ImGui::Button("构建全部修改项")) build_all_changed_assets();
+        ImGui::EndDisabled();
     if (!g_workspace) {
         ImGui::Separator();
         ImGui::TextUnformatted("请先选择 unpack 中的 .minfo 文件。");
@@ -992,6 +1077,17 @@ void draw_editor_shell() {
         ImGui::InputTextWithHint("##asset_search","按文件名、子类或输出路径过滤",g_asset_search.data(),g_asset_search.size());
         std::vector<std::size_t> visible_assets;
         for(std::size_t index=0;index<g_workspace->assets().size();++index){const auto& asset=g_workspace->assets()[index];if(g_changed_only&&!asset.changed)continue;if(!asset_matches_function(asset,g_asset_function)||!asset_matches_search(asset))continue;visible_assets.push_back(index);}
+        std::size_t visible_selected{};
+        for (const auto index : visible_assets) if (g_asset_selection.Contains(static_cast<ImGuiID>(index+1))) ++visible_selected;
+        bool select_visible = !visible_assets.empty() && visible_selected == visible_assets.size();
+        const bool select_visible_mixed = visible_selected != 0 && !select_visible;
+        ImGui::PushItemFlag(ImGuiItemFlags_MixedValue, select_visible_mixed);
+        if (ImGui::Checkbox("选择当前列表", &select_visible)) {
+            for (const auto index : visible_assets) g_asset_selection.SetItemSelected(static_cast<ImGuiID>(index+1),select_visible);
+        }
+        ImGui::PopItemFlag();
+        ImGui::SameLine();
+        ImGui::TextDisabled("已选 %d（Ctrl/Shift/框选）", g_asset_selection.Size);
         const auto table_flags=ImGuiTableFlags_RowBg|ImGuiTableFlags_BordersInnerV|ImGuiTableFlags_ScrollY|ImGuiTableFlags_Resizable|ImGuiTableFlags_Sortable|ImGuiTableFlags_SortMulti|ImGuiTableFlags_SortTristate;
         if (ImGui::BeginTable("assets", 5, table_flags)) {
         ImGui::TableSetupScrollFreeze(0, 1);
@@ -1016,18 +1112,29 @@ void draw_editor_shell() {
             });
             specs->SpecsDirty=false;
         }
-        for (const auto index:visible_assets) {
+        g_asset_selection.UserData=&visible_assets;
+        g_asset_selection.AdapterIndexToStorageId=[](ImGuiSelectionBasicStorage* self,int index){
+            const auto& visible=*static_cast<const std::vector<std::size_t>*>(self->UserData);
+            return static_cast<ImGuiID>(visible[static_cast<std::size_t>(index)]+1);
+        };
+        auto* selection_io=ImGui::BeginMultiSelect(ImGuiMultiSelectFlags_BoxSelect1d|ImGuiMultiSelectFlags_ClearOnEscape,
+                                                    g_asset_selection.Size,static_cast<int>(visible_assets.size()));
+        g_asset_selection.ApplyRequests(selection_io);
+        for (std::size_t visible_index=0;visible_index<visible_assets.size();++visible_index) {
+            const auto index=visible_assets[visible_index];
             const auto& asset = g_workspace->assets()[index];
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
+            ImGui::SetNextItemSelectionUserData(static_cast<ImGuiSelectionUserData>(visible_index));
             const std::string id = (asset.changed ? "已修改##" : asset.available ? "未修改##" : "缺失##") + std::to_string(index);
-            if (ImGui::Selectable(id.c_str(), g_selected_asset == index, ImGuiSelectableFlags_SpanAllColumns)) {g_selected_asset = index;preview_asset(index);}
+            if (ImGui::Selectable(id.c_str(), g_asset_selection.Contains(static_cast<ImGuiID>(index+1)), ImGuiSelectableFlags_SpanAllColumns)) {g_selected_asset = index;preview_asset(index);}
             ImGui::TableNextColumn(); ImGui::TextUnformatted(gbfr::asset_kind_name(asset.kind));
             ImGui::TableNextColumn(); ImGui::TextUnformatted(asset.subtype.c_str());
             ImGui::TableNextColumn(); ImGui::TextUnformatted(utf8(asset.input.filename().wstring()).c_str());
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", utf8(asset.input.wstring()).c_str());
             ImGui::TableNextColumn(); ImGui::TextUnformatted(utf8(asset.output.lexically_relative(g_workspace->root()).wstring()).c_str());
         }
+            selection_io=ImGui::EndMultiSelect();g_asset_selection.ApplyRequests(selection_io);g_asset_selection.UserData=nullptr;
             ImGui::EndTable();
         }
     }
@@ -1087,7 +1194,33 @@ void draw_editor_shell() {
     g_texture_gallery.draw(*g_workspace,*g_preview,g_selected_asset,preview_gallery_texture);
 
     ImGui::Begin("Inspector");
-    if (g_workspace && g_selected_asset) {
+    if(g_workspace){
+        ImGui::BeginDisabled(g_workspace->changed_count()==0);
+        if(ImGui::Button("构建全部修改项"))build_all_changed_assets();
+        ImGui::EndDisabled();
+        ImGui::Separator();
+    }
+    const auto inspector_indices=selected_asset_indices();
+    if(g_workspace&&g_asset_selection.Size>1){
+        std::size_t changed{},available_count{},materials{},a4_files{};
+        for(const auto index:inspector_indices){const auto& item=g_workspace->assets()[index];if(item.changed)++changed;if(item.available)++available_count;if(item.kind==gbfr::AssetKind::material){++materials;try{if(g_workspace->material_a4_count(index))++a4_files;}catch(...){}}}
+        ImGui::Text("多选 / %zu 个资源",inspector_indices.size());
+        ImGui::Text("可用 %zu  |  已修改 %zu  |  mmat %zu",available_count,changed,materials);
+        ImGui::SeparatorText("批量操作");
+        ImGui::BeginDisabled(available_count==0);
+        if(ImGui::Button("构建选中项"))run_asset_actions(inspector_indices,false);
+        ImGui::SameLine();
+        if(ImGui::Button("恢复选中项"))run_asset_actions(inspector_indices,true);
+        ImGui::EndDisabled();
+        ImGui::BeginDisabled(a4_files==0);
+        if(ImGui::Button("清除选中 mmat 的 A4")){
+            g_pending_a4_assets.clear();for(const auto index:inspector_indices)if(g_workspace->assets()[index].kind==gbfr::AssetKind::material){try{if(g_workspace->material_a4_count(index))g_pending_a4_assets.push_back(index);}catch(...){}}
+            ImGui::OpenPopup("确认清除 mmat A4");
+        }
+        ImGui::EndDisabled();
+        ImGui::TextDisabled("含 A4 的 mmat：%zu",a4_files);
+        draw_material_a4_confirmation_popup();
+    }else if (g_workspace && g_selected_asset) {
         const auto& asset = g_workspace->assets()[*g_selected_asset];
         ImGui::Text("%s / %s", gbfr::asset_kind_name(asset.kind), asset.subtype.c_str());
         if(asset.kind==gbfr::AssetKind::model&&!g_preview_error.empty()){
@@ -1117,8 +1250,35 @@ void draw_editor_shell() {
     ImGui::End();
 
     ImGui::Begin("快捷操作");
-    if (g_workspace && g_selected_asset && *g_selected_asset < g_workspace->assets().size()) {
-        const auto index=*g_selected_asset;
+    if (g_workspace && ((!g_selected_asset || *g_selected_asset < g_workspace->assets().size()) &&
+                        (g_selected_asset || g_asset_selection.Size > 0))) {
+        const auto batch_indices = selected_asset_indices();
+        if (g_asset_selection.Size > 1) {
+            ImGui::Text("已选 %zu 个资源", batch_indices.size());
+            ImGui::Separator();
+            const auto available_count = std::count_if(batch_indices.begin(), batch_indices.end(), [&](const auto index){return g_workspace->assets()[index].available;});
+            ImGui::BeginDisabled(available_count == 0);
+            if (ImGui::Button("构建选中项")) run_asset_actions(batch_indices, false);
+            ImGui::SameLine();
+            if (ImGui::Button("从 source 恢复选中")) run_asset_actions(batch_indices, true);
+            ImGui::EndDisabled();
+            std::size_t material_count{}, a4_files{};
+            for (const auto index : batch_indices) if (g_workspace->assets()[index].kind == gbfr::AssetKind::material) {
+                ++material_count;
+                try { if (g_workspace->material_a4_count(index)) ++a4_files; } catch (...) {}
+            }
+            ImGui::Text("其中 mmat：%zu 个，含 A4：%zu 个", material_count, a4_files);
+            ImGui::BeginDisabled(a4_files == 0);
+            if (ImGui::Button("清除选中 mmat 的 A4")) {
+                g_pending_a4_assets.clear();
+                for (const auto index : batch_indices) if (g_workspace->assets()[index].kind == gbfr::AssetKind::material) {
+                    try { if (g_workspace->material_a4_count(index)) g_pending_a4_assets.push_back(index); } catch (...) {}
+                }
+                ImGui::OpenPopup("确认清除 mmat A4");
+            }
+            ImGui::EndDisabled();
+        } else {
+        const auto index=g_selected_asset?*g_selected_asset:batch_indices.front();
         const auto& asset=g_workspace->assets()[index];
         ImGui::Text("%s / %s",gbfr::asset_kind_name(asset.kind),asset.subtype.c_str());
         ImGui::TextColored(asset.changed?ImVec4(.95f,.72f,.25f,1):asset.available?ImVec4(.35f,.8f,.5f,1):ImVec4(.95f,.35f,.35f,1),
@@ -1143,7 +1303,7 @@ void draw_editor_shell() {
             if(a4_error.empty())ImGui::Text("Granite A4 引用：%zu",a4_count);
             else ImGui::TextWrapped("A4 读取失败：%s",a4_error.c_str());
             ImGui::BeginDisabled(!a4_error.empty()||a4_count==0);
-            if(ImGui::Button("清除全部 A4")){g_pending_a4_asset=index;ImGui::OpenPopup("确认清除 mmat A4");}
+            if(ImGui::Button("清除全部 A4")){g_pending_a4_assets={index};ImGui::OpenPopup("确认清除 mmat A4");}
             ImGui::EndDisabled();
             if(ImGui::Button("编码 mmat 到 build"))run_selected_asset_action(false);
             if(ImGui::Button("从 source 恢复 JSON"))run_selected_asset_action(true);
@@ -1151,24 +1311,9 @@ void draw_editor_shell() {
             ImGui::TextUnformatted("该资源目前只支持查看和编辑中间态。");
         }
         ImGui::EndDisabled();
+        }
     }else ImGui::TextUnformatted("选择一个资源后显示可用操作。");
-    if(ImGui::BeginPopupModal("确认清除 mmat A4",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){
-        if(g_workspace&&g_pending_a4_asset&&*g_pending_a4_asset<g_workspace->assets().size()){
-            const auto index=*g_pending_a4_asset;const auto& asset=g_workspace->assets()[index];
-            std::size_t count{};try{count=g_workspace->material_a4_count(index);}catch(...){count=0;}
-            ImGui::Text("文件：%s",utf8(asset.input.filename().wstring()).c_str());
-            ImGui::Text("将删除 %zu 个 A4 流式贴图引用。",count);
-            ImGui::TextWrapped("删除后材质会改查 A2.Name 对应的普通 .texture；请同时构建所需的 2k/4k 贴图。");
-            if(ImGui::Button("确认清除")){
-                try{const auto removed=g_workspace->remove_material_a4(index);gbfr::Log::write(gbfr::LogLevel::info,"已从 mmat JSON 清除 "+std::to_string(removed)+" 个 A4 引用");}
-                catch(const std::exception& error){gbfr::Log::write(gbfr::LogLevel::error,error.what());}
-                g_pending_a4_asset.reset();ImGui::CloseCurrentPopup();
-            }
-            ImGui::SameLine();
-            if(ImGui::Button("取消")){g_pending_a4_asset.reset();ImGui::CloseCurrentPopup();}
-        }else{g_pending_a4_asset.reset();ImGui::CloseCurrentPopup();}
-        ImGui::EndPopup();
-    }
+    draw_material_a4_confirmation_popup();
     ImGui::End();
 
     ImGui::Begin("Skeleton & Cloth");
