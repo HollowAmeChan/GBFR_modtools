@@ -166,6 +166,17 @@ std::wstring wide(const std::string& value) {
     return output;
 }
 
+void open_directory(const std::filesystem::path& path) {
+    if (!std::filesystem::is_directory(path)) return;
+    ShellExecuteW(nullptr, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+}
+
+void reveal_file(const std::filesystem::path& path) {
+    if (!std::filesystem::is_regular_file(path)) return;
+    const auto arguments = L"/select,\"" + path.wstring() + L"\"";
+    ShellExecuteW(nullptr, L"open", L"explorer.exe", arguments.c_str(), nullptr, SW_SHOWNORMAL);
+}
+
 void set_path_input(std::array<char,32768>& input,const std::filesystem::path& path) {
     const auto value=utf8(path.wstring());
     strncpy_s(input.data(),input.size(),value.c_str(),_TRUNCATE);
@@ -1115,6 +1126,15 @@ void draw_editor_shell() {
             const bool built = !asset.output.empty() && std::filesystem::is_regular_file(asset.output);
             const std::string id = (built ? "已构建##" : asset.available ? "可用##" : "缺失##") + std::to_string(index);
             if (ImGui::Selectable(id.c_str(), g_asset_selection.Contains(static_cast<ImGuiID>(index+1)), ImGuiSelectableFlags_SpanAllColumns)) {g_selected_asset = index;preview_asset(index);}
+            const auto context_id = "asset_context##" + std::to_string(index);
+            if (ImGui::BeginPopupContextItem(context_id.c_str())) {
+                g_selected_asset = index;
+                if (ImGui::MenuItem("打开 unpack 文件夹")) open_directory(asset.input.parent_path());
+                if (ImGui::MenuItem("定位 unpack 文件")) reveal_file(asset.input);
+                if (!asset.output.empty() && ImGui::MenuItem("打开 build 文件夹")) open_directory(asset.output.parent_path());
+                if (!asset.output.empty() && ImGui::MenuItem("定位 build 文件")) reveal_file(asset.output);
+                ImGui::EndPopup();
+            }
             ImGui::TableNextColumn(); ImGui::TextUnformatted(gbfr::asset_kind_name(asset.kind));
             ImGui::TableNextColumn(); ImGui::TextUnformatted(asset.subtype.c_str());
             ImGui::TableNextColumn(); ImGui::TextUnformatted(utf8(asset.input.filename().wstring()).c_str());
