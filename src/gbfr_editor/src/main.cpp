@@ -42,6 +42,7 @@ gbfr::PreviewRenderer* g_preview = nullptr;
 std::unique_ptr<gbfr::Workspace> g_workspace;
 std::string g_imgui_ini;
 std::optional<std::size_t> g_selected_asset;
+std::optional<std::size_t> g_pending_a4_asset;
 bool g_changed_only = false;
 enum class AssetFunction { all, model, texture, ui_image, material, cloth };
 enum class PreviewMode { none, model, texture };
@@ -232,7 +233,7 @@ bool load_workspace(const std::filesystem::path& path) {
         if(g_preview) g_preview->clear();
         const auto settings_directory=g_workspace->root()/L".gbfr";
         std::filesystem::create_directories(settings_directory);
-        const auto settings_file=settings_directory/L"imgui_v5.ini";
+        const auto settings_file=settings_directory/L"imgui_v6.ini";
         g_imgui_ini=utf8(settings_file.wstring());
         ImGui::GetIO().IniFilename=g_imgui_ini.c_str();
         if(std::filesystem::is_regular_file(settings_file)) {
@@ -749,6 +750,7 @@ void build_default_dock_layout(ImGuiID dockspace) {
     ImGui::DockBuilderDockWindow("贴图库",center);
     ImGui::DockBuilderDockWindow("Viewport",center);
     ImGui::DockBuilderDockWindow("Inspector",right_top);
+    ImGui::DockBuilderDockWindow("快捷操作",right_top);
     ImGui::DockBuilderDockWindow("Skeleton & Cloth",right_bottom);
     ImGui::DockBuilderDockWindow("Log",bottom);
     ImGui::DockBuilderDockWindow("预览控制",bottom);
@@ -1084,7 +1086,6 @@ void draw_editor_shell() {
         }
         ImGui::TextColored(workspace_area_color(WorkspaceArea::build),"Mod 输出 (build)");
         ImGui::TextWrapped("%s",utf8(asset.output.wstring()).c_str());
-        ImGui::Separator();
         if (asset.kind == gbfr::AssetKind::model) {
             if(g_loaded_model&&g_loaded_model->minfo.stem()==asset.input.stem()){
                 const auto lod_label=std::string(g_loaded_model->shadow_lod?"shadowlod":"lod")+std::to_string(g_loaded_model->lod_index);
@@ -1093,17 +1094,63 @@ void draw_editor_shell() {
                 ImGui::Text("普通 LOD %zu  |  阴影 LOD %zu  |  Mesh %zu",g_loaded_model_stats.lod_count,g_loaded_model_stats.shadow_lod_count,g_loaded_model_stats.mesh_count);
                 ImGui::Text("%u 权重  |  UV1 %s  |  顶点色 %s",g_loaded_model_stats.influence_count,g_loaded_model_stats.has_uv1?"有":"无",g_loaded_model_stats.has_color?"有":"无");
             }
-            if (ImGui::Button("重新加载预览")) load_model_preview(*g_selected_asset,true);
-            if (ImGui::Button("从 unpack 复制到 build")) run_selected_asset_action(false);
-            if (ImGui::Button("从 source 恢复 unpack")) run_selected_asset_action(true);
-        } else if (asset.kind == gbfr::AssetKind::texture || asset.kind == gbfr::AssetKind::ui_image) {
-            if (ImGui::Button("重新加载预览")) preview_asset(*g_selected_asset);
-            if (ImGui::Button("封回 WTB 到 build")) run_selected_asset_action(false);
-            if (ImGui::Button("从 source 恢复 DDS")) run_selected_asset_action(true);
-        } else {
-            ImGui::TextUnformatted("当前 C++ 版本尚未实现此类型的构建操作。");
         }
     } else ImGui::TextUnformatted("选择一个资源");
+    ImGui::End();
+
+    ImGui::Begin("快捷操作");
+    if (g_workspace && g_selected_asset && *g_selected_asset < g_workspace->assets().size()) {
+        const auto index=*g_selected_asset;
+        const auto& asset=g_workspace->assets()[index];
+        ImGui::Text("%s / %s",gbfr::asset_kind_name(asset.kind),asset.subtype.c_str());
+        ImGui::TextColored(asset.changed?ImVec4(.95f,.72f,.25f,1):asset.available?ImVec4(.35f,.8f,.5f,1):ImVec4(.95f,.35f,.35f,1),
+                           "%s",asset.changed?"unpack 已修改":asset.available?"unpack 未修改":"unpack 输入缺失");
+        ImGui::Separator();
+        ImGui::BeginDisabled(!asset.available);
+        if(asset.kind==gbfr::AssetKind::model){
+            if(ImGui::Button("重新加载模型预览"))load_model_preview(index,true);
+            if(ImGui::Button("复制模型到 build"))run_selected_asset_action(false);
+            if(ImGui::Button("从 source 恢复模型"))run_selected_asset_action(true);
+        }else if(asset.kind==gbfr::AssetKind::texture||asset.kind==gbfr::AssetKind::ui_image){
+            if(ImGui::Button("重新加载 DDS 预览"))preview_asset(index);
+            if(ImGui::Button("封回 WTB 到 build"))run_selected_asset_action(false);
+            if(ImGui::Button("从 source 恢复 DDS")){run_selected_asset_action(true);preview_asset(index);}
+        }else if(asset.kind==gbfr::AssetKind::new_texture){
+            if(ImGui::Button("重新加载 DDS 预览"))preview_asset(index);
+            if(ImGui::Button("生成 .texture 到 build"))run_selected_asset_action(false);
+            ImGui::TextWrapped("该贴图没有原始 .texture 模板，将使用 nier_cli_mgrr 新建单槽 WTB。");
+        }else if(asset.kind==gbfr::AssetKind::material){
+            std::size_t a4_count{};std::string a4_error;
+            try{a4_count=g_workspace->material_a4_count(index);}catch(const std::exception& error){a4_error=error.what();}
+            if(a4_error.empty())ImGui::Text("Granite A4 引用：%zu",a4_count);
+            else ImGui::TextWrapped("A4 读取失败：%s",a4_error.c_str());
+            ImGui::BeginDisabled(!a4_error.empty()||a4_count==0);
+            if(ImGui::Button("清除全部 A4")){g_pending_a4_asset=index;ImGui::OpenPopup("确认清除 mmat A4");}
+            ImGui::EndDisabled();
+            if(ImGui::Button("编码 mmat 到 build"))run_selected_asset_action(false);
+            if(ImGui::Button("从 source 恢复 JSON"))run_selected_asset_action(true);
+        }else{
+            ImGui::TextUnformatted("该资源目前只支持查看和编辑中间态。");
+        }
+        ImGui::EndDisabled();
+    }else ImGui::TextUnformatted("选择一个资源后显示可用操作。");
+    if(ImGui::BeginPopupModal("确认清除 mmat A4",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){
+        if(g_workspace&&g_pending_a4_asset&&*g_pending_a4_asset<g_workspace->assets().size()){
+            const auto index=*g_pending_a4_asset;const auto& asset=g_workspace->assets()[index];
+            std::size_t count{};try{count=g_workspace->material_a4_count(index);}catch(...){count=0;}
+            ImGui::Text("文件：%s",utf8(asset.input.filename().wstring()).c_str());
+            ImGui::Text("将删除 %zu 个 A4 流式贴图引用。",count);
+            ImGui::TextWrapped("删除后材质会改查 A2.Name 对应的普通 .texture；请同时构建所需的 2k/4k 贴图。");
+            if(ImGui::Button("确认清除")){
+                try{const auto removed=g_workspace->remove_material_a4(index);gbfr::Log::write(gbfr::LogLevel::info,"已从 mmat JSON 清除 "+std::to_string(removed)+" 个 A4 引用");}
+                catch(const std::exception& error){gbfr::Log::write(gbfr::LogLevel::error,error.what());}
+                g_pending_a4_asset.reset();ImGui::CloseCurrentPopup();
+            }
+            ImGui::SameLine();
+            if(ImGui::Button("取消")){g_pending_a4_asset.reset();ImGui::CloseCurrentPopup();}
+        }else{g_pending_a4_asset.reset();ImGui::CloseCurrentPopup();}
+        ImGui::EndPopup();
+    }
     ImGui::End();
 
     ImGui::Begin("Skeleton & Cloth");

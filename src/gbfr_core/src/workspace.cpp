@@ -12,6 +12,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <cstdint>
+#include <atomic>
 
 namespace fs = std::filesystem;
 
@@ -126,6 +127,145 @@ void restore_wtb_slots(const fs::path& source, const std::vector<std::pair<unsig
         stream.write(reinterpret_cast<const char*>(bytes.data() + offset), size);
     }
 }
+
+std::wstring quote_argument(const std::wstring& value) {
+    if (value.find_first_of(L" \t\n\v\"") == std::wstring::npos) return value;
+    std::wstring result(1, L'\"');
+    std::size_t slashes = 0;
+    for (const wchar_t c : value) {
+        if (c == L'\\') { ++slashes; continue; }
+        if (c == L'\"') result.append(slashes * 2 + 1, L'\\');
+        else result.append(slashes, L'\\');
+        slashes = 0;
+        result.push_back(c);
+    }
+    result.append(slashes * 2, L'\\');
+    result.push_back(L'\"');
+    return result;
+}
+
+std::string run_process(const fs::path& executable, const std::vector<std::wstring>& arguments) {
+    std::wstring command = quote_argument(executable.wstring());
+    for (const auto& argument : arguments) command += L" " + quote_argument(argument);
+    std::vector<wchar_t> command_buffer(command.begin(), command.end());
+    command_buffer.push_back(L'\0');
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION process{};
+    const BOOL started = CreateProcessW(executable.c_str(), command_buffer.data(), nullptr, nullptr, FALSE,
+                                        CREATE_NO_WINDOW, nullptr, nullptr, &startup, &process);
+    if (!started) {
+        throw std::runtime_error("Cannot start encoder process (Win32 " + std::to_string(GetLastError()) + ")");
+    }
+    WaitForSingleObject(process.hProcess, INFINITE);
+    DWORD exit_code{};
+    GetExitCodeProcess(process.hProcess, &exit_code);
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    if (exit_code != 0) throw std::runtime_error("Encoder exited with code " + std::to_string(exit_code) + ": " + executable.string());
+    return {};
+}
+
+fs::path locate_repo_file(const fs::path& relative) {
+    std::vector<fs::path> roots;
+    std::array<wchar_t, 32768> module{};
+    const auto length = GetModuleFileNameW(nullptr, module.data(), static_cast<DWORD>(module.size()));
+    if (length && length < module.size()) roots.emplace_back(fs::path(module.data()).parent_path());
+    roots.emplace_back(fs::current_path());
+    for (auto root : roots) {
+        for (;;) {
+            const auto candidate = root / relative;
+            if (fs::is_regular_file(candidate)) return candidate;
+            const auto parent = root.parent_path();
+            if (parent == root || parent.empty()) break;
+            root = parent;
+        }
+    }
+    throw std::runtime_error("Required runtime file is missing: " + relative.generic_string() + ". Run build.bat tools.");
+}
+
+class TemporaryDirectory {
+public:
+    explicit TemporaryDirectory(const wchar_t* prefix) {
+        static std::atomic_uint counter{};
+        for (unsigned attempt = 0; attempt < 100; ++attempt) {
+            path_ = fs::temp_directory_path() /
+                (std::wstring(prefix) + std::to_wstring(GetCurrentProcessId()) + L"_" +
+                 std::to_wstring(GetTickCount64()) + L"_" + std::to_wstring(counter++));
+            std::error_code ec;
+            if (fs::create_directory(path_, ec)) return;
+        }
+        throw std::runtime_error("Cannot create temporary encoder directory");
+    }
+    ~TemporaryDirectory() { std::error_code ec; fs::remove_all(path_, ec); }
+    const fs::path& path() const noexcept { return path_; }
+private:
+    fs::path path_;
+};
+
+void validate_dds(const fs::path& path) {
+    const auto bytes = read_bytes(path);
+    if (bytes.size() < 4 || bytes[0] != 'D' || bytes[1] != 'D' || bytes[2] != 'S' || bytes[3] != ' ')
+        throw std::runtime_error("Input is not a DDS file: " + path.string());
+}
+
+void validate_generated_wtb(const fs::path& path) {
+    const auto bytes = read_bytes(path);
+    if (bytes.size() < 32 || bytes[0] != 'W' || bytes[1] != 'T' || bytes[2] != 'B' || bytes[3] != 0)
+        throw std::runtime_error("nier_cli did not generate a valid WTB texture");
+    const auto count = read_u32(bytes, 4), offsets = read_u32(bytes, 12), sizes = read_u32(bytes, 16);
+    if (!count || offsets + count * 4 > bytes.size() || sizes + count * 4 > bytes.size())
+        throw std::runtime_error("Generated WTB has invalid tables");
+    const auto offset = read_u32(bytes, offsets), size = read_u32(bytes, sizes);
+    if (size < 4 || static_cast<std::size_t>(offset) + size > bytes.size() ||
+        bytes[offset] != 'D' || bytes[offset + 1] != 'D' || bytes[offset + 2] != 'S' || bytes[offset + 3] != ' ')
+        throw std::runtime_error("Generated WTB does not contain the DDS payload");
+}
+
+void build_new_texture(const fs::path& input, const fs::path& output, std::uint32_t texture_id) {
+    validate_dds(input);
+    TemporaryDirectory temporary(L"gbfr_texture_");
+    const auto extracted = temporary.path() / L"texture.wtb_extracted";
+    fs::create_directories(extracted);
+    std::wostringstream name;
+    name << L"0_" << std::hex << std::setw(8) << std::setfill(L'0') << texture_id << L".dds";
+    fs::copy_file(input, extracted / name.str(), fs::copy_options::overwrite_existing);
+    run_process(locate_repo_file(L"_lib/tools/nier_cli_mgrr.exe"), {extracted.wstring()});
+    const auto packed = temporary.path() / L"texture.wtb";
+    validate_generated_wtb(packed);
+    copy_atomic(packed, output);
+}
+
+void encode_material(const fs::path& input, const fs::path& output) {
+    json document;
+    { std::ifstream stream(input); if (!stream) throw std::runtime_error("Material JSON is missing"); stream >> document; }
+    TemporaryDirectory temporary(L"gbfr_mmat_");
+    const auto flatc = locate_repo_file(L"_lib/tools/flatc.exe");
+    const auto schema = locate_repo_file(L"_lib/MMat_ModelMaterial.fbs");
+    run_process(flatc, {L"--binary", L"-o", temporary.path().wstring(), schema.wstring(), input.wstring()});
+    const auto encoded = temporary.path() / (input.stem().wstring() + L".bin");
+    if (!fs::is_regular_file(encoded) || !fs::file_size(encoded)) throw std::runtime_error("flatc did not generate the mmat binary");
+    copy_atomic(encoded, output);
+}
+
+void decode_material(const fs::path& source, const fs::path& input) {
+    TemporaryDirectory temporary(L"gbfr_mmat_restore_");
+    const auto flatc = locate_repo_file(L"_lib/tools/flatc.exe");
+    const auto schema = locate_repo_file(L"_lib/MMat_ModelMaterial.fbs");
+    run_process(flatc, {L"--json", L"--strict-json", L"--raw-binary", L"-o", temporary.path().wstring(),
+                        schema.wstring(), L"--", source.wstring()});
+    const auto decoded = temporary.path() / (source.stem().wstring() + L".json");
+    json document;
+    { std::ifstream stream(decoded); if (!stream) throw std::runtime_error("flatc did not restore the material JSON"); stream >> document; }
+    copy_atomic(decoded, input);
+}
+
+std::size_t count_a4(const json& document) {
+    if (!document.contains("Entries1") || !document["Entries1"].is_array()) return 0;
+    return std::count_if(document["Entries1"].begin(), document["Entries1"].end(), [](const auto& entry) {
+        return entry.is_object() && entry.contains("A4") && !entry["A4"].is_null();
+    });
+}
 }
 
 namespace gbfr {
@@ -229,8 +369,10 @@ Workspace Workspace::load(const fs::path& selected) {
         append(AssetKind::cloth, record.value("Category", "cloth"), required_string(record, "Xml"), required_string(record, "Source"), required_string(record, "Output"), required_string(record, "BaselineSha256"), record.value("SourceSha256", ""));
     for (const auto& record : document.value("ModelFiles", json::array()))
         append(AssetKind::model, record.value("FileType", "model"), required_string(record, "Input"), required_string(record, "Source"), required_string(record, "Output"), required_string(record, "BaselineSha256"), required_string(record, "SourceSha256"));
-    for (const auto& record : document.value("NewTextures", json::array()))
+    for (const auto& record : document.value("NewTextures", json::array())) {
         append(AssetKind::new_texture, "texture", required_string(record, "Input"), "", required_string(record, "Output"), required_string(record, "BaselineSha256"), "");
+        result.assets_.back().texture_id = record.value("TextureId", 0u);
+    }
     std::stable_sort(result.assets_.begin(), result.assets_.end(), [](const auto& left, const auto& right) {
         const auto left_name = left.input.filename().native();
         const auto right_name = right.input.filename().native();
@@ -271,6 +413,9 @@ void Workspace::build_asset(std::size_t index) {
     if (index >= assets_.size()) throw std::runtime_error("Selected asset is invalid");
     if (assets_[index].kind == AssetKind::model) { build_model(index); return; }
     auto& asset = assets_[index];
+    if (!fs::is_regular_file(asset.input)) throw std::runtime_error("Selected input is missing");
+    if (asset.kind == AssetKind::new_texture) { build_new_texture(asset.input, asset.output, asset.texture_id); return; }
+    if (asset.kind == AssetKind::material) { encode_material(asset.input, asset.output); return; }
     if (asset.wtb_slots.empty() || asset.source.empty()) throw std::runtime_error("Selected asset has no packable WTB source");
     if (!fs::is_regular_file(asset.source) || sha256_file(asset.source) != asset.source_sha256) throw std::runtime_error("WTB source baseline is missing or changed");
     write_wtb_from_slots(asset.source, asset.output, asset.wtb_slots);
@@ -289,10 +434,47 @@ void Workspace::restore_asset(std::size_t index) {
     if (index >= assets_.size()) throw std::runtime_error("Selected asset is invalid");
     if (assets_[index].kind == AssetKind::model) { restore_model(index); return; }
     auto& asset = assets_[index];
+    if (asset.kind == AssetKind::new_texture) throw std::runtime_error("A new texture has no source baseline to restore");
+    if (asset.kind == AssetKind::material) {
+        if (!fs::is_regular_file(asset.source) || sha256_file(asset.source) != asset.source_sha256) throw std::runtime_error("mmat source baseline is missing or changed");
+        decode_material(asset.source, asset.input);
+        refresh();
+        return;
+    }
     if (asset.wtb_slots.empty() || asset.source.empty()) throw std::runtime_error("Selected asset has no restorable WTB source");
     if (!fs::is_regular_file(asset.source) || sha256_file(asset.source) != asset.source_sha256) throw std::runtime_error("WTB source baseline is missing or changed");
     restore_wtb_slots(asset.source, asset.wtb_slots);
     refresh();
+}
+
+std::size_t Workspace::material_a4_count(std::size_t index) const {
+    if (index >= assets_.size() || assets_[index].kind != AssetKind::material) throw std::runtime_error("Selected asset is not a material JSON");
+    json document;
+    std::ifstream stream(assets_[index].input);
+    if (!stream) throw std::runtime_error("Material JSON is missing");
+    stream >> document;
+    return count_a4(document);
+}
+
+std::size_t Workspace::remove_material_a4(std::size_t index) {
+    if (index >= assets_.size() || assets_[index].kind != AssetKind::material) throw std::runtime_error("Selected asset is not a material JSON");
+    auto& asset = assets_[index];
+    json document;
+    { std::ifstream stream(asset.input); if (!stream) throw std::runtime_error("Material JSON is missing"); stream >> document; }
+    const auto removed = count_a4(document);
+    if (!removed) return 0;
+    for (auto& entry : document["Entries1"]) if (entry.is_object() && entry.contains("A4") && !entry["A4"].is_null()) entry.erase("A4");
+    fs::path temporary = asset.input;
+    temporary += L".tmp";
+    { std::ofstream stream(temporary, std::ios::trunc); if (!stream) throw std::runtime_error("Cannot write material JSON"); stream << document.dump(2) << '\n'; }
+    { json validation; std::ifstream stream(temporary); stream >> validation; }
+    if (!MoveFileExW(temporary.c_str(), asset.input.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        const auto error = GetLastError();
+        fs::remove(temporary);
+        throw std::runtime_error("Cannot replace material JSON (Win32 " + std::to_string(error) + ")");
+    }
+    refresh();
+    return removed;
 }
 
 std::size_t Workspace::missing_count() const noexcept { return std::count_if(assets_.begin(), assets_.end(), [](const auto& a) { return !a.available; }); }

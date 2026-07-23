@@ -124,6 +124,11 @@ Install-ZipExecutable "flatc.exe" "25.12.19" `
     "68d51916873a3dbdaf7997ddfbbbfd6472b5907ffc62ccc9a88d146bbc0db87d" `
     "d873c85d970314177574b9bb468daea2084ae6198232a7045207bff2abd69aec" `
     "flatc.exe"
+Install-ZipExecutable "nier_cli_mgrr.exe" "1.3.0_mgrr" `
+    "https://github.com/ArthurHeitmann/nier_cli/releases/download/v1.3.0_mgrr/nier_cli_mgrr_1.3.0.zip" `
+    "3b56e3fb6423de94d78b57d417614995b0958e3d9b140d7aed31d2f32c5983c9" `
+    "2d0b054b121aa36ef2d2770a4890914bf6b426f51834b2cf77c61992b3079e90" `
+    "nier_cli_mgrr.exe"
 Install-DirectTool "GraniteTextureReader.exe" "1.1.5" `
     "https://github.com/Nenkai/GraniteTextureReader/releases/download/1.1.5/GraniteTextureReader.exe" `
     "b1f036bef11d86e42a4701b726f20b7d1456312debae96780228c701a3c62d42" `
@@ -136,6 +141,7 @@ Install-DirectTool "texconv.exe" "may2026" `
 $versions = [ordered]@{
     GBFRDataTools = "2.0.0"
     FlatBuffers = "25.12.19"
+    NierCliMgrr = "1.3.0_mgrr"
     GraniteTextureReader = "1.1.5"
     DirectXTex = "may2026"
 }

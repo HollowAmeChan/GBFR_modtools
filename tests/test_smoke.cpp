@@ -116,6 +116,16 @@ int main() {
     if (gbfr::sha256_file(wtb_root / L"unpack/ui_0.dds") != dds_hash) return 75;
     fs::remove_all(wtb_root);
 
+    const fs::path material_root = test_temp / L"material_workspace";
+    fs::create_directories(material_root / L"unpack");
+    nlohmann::json material_fixture={{"Magic",20230727},{"Entries1",nlohmann::json::array({{{"A4",{{"Unk",nlohmann::json::array({"hash"})}}}}})}};
+    { std::ofstream stream(material_root/L"unpack/0.mmat.json"); stream << material_fixture.dump(2) << '\n'; }
+    const auto material_fixture_hash=gbfr::sha256_file(material_root/L"unpack/0.mmat.json");
+    { std::ofstream manifest(material_root/L"workspace.json"); manifest << "{\"Version\":1,\"CharacterId\":\"material\",\"Materials\":[{\"Json\":\"unpack/0.mmat.json\",\"Source\":\"source/0.mmat\",\"Output\":\"build/0.mmat\",\"BaselineSha256\":\"" << material_fixture_hash << "\",\"SourceSha256\":\"\"}]}"; }
+    auto material_workspace=gbfr::Workspace::load(material_root/L"workspace.json");
+    if(material_workspace.assets().size()!=1||material_workspace.material_a4_count(0)!=1||material_workspace.remove_material_a4(0)!=1||material_workspace.material_a4_count(0)!=0||!material_workspace.assets()[0].changed)return 77;
+    fs::remove_all(material_root);
+
     const fs::path integration = fs::path(GBFR_ROOT_DIR) / L"explore_output/workspace.json";
     if(fs::is_regular_file(integration)){
         nlohmann::json current;std::ifstream(integration)>>current;

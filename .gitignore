@@ -7,3 +7,4 @@ research_output/
 
 # Third-party runtime tools installed by scripts/bootstrap_tools.ps1
 /_lib/tools/
+/.gbfr_mmat_debug/
