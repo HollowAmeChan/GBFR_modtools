@@ -103,7 +103,7 @@ const char* parameter_meaning(const gbfr::MaterialShaderParameter& parameter) {
     case 0xE208C4C4u: return "使用颜色噪声";
     case 0x11664BFCu: return "按第 5 号骨骼计算面部参考中心";
     case 0x56346692u: return "面部参考中心的骨骼局部偏移";
-    case 0x8B8038FCu: return "选择角色材质的有效 Shader subtype 13 路径";
+    case 0x8B8038FCu: return "选择角色管线状态表第 13 路径（视觉语义未确认）";
     case 0x92339519u: return "启用冰 / 晶体模型专用资源路径";
     case 0xBAEF6920u: return "右眼材质标记";
     case 0xE56343C0u: return "左眼材质标记";
@@ -134,9 +134,11 @@ const char* parameter_confidence(const gbfr::MaterialShaderParameter& parameter)
     case 0xB460A0F0u:
         return "A：正式 schema";
     case 0x11664BFCu: case 0x2AEDA6ADu: case 0x2B5C866Cu: case 0x56346692u:
-    case 0x8B8038FCu: case 0x92339519u: case 0x93D9F63Au: case 0x9C83F56Fu:
+    case 0x92339519u: case 0x93D9F63Au: case 0x9C83F56Fu:
     case 0xAC6F995Du: case 0xBAEF6920u: case 0xE56343C0u:
         return "B/C：运行时 + 样本";
+    case 0x8B8038FCu:
+        return "B：EXE 管线状态表 + 全量样本";
     case 0xA6EB1B34u:
         return "B：CPU 写入 + DXBC 消费 + 角色全量样本";
     case 0x53F49792u:

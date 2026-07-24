@@ -119,7 +119,7 @@ EXE `0x1446E66E3..0x1446E6935` 的行为是：当 `0x11664BFC` 为真时取得�
 
 EXE `0x1446F2C15` 与 `0x1446F2CFA` 两次读取该参数。为真时会复制额外资源句柄、建立专用数据并替换其中一组 texture binding；为假时跳过。这达到 B/C 级，可描述为“启用冰/晶体模型专用资源路径”，但尚未恢复官方字段名，也不能直接等同于已有的 `g_UseIceEmissive`。
 
-### Alpha 与另一条独立变体
+### Alpha 与另一条独立管线状态
 
 `0x53F49792` 与 `0x8B8038FC` 都出现在同一批 7,287 个复用角色 shader family 的 material，但列联表证明二者不是别名：
 
@@ -132,9 +132,20 @@ EXE `0x1446F2C15` 与 `0x1446F2CFA` 两次读取该参数。为真时会复制�
 
 EXE 对 `0x53F49792` 有 16 个直接读取点。Eye、Face、Hair、Metal、Skin 等角色构建路径都会先检查其类型和值，再与三项材质/pass 布尔状态做 OR；结果为真时给管线选择 key 增加 `0x4`，随后据 key 选择 shader/resource 组合。它不写入 alpha 数值，也不等同于 `ignore_alpha`、`shadow_type` 或 RDEF 已命名的 `g_IsUseAlbedoAlphaClip`。因此当前 B 级行为是“角色材质 pass key 位 `0x4`”；社区的 `EnableAlpha` 只作为 C 级视觉含义线索保留。
 
-`0x8B8038FC` 在 Face、Hair、Metal、Skin 的两组构建路径中共有 8 个读取点。描述表路径 `0x1446E7C1E..0x1446E7CCA`、`0x1446E9B7E..0x1446E9C30`、`0x1446ED197..0x1446ED24C`、`0x1446EEA98..0x1446EEB44` 都在值类型为 U8 且值非零时选择有效 subtype `13`；Face/Hair/Skin 的 key 构造器也把原 subtype 高字节替换为 `0x0D000000`。Metal 的 key 布局不同，以专用 `0x400` 位表示同一路径。它因此不是 `0x53F49792` 的别名，也不是写入颜色或透明度的常量。
+`0x8B8038FC` 在 Face、Hair、Metal、Skin 的两组构建路径中共有 8 个读取点。描述表路径 `0x1446E7C1E..0x1446E7CCA`、`0x1446E9B7E..0x1446E9C30`、`0x1446ED197..0x1446ED25E`、`0x1446EEA98..0x1446EEB44` 都在值类型为 U8 且值非零时选中 `0x146138780` 的 24 字节管线状态记录 13；另一组表块对应记录 29，也就是 13 + 16。最终传给管线注册器的 VS/PS 哈希不随该参数改变，因此它不是另一份 `ps_character*` Shader 文件选择器。
 
-全量 21 个真值分布为 Face 10、Hair 4、Metal 4、Skin 3，来自 9 个 MMAT：`em2000/vars/1`、`em7700/vars/0`、`em8200/vars/0,1,2`、`em8210/vars/0`、`fe2000/vars/1`、`fe2100/vars/1`、`fe8200/vars/2`。其中既有默认 `vars/0`，也有 `c01/c02` 贴图变体，不能把它命名为“配色开关”。实际 `pl/fp/wp` 的 4,779 个非 Eye 样本全部为 0。当前 B/C 级解释收紧为“选择角色材质的有效 Shader subtype 13 路径”；subtype 13 的最终视觉语义仍需帧捕获或运行时 A/B 才能命名。
+四类材质在基表中的转换如下；每一行都只有记录偏移 20 的一个字节发生变化，其余 23 字节不变：
+
+| family | 默认记录 | 启用记录 | 偏移 20 |
+|---|---:|---:|---|
+| Face | 9 | 13 | `0x80 -> 0x84` |
+| Hair | 10 | 13 | `0x81 -> 0x84` |
+| Metal | 7 | 13 | `0x47 -> 0x84` |
+| Skin | 9 | 13 | `0x80 -> 0x84` |
+
+高表块执行相同的 `+16` 转换；其中 Metal 从记录 23 的 `0x07` 转到记录 29 的 `0x84`，脚本会单独保留而不是把它误写成低表块的复制。当前 B 级行为应表述为“选择角色管线状态表第 13 路径”。该字节最终对应 blend、depth/stencil 还是 rasterizer 状态，仍需运行时 D3D11 状态或帧捕获确认，不能仅凭记录序号命名视觉效果。
+
+全量 21 个真值分布为 Face 10、Hair 4、Metal 4、Skin 3，来自 9 个 MMAT：`em2000/vars/1`、`em7700/vars/0`、`em8200/vars/0,1,2`、`em8210/vars/0`、`fe2000/vars/1`、`fe2100/vars/1`、`fe8200/vars/2`。21 条全部是 `shadow=1`、`bool9=false`、`bool10=true`、`bool12=false`；`ignore_alpha` 同时存在真假，因此不是透明开关。其中既有默认 `vars/0`，也有 `c01/c02` 贴图变体，不能把它命名为“配色开关”。实际 `pl/fp/wp` 的 4,779 个非 Eye 样本全部为 0。
 
 ### Elemental 的三层管线模板选择
 
@@ -150,6 +161,7 @@ EXE 对 `0x53F49792` 有 16 个直接读取点。Eye、Face、Hair、Metal、Ski
 
 | 参数组 | 样本范围 | 当前结论 |
 |---|---|---|
+| `0x8B8038FC` | 7,287 个角色 shader family material | 21 个真值选择 24 字节管线状态表记录 13/29；不更换 VS/PS Shader 哈希，视觉状态名未知 |
 | `0x9C83F56F`, `0xA6EB1B34` | 4,133 个 Metal `5/7`、`5/5` material | 前者选择备用管线/资源描述符；后者为阴影类型 3 追加方向驱动的 Alpha 裁切阈值，行为不同 |
 | `0x037BE4E5` | UberEnv / 植被 | 禁用背面剔除，选择双面光栅路径；官方字段名未知 |
 | `0x0A05A26F` | 18 个 foliage `9/1` material | 17 真 1 假；EXE 无直接哈希常量引用，行为仍未知 |
@@ -262,6 +274,13 @@ $gameExe = "D:\Steam\steamapps\common\Granblue Fantasy Relink\granblue_fantasy_r
 & $dumpbin /RAWDATA /RANGE:0x1454A8EF0,0x1454A8EF4 $gameExe
 & $dumpbin /RAWDATA /RANGE:0x1454A4860,0x1454A4864 $gameExe
 
+# 0x8B8038FC：Face / Hair / Metal / Skin 的状态表选择与 24 字节记录表
+& $dumpbin /DISASM /RANGE:0x1446E7C1E,0x1446E7CCA $gameExe
+& $dumpbin /DISASM /RANGE:0x1446E9B7E,0x1446E9C30 $gameExe
+& $dumpbin /DISASM /RANGE:0x1446ED197,0x1446ED25E $gameExe
+& $dumpbin /DISASM /RANGE:0x1446EEA98,0x1446EEB44 $gameExe
+& $dumpbin /RAWDATA /RANGE:0x146138780,0x146138A80 $gameExe
+
 & $gbfrPython scripts\research\analyze_mmat.py `
   --data-root "D:\Steam\steamapps\common\Granblue Fantasy Relink\data" `
   --flatc "_lib\tools\flatc.exe" `
@@ -283,6 +302,11 @@ $gameExe = "D:\Steam\steamapps\common\Granblue Fantasy Relink\granblue_fantasy_r
   --parameter-catalog "research_output\mmat\shader_parameters.csv" `
   --out-dir "research_output\mmat\characters"
 
+& $gbfrPython scripts\research\analyze_subtype13_pipeline.py `
+  --materials "research_output\mmat\materials.jsonl" `
+  --binary "D:\Steam\steamapps\common\Granblue Fantasy Relink\granblue_fantasy_relink.exe" `
+  --output "research_output\mmat\subtype13_pipeline.json"
+
 & $gbfrPython scripts\research\compare_character_mmat.py `
   --materials "research_output\mmat\characters\character_materials.csv" `
   --fields "research_output\mmat\characters\character_parambuffer_fields.csv" `
@@ -301,7 +325,7 @@ $gameExe = "D:\Steam\steamapps\common\Granblue Fantasy Relink\granblue_fantasy_r
 ## 下一步验证
 
 1. 追踪 face 世界空间中心最终绑定到哪个 constant buffer 和 shader 变量，确认它是光照中心、阴影中心还是视线中心。
-2. 对 `0x8B8038FC` 的 subtype 13 路径做运行时 A/B 或帧捕获，确认它最终选择的 Face/Hair/Metal/Skin shader 资源及视觉语义。
+2. 对 `0x8B8038FC` 的状态表记录 13 路径做运行时 A/B 或帧捕获，确认记录偏移 20 的 `0x84` 最终对应 blend、depth/stencil 还是 rasterizer 状态及其视觉语义。
 3. 用运行时 A/B 或帧捕获确认已定位的 pipeline 位最终对应的视觉名称，重点区分透明、深度、阴影和 pass 变体。
 4. 找到 ER 升级前的同一角色 MMAT 基线，再与当前版本做逐字段比较；`pl1400` 与 `pl2900` 的横向比较不能替代版本比较。
 5. 持续把新证据同步到独立 MMAT 检查器；当前已显示 A/B/C/D 等级和恢复名称，封回仍保留原哈希和值类型。
