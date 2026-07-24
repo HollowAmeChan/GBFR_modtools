@@ -373,6 +373,7 @@ def main() -> int:
     two_sided_present = two_sided_enabled = 0
     discard_present = discard_enabled = 0
     subtype13_present = subtype13_enabled = 0
+    directional_alpha_present = directional_alpha_enabled = directional_alpha_mismatches = 0
     for record in records:
         alpha_key = raw_parameter(record, "0x53F49792")
         if alpha_key is None:
@@ -385,6 +386,7 @@ def main() -> int:
         two_sided = raw_parameter(record, "0xD94F2821")
         discard = raw_parameter(record, "0x24C1ABA9")
         subtype13 = raw_parameter(record, "0x8B8038FC")
+        directional_alpha = raw_parameter(record, "0xA6EB1B34")
         if two_sided is not None:
             two_sided_present += 1
             two_sided_enabled += int(bool(two_sided))
@@ -394,6 +396,12 @@ def main() -> int:
         if subtype13 is not None:
             subtype13_present += 1
             subtype13_enabled += int(bool(subtype13))
+        if directional_alpha is not None:
+            directional_alpha_present += 1
+            directional_alpha_enabled += int(bool(directional_alpha))
+            directional_alpha_mismatches += int(
+                bool(directional_alpha) != (int(record["shadow"]) == 3 and bool(record["bool12"]))
+            )
 
     invariants = {
         "scope": "model/{pl,fp,wp} with character shader types 2..6",
@@ -411,6 +419,11 @@ def main() -> int:
         "g_TwoSided_0xD94F2821": {"present": two_sided_present, "enabled": two_sided_enabled},
         "g_EnableDiscardMask_0x24C1ABA9": {"present": discard_present, "enabled": discard_enabled},
         "subtype13_selector_0x8B8038FC": {"present": subtype13_present, "enabled": subtype13_enabled},
+        "metal_directional_alpha_cutoff_0xA6EB1B34": {
+            "present": directional_alpha_present,
+            "enabled": directional_alpha_enabled,
+            "mismatches_against_shadow_type_3_and_bool12": directional_alpha_mismatches,
+        },
     }
     (out_dir / "character_invariants.json").write_text(
         json.dumps(invariants, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"

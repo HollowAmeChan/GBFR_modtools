@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import collections
 import json
 import pathlib
 
 
 SOURCES = (
+    (1, 48, "ps/model/foward/ps_characterconstant.pso"),
     (2, 48, "ps/model/foward/lookdev/ps_charactereyelookdev.pso"),
     (3, 96, "ps/model/foward/lookdev/ps_characterfacelookdev.pso"),
     (4, 48, "ps/model/foward/lookdev/ps_characterhairlookdev.pso"),
@@ -22,6 +24,7 @@ SOURCES = (
     (13, 224, "ps/model/ps_ice_2layer.pso"),
     (14, 352, "ps/model/ps_lavafall.pso"),
     (15, 112, "ps/model/foward/lookdev/ps_lucilius.pso"),
+    (17, 16, "vs/model/vs_plantbillboard.vso"),
     (18, 208, "ps/model/ps_plantmiddleview.pso"),
     (19, 128, "ps/model/ps_plantshake.pso"),
     (20, 128, "ps/model/ps_skycloud.pso"),
@@ -35,6 +38,12 @@ SOURCES = (
     (28, 368, "ps/model/ps_water_lake.pso"),
     (29, 48, "ps/model/ps_grid.pso"),
 )
+
+BINDING_EVIDENCE = {
+    1: "C: full-sample size and value contract",
+    17: "C: shader family and full-sample size contract",
+}
+DEFAULT_BINDING_EVIDENCE = "C: shader family and full-sample size contract"
 
 
 def cpp_type(type_name: str) -> str:
@@ -55,7 +64,11 @@ def main() -> int:
     parser.add_argument("--output", type=pathlib.Path, required=True)
     parser.add_argument("--materials", type=pathlib.Path,
                         help="Optional analyze_mmat.py JSONL used to verify first-buffer coverage")
+    parser.add_argument("--coverage-output", type=pathlib.Path,
+                        help="Optional JSON report for full-material first-buffer coverage")
     args = parser.parse_args()
+    if args.coverage_output and not args.materials:
+        parser.error("--coverage-output requires --materials")
 
     wanted = {path for _, _, path in SOURCES}
     shaders = {}
@@ -76,7 +89,7 @@ def main() -> int:
         "namespace gbfr::editor::mmat_catalog {",
         "enum class FieldType { floating, boolean, signed_integer, unsigned_integer };",
         "struct Field { const char* name; std::uint16_t offset; std::uint16_t size; FieldType type; };",
-        "struct Layout { std::uint8_t shader_type; const char* shader; std::uint16_t size; std::span<const Field> fields; };",
+        "struct Layout { std::uint8_t shader_type; const char* shader; std::uint16_t size; std::span<const Field> fields; const char* binding_evidence; };",
         "",
     ]
     layouts = []
@@ -101,11 +114,15 @@ def main() -> int:
             lines.append(f'    {{"{field["name"]}", {offset}, {size}, {cpp_type(field["type"]["name"])} }},')
         lines.append("};")
         lines.append("")
-        layouts.append((shader_type, path, expected_size, variable_name))
+        layouts.append((shader_type, path, expected_size, variable_name,
+                        BINDING_EVIDENCE.get(shader_type, DEFAULT_BINDING_EVIDENCE)))
 
     lines.append("inline constexpr Layout layouts[] = {")
-    for shader_type, path, size, variable_name in layouts:
-        lines.append(f'    {{{shader_type}, "{path}", {size}, std::span<const Field>{{{variable_name}}}}},')
+    for shader_type, path, size, variable_name, binding_evidence in layouts:
+        lines.append(
+            f'    {{{shader_type}, "{path}", {size}, std::span<const Field>{{{variable_name}}}, '
+            f'"{binding_evidence}"}},'
+        )
     lines.extend([
         "};",
         "",
@@ -121,27 +138,93 @@ def main() -> int:
     coverage = ""
     if args.materials:
         expected_by_type = {shader_type: size for shader_type, size, _ in SOURCES}
-        total = matched = 0
+        total = matched = buffer_bearing = no_first_buffer = 0
+        mismatch_count = 0
         mismatches = []
+        unsupported: collections.Counter[int] = collections.Counter()
+        unsupported_samples: dict[int, str] = {}
+        per_type: dict[int, collections.Counter[str]] = {}
         with args.materials.open("r", encoding="utf-8") as stream:
             for line in stream:
                 material = json.loads(line)
                 total += 1
                 shader_type = int(material["shader"].split("/", 1)[0])
+                stats = per_type.setdefault(shader_type, collections.Counter())
+                stats["materials"] += 1
+                indices = material.get("buffer_indices", [])
+                if not indices:
+                    no_first_buffer += 1
+                    stats["no_first_buffer"] += 1
+                    continue
+                buffers = material.get("buffers", [])
+                index = int(indices[0])
+                actual = len(buffers[index]["words"]) * 4 if 0 <= index < len(buffers) else -1
+                if actual < 0:
+                    mismatch_count += 1
+                    if len(mismatches) < 12:
+                        mismatches.append(
+                            f"{material['file']}#{material['material']} type={shader_type} "
+                            f"has invalid first buffer index {index} for {len(buffers)} buffers"
+                        )
+                    continue
+                buffer_bearing += 1
+                stats["buffer_bearing"] += 1
                 expected = expected_by_type.get(shader_type)
                 if expected is None:
+                    unsupported[shader_type] += 1
+                    unsupported_samples.setdefault(
+                        shader_type, f"{material['file']}#{material['material']} size={actual}"
+                    )
                     continue
-                indices = material.get("buffer_indices", [])
-                buffers = material.get("buffers", [])
-                index = indices[0] if indices else -1
-                actual = len(buffers[index]["words"]) * 4 if 0 <= index < len(buffers) else -1
                 if actual == expected:
                     matched += 1
-                elif len(mismatches) < 12:
-                    mismatches.append(f"{material['file']}#{material['material']} type={shader_type} expected={expected} actual={actual}")
-        if mismatches:
-            raise ValueError("material ParamBuffer mismatches:\n" + "\n".join(mismatches))
-        coverage = f" matched_materials={matched}/{total} ({100.0 * matched / max(1, total):.2f}%)"
+                    stats["matched"] += 1
+                else:
+                    mismatch_count += 1
+                    if len(mismatches) < 12:
+                        mismatches.append(f"{material['file']}#{material['material']} type={shader_type} expected={expected} actual={actual}")
+        if unsupported:
+            details = [
+                f"type={shader_type} materials={count} sample={unsupported_samples[shader_type]}"
+                for shader_type, count in sorted(unsupported.items())
+            ]
+            raise ValueError("buffer-bearing shader types missing from catalog:\n" + "\n".join(details))
+        if mismatch_count:
+            raise ValueError(
+                f"material ParamBuffer mismatches ({mismatch_count} total, first {len(mismatches)}):\n"
+                + "\n".join(mismatches)
+            )
+        if matched != buffer_bearing:
+            raise ValueError(f"coverage invariant failed: matched={matched} buffer_bearing={buffer_bearing}")
+        report = {
+            "materials": total,
+            "buffer_bearing_materials": buffer_bearing,
+            "matched_materials": matched,
+            "no_first_buffer_materials": no_first_buffer,
+            "buffer_bearing_coverage_percent": round(100.0 * matched / max(1, buffer_bearing), 6),
+            "all_material_coverage_percent": round(100.0 * matched / max(1, total), 6),
+            "shader_types": [
+                {
+                    "shader_type": shader_type,
+                    "materials": stats["materials"],
+                    "buffer_bearing": stats["buffer_bearing"],
+                    "matched": stats["matched"],
+                    "no_first_buffer": stats["no_first_buffer"],
+                    "catalog_size": expected_by_type.get(shader_type),
+                }
+                for shader_type, stats in sorted(per_type.items())
+            ],
+        }
+        if args.coverage_output:
+            args.coverage_output.parent.mkdir(parents=True, exist_ok=True)
+            args.coverage_output.write_text(
+                json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+            )
+        coverage = (
+            f" matched_materials={matched}/{total} ({100.0 * matched / max(1, total):.2f}%)"
+            f" buffer_bearing={matched}/{buffer_bearing}"
+            f" no_first_buffer={no_first_buffer}"
+        )
     print(f"layouts={len(layouts)}{coverage} output={args.output}")
     return 0
 

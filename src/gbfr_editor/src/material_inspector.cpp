@@ -114,7 +114,7 @@ const char* parameter_meaning(const gbfr::MaterialShaderParameter& parameter) {
     case 0x4298F7E4u: return "Sky / Cloud 管线 permutation 位 0x2";
     case 0x93D9F63Au: return "Elemental 7/11 管线模板开关";
     case 0x9C83F56Fu: return "Metal 备用管线 / 资源描述符开关";
-    case 0xA6EB1B34u: return "启用角色根位置相关的运行时方向数据";
+    case 0xA6EB1B34u: return "Metal 阴影类型 3 的方向驱动 Alpha 裁切阈值（标称范围 0.2..1.0）";
     case 0xAB261CFAu: return "UberEnv 管线 permutation 位 0x10";
     case 0xAC6F995Du: return "能量护盾控制的遗迹材质组索引（0 / 1..4 / 5 汇总）";
     case 0xC5BD3DEDu: return "UberEnv 管线 permutation 位 0x100";
@@ -135,8 +135,10 @@ const char* parameter_confidence(const gbfr::MaterialShaderParameter& parameter)
         return "A：正式 schema";
     case 0x11664BFCu: case 0x2AEDA6ADu: case 0x2B5C866Cu: case 0x56346692u:
     case 0x8B8038FCu: case 0x92339519u: case 0x93D9F63Au: case 0x9C83F56Fu:
-    case 0xA6EB1B34u: case 0xAC6F995Du: case 0xBAEF6920u: case 0xE56343C0u:
+    case 0xAC6F995Du: case 0xBAEF6920u: case 0xE56343C0u:
         return "B/C：运行时 + 样本";
+    case 0xA6EB1B34u:
+        return "B：CPU 写入 + DXBC 消费 + 角色全量样本";
     case 0x53F49792u:
         return "B/C：pass key + 社区推测";
     case 0xEB6F1AE7u:
@@ -361,7 +363,7 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
                 label_value("g_TwoSided", find_parameter(material, two_sided_shader_parameter_id) ?
                     (parameter_enabled(material, two_sided_shader_parameter_id) ? "1" : "0") : "未设置");
                 label_value("0x53F49792 pass key 0x4", parameter_enabled(material, enable_alpha_shader_parameter_id) ? "1（社区推测与 Alpha 相关）" : "0 / 未设置");
-                label_value("bool9 / bool10 / bool12", (std::to_string(material.bool9) + " / " + std::to_string(material.bool10) + " / " + std::to_string(material.bool12) + "（意义未知）").c_str());
+                label_value("bool9 / bool10 / bool12", (std::to_string(material.bool9) + " / " + std::to_string(material.bool10) + " / " + std::to_string(material.bool12) + "（角色样本中 bool12=shadow_type 3）").c_str());
                 ImGui::EndTable();
             }
             ImGui::Spacing();
@@ -377,6 +379,11 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
                     ImGui::TextColored(ImVec4(1.0f, .68f, .25f, 1.0f), "角色基线偏差：0x53F49792 应与 ignore_alpha=false 同值。");
                 if (material.bool12 != (material.shadow_type == 3))
                     ImGui::TextColored(ImVec4(1.0f, .68f, .25f, 1.0f), "角色基线偏差：bool12 应与 shadow_type=3 同现。");
+                if (material.shader_type == 5) {
+                    const auto* directional_alpha = find_parameter(material, 0xA6EB1B34u);
+                    if (!directional_alpha || (directional_alpha->value_or_offset != 0) != (material.shadow_type == 3 && material.bool12))
+                        ImGui::TextColored(ImVec4(1.0f, .68f, .25f, 1.0f), "角色 Metal 基线偏差：0xA6EB1B34 应与 shadow_type=3 / bool12=true 同现。");
+                }
                 if (material.bool9 || !material.bool10)
                     ImGui::TextColored(ImVec4(1.0f, .68f, .25f, 1.0f), "角色基线偏差：完整 pl/fp/wp 样本中 bool9=false、bool10=true。");
                 if (find_parameter(material, two_sided_shader_parameter_id))
@@ -478,8 +485,9 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
                     param_buffer = &asset_.constant_buffers[param_buffer_index];
             }
             if (param_buffer) {
-                ImGui::SeparatorText("ParamBuffer（Shader RDEF 精确匹配）");
+                ImGui::SeparatorText("ParamBuffer（字段 A / 绑定 C）");
                 ImGui::TextWrapped("%s | buffer %zu | %u bytes", layout->shader, param_buffer_index, layout->size);
+                ImGui::TextDisabled("字段名：A - DXBC RDEF；绑定：%s", layout->binding_evidence);
                 const auto reflected_height = std::clamp(ImGui::GetContentRegionAvail().y * .55f, 180.0f, 480.0f);
                 if (ImGui::BeginTable("mmat_reflected_param_buffer", 5,
                     ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollY, ImVec2(0, reflected_height))) {

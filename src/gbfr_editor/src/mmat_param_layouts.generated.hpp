@@ -8,7 +8,16 @@
 namespace gbfr::editor::mmat_catalog {
 enum class FieldType { floating, boolean, signed_integer, unsigned_integer };
 struct Field { const char* name; std::uint16_t offset; std::uint16_t size; FieldType type; };
-struct Layout { std::uint8_t shader_type; const char* shader; std::uint16_t size; std::span<const Field> fields; };
+struct Layout { std::uint8_t shader_type; const char* shader; std::uint16_t size; std::span<const Field> fields; const char* binding_evidence; };
+
+inline constexpr Field fields_1[] = {
+    {"g_AlbedoColor", 0, 12, FieldType::floating },
+    {"g_Intensity", 12, 4, FieldType::floating },
+    {"g_UvAnimation", 16, 8, FieldType::floating },
+    {"g_bAlbedoOverWrite", 24, 4, FieldType::boolean },
+    {"g_UseNormalMap", 28, 4, FieldType::boolean },
+    {"g_UberEmissivePower", 32, 4, FieldType::floating },
+};
 
 inline constexpr Field fields_2[] = {
     {"g_VariationMulAlbedoColor", 0, 12, FieldType::floating },
@@ -410,6 +419,12 @@ inline constexpr Field fields_15[] = {
     {"g_RimMoveExp", 100, 4, FieldType::floating },
     {"g_RimIntensity", 104, 4, FieldType::floating },
     {"g_RimMoveIntensity", 108, 4, FieldType::floating },
+};
+
+inline constexpr Field fields_17[] = {
+    {"g_GeneralWindStrength", 0, 4, FieldType::floating },
+    {"g_SwingNoiseSpeed", 4, 4, FieldType::floating },
+    {"g_IsUseYAxisBillboard", 8, 4, FieldType::boolean },
 };
 
 inline constexpr Field fields_18[] = {
@@ -968,31 +983,33 @@ inline constexpr Field fields_29[] = {
 };
 
 inline constexpr Layout layouts[] = {
-    {2, "ps/model/foward/lookdev/ps_charactereyelookdev.pso", 48, std::span<const Field>{fields_2}},
-    {3, "ps/model/foward/lookdev/ps_characterfacelookdev.pso", 96, std::span<const Field>{fields_3}},
-    {4, "ps/model/foward/lookdev/ps_characterhairlookdev.pso", 48, std::span<const Field>{fields_4}},
-    {5, "ps/model/foward/lookdev/ps_charactermetallookdev.pso", 96, std::span<const Field>{fields_5}},
-    {6, "ps/model/foward/lookdev/ps_characterskinlookdev.pso", 48, std::span<const Field>{fields_6}},
-    {7, "ps/model/foward/lookdev/ps_elementallookdev.pso", 112, std::span<const Field>{fields_7}},
-    {8, "ps/model/ps_flowmap.pso", 160, std::span<const Field>{fields_8}},
-    {10, "ps/model/ps_glowingground.pso", 224, std::span<const Field>{fields_10}},
-    {11, "ps/model/ps_glowingmountain.pso", 336, std::span<const Field>{fields_11}},
-    {12, "ps/model/ps_ice_1dither_2emissive_3cameraalpha.pso", 160, std::span<const Field>{fields_12}},
-    {13, "ps/model/ps_ice_2layer.pso", 224, std::span<const Field>{fields_13}},
-    {14, "ps/model/ps_lavafall.pso", 352, std::span<const Field>{fields_14}},
-    {15, "ps/model/foward/lookdev/ps_lucilius.pso", 112, std::span<const Field>{fields_15}},
-    {18, "ps/model/ps_plantmiddleview.pso", 208, std::span<const Field>{fields_18}},
-    {19, "ps/model/ps_plantshake.pso", 128, std::span<const Field>{fields_19}},
-    {20, "ps/model/ps_skycloud.pso", 128, std::span<const Field>{fields_20}},
-    {21, "ps/model/ps_uberenv.pso", 320, std::span<const Field>{fields_21}},
-    {22, "ps/model/ps_uberenv_layer2.pso", 368, std::span<const Field>{fields_22}},
-    {23, "ps/model/ps_uberenv_layer2_plantpivotpainter.pso", 192, std::span<const Field>{fields_23}},
-    {24, "ps/model/ps_uberenv_layer3.pso", 416, std::span<const Field>{fields_24}},
-    {25, "ps/model/ps_uberenv_layer4.pso", 384, std::span<const Field>{fields_25}},
-    {26, "ps/model/ps_uberenv_plantpivotpainter.pso", 192, std::span<const Field>{fields_26}},
-    {27, "ps/model/ps_uberenvtextureless.pso", 64, std::span<const Field>{fields_27}},
-    {28, "ps/model/ps_water_lake.pso", 368, std::span<const Field>{fields_28}},
-    {29, "ps/model/ps_grid.pso", 48, std::span<const Field>{fields_29}},
+    {1, "ps/model/foward/ps_characterconstant.pso", 48, std::span<const Field>{fields_1}, "C: full-sample size and value contract"},
+    {2, "ps/model/foward/lookdev/ps_charactereyelookdev.pso", 48, std::span<const Field>{fields_2}, "C: shader family and full-sample size contract"},
+    {3, "ps/model/foward/lookdev/ps_characterfacelookdev.pso", 96, std::span<const Field>{fields_3}, "C: shader family and full-sample size contract"},
+    {4, "ps/model/foward/lookdev/ps_characterhairlookdev.pso", 48, std::span<const Field>{fields_4}, "C: shader family and full-sample size contract"},
+    {5, "ps/model/foward/lookdev/ps_charactermetallookdev.pso", 96, std::span<const Field>{fields_5}, "C: shader family and full-sample size contract"},
+    {6, "ps/model/foward/lookdev/ps_characterskinlookdev.pso", 48, std::span<const Field>{fields_6}, "C: shader family and full-sample size contract"},
+    {7, "ps/model/foward/lookdev/ps_elementallookdev.pso", 112, std::span<const Field>{fields_7}, "C: shader family and full-sample size contract"},
+    {8, "ps/model/ps_flowmap.pso", 160, std::span<const Field>{fields_8}, "C: shader family and full-sample size contract"},
+    {10, "ps/model/ps_glowingground.pso", 224, std::span<const Field>{fields_10}, "C: shader family and full-sample size contract"},
+    {11, "ps/model/ps_glowingmountain.pso", 336, std::span<const Field>{fields_11}, "C: shader family and full-sample size contract"},
+    {12, "ps/model/ps_ice_1dither_2emissive_3cameraalpha.pso", 160, std::span<const Field>{fields_12}, "C: shader family and full-sample size contract"},
+    {13, "ps/model/ps_ice_2layer.pso", 224, std::span<const Field>{fields_13}, "C: shader family and full-sample size contract"},
+    {14, "ps/model/ps_lavafall.pso", 352, std::span<const Field>{fields_14}, "C: shader family and full-sample size contract"},
+    {15, "ps/model/foward/lookdev/ps_lucilius.pso", 112, std::span<const Field>{fields_15}, "C: shader family and full-sample size contract"},
+    {17, "vs/model/vs_plantbillboard.vso", 16, std::span<const Field>{fields_17}, "C: shader family and full-sample size contract"},
+    {18, "ps/model/ps_plantmiddleview.pso", 208, std::span<const Field>{fields_18}, "C: shader family and full-sample size contract"},
+    {19, "ps/model/ps_plantshake.pso", 128, std::span<const Field>{fields_19}, "C: shader family and full-sample size contract"},
+    {20, "ps/model/ps_skycloud.pso", 128, std::span<const Field>{fields_20}, "C: shader family and full-sample size contract"},
+    {21, "ps/model/ps_uberenv.pso", 320, std::span<const Field>{fields_21}, "C: shader family and full-sample size contract"},
+    {22, "ps/model/ps_uberenv_layer2.pso", 368, std::span<const Field>{fields_22}, "C: shader family and full-sample size contract"},
+    {23, "ps/model/ps_uberenv_layer2_plantpivotpainter.pso", 192, std::span<const Field>{fields_23}, "C: shader family and full-sample size contract"},
+    {24, "ps/model/ps_uberenv_layer3.pso", 416, std::span<const Field>{fields_24}, "C: shader family and full-sample size contract"},
+    {25, "ps/model/ps_uberenv_layer4.pso", 384, std::span<const Field>{fields_25}, "C: shader family and full-sample size contract"},
+    {26, "ps/model/ps_uberenv_plantpivotpainter.pso", 192, std::span<const Field>{fields_26}, "C: shader family and full-sample size contract"},
+    {27, "ps/model/ps_uberenvtextureless.pso", 64, std::span<const Field>{fields_27}, "C: shader family and full-sample size contract"},
+    {28, "ps/model/ps_water_lake.pso", 368, std::span<const Field>{fields_28}, "C: shader family and full-sample size contract"},
+    {29, "ps/model/ps_grid.pso", 48, std::span<const Field>{fields_29}, "C: shader family and full-sample size contract"},
 };
 
 inline const Layout* find(std::uint8_t shader_type) noexcept {

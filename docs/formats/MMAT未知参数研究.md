@@ -22,12 +22,14 @@ Shader 目录实际存放裸 DXBC：1,162 个 `.pso`、265 个 `.vso`、170 个 
 研究链路：
 
 1. `gbfr_shader_reflect` 提取每个 DXBC 的 RDEF 变量、资源和布局。
-2. `analyze_mmat.py` 用正式 2.0.0 FlatBuffers schema 直接读取全部 MMAT，并用 GBFRDataTools 的定制 XXHash32 关联名称。
-3. `summarize_mmat_patterns.py` 生成取值、类别、shader family、稀有样本和参数对列联表。
-4. `find_hash_constants.py` 在 PE section 中定位哈希常量，再用 `dumpbin /DISASM /RANGE` 检查实际取参和分支行为。
-5. `compare_mmat_records.py` 对两份分析结果按材质哈希比较渲染状态、参数实际值、贴图、被引用的常量缓冲和 Granite 配置，忽略 FlatBuffers 的非语义字节布局差异。
-6. `analyze_character_mmat.py` 只抽取 `model/{pl,fp,wp}` 下 Eye、Face、Hair、Metal、Skin 五类角色材质，逐字段解码 `ParamBuffer`，并验证角色渲染状态不变量。
-7. `compare_character_mmat.py` 按角色模型与配色对比材质家族、状态、贴图槽、首缓冲字节指纹和 RDEF 字段值集合。
+2. `gbfr_shader_disasm` 用系统 `D3DDisassemble` 输出带指令编号和字节偏移的 DXBC 汇编，用于追踪实例缓冲、采样和 discard 数据流。
+3. `analyze_mmat.py` 用正式 2.0.0 FlatBuffers schema 直接读取全部 MMAT，并用 GBFRDataTools 的定制 XXHash32 关联名称。
+4. `summarize_mmat_patterns.py` 生成取值、类别、shader family、稀有样本和参数对列联表。
+5. `find_hash_constants.py` 在 PE section 中定位哈希常量，再用 `dumpbin /DISASM /RANGE` 检查实际取参和分支行为。
+6. `compare_mmat_records.py` 对两份分析结果按材质哈希比较渲染状态、参数实际值、贴图、被引用的常量缓冲和 Granite 配置，忽略 FlatBuffers 的非语义字节布局差异。
+7. `analyze_character_mmat.py` 只抽取 `model/{pl,fp,wp}` 下 Eye、Face、Hair、Metal、Skin 五类角色材质，逐字段解码 `ParamBuffer`，并验证角色渲染状态不变量。
+8. `compare_character_mmat.py` 按角色模型与配色对比材质家族、状态、贴图槽、首缓冲字节指纹和 RDEF 字段值集合。
+9. `generate_mmat_cbuffer_catalog.py` 从指定 DXBC 基准生成编辑器字段目录，并对全量 MMAT 做严格覆盖校验；任何新的带首缓冲 shader type、非法索引或长度偏差都会使生成失败。
 
 生成的 `research_output/mmat` 约有上百 MB，已被 Git 忽略；仓库提交的是脚本、精炼结论和以后可由编辑器读取的字段目录。
 
@@ -44,6 +46,7 @@ Shader 目录实际存放裸 DXBC：1,162 个 `.pso`、265 个 `.vso`、170 个 
 - `g_EnableDiscardMask` 在 3,221 条 Eye/Metal 材质中存在，但全部为 false。
 - A 级 `g_TwoSided` 在 `pl/fp/wp` 中一次都没有；它只属于当前样本中的 PlantShake/场景资产，不能用于解释角色背面的异常半透。
 - `0x8B8038FC` 在 4,779 条非 Eye 角色材质中存在但全部为 false。全量数据中的 21 个真值来自 `em/fe` 等复用角色 shader 的资产，不代表普通 `pl/fp/wp` 会启用 subtype 13。
+- Metal 的 `0xA6EB1B34` 在 2,499 条样本中存在，981 个真值与 `shadow_type=3 / bool12=true` 完全同现，1,518 个假值均不属于该状态，错误数为 0。
 
 这些关系由 `character_invariants.json` 自动生成，游戏更新后应重新扫描，而不是把当前计数写成永久格式规则。
 
@@ -147,7 +150,7 @@ EXE 对 `0x53F49792` 有 16 个直接读取点。Eye、Face、Hair、Metal、Ski
 
 | 参数组 | 样本范围 | 当前结论 |
 |---|---|---|
-| `0x9C83F56F`, `0xA6EB1B34` | 4,133 个 Metal `5/7`、`5/5` material | 前者选择备用管线/资源描述符，后者启用角色根位置运行时数据；行为不同 |
+| `0x9C83F56F`, `0xA6EB1B34` | 4,133 个 Metal `5/7`、`5/5` material | 前者选择备用管线/资源描述符；后者为阴影类型 3 追加方向驱动的 Alpha 裁切阈值，行为不同 |
 | `0x037BE4E5` | UberEnv / 植被 | 禁用背面剔除，选择双面光栅路径；官方字段名未知 |
 | `0x0A05A26F` | 18 个 foliage `9/1` material | 17 真 1 假；EXE 无直接哈希常量引用，行为仍未知 |
 | `0x4298F7E4` | 25 个 sky/cloud `20/1` material | Sky/Cloud 管线 permutation 位 `0x2`，官方视觉名称未知 |
@@ -184,13 +187,19 @@ EXE `0x1446FA6FE..0x1446FA7B7` 在构造 UberEnv 管线 key 时分别读取三�
 
 `0x4298F7E4` 只存在于 25 个 sky/cloud `20/1` material，23 真 2 假。EXE `0x1446F8AEE` 和 `0x1446F93AA` 的两条构建路径都会把布尔值乘 2 后并入 pipeline key，再与 pass 类型、材质状态和 subtype 位组合；它不进入 Sky `ParamBuffer`。因此该参数达到 B 级“Sky/Cloud permutation 位 `0x2`”行为证据，但真值不等同于“显示云”“启用透明”或其他具体视觉名称。
 
-### Metal 的角色位置相关运行时数据
+### Metal 阴影类型 3 的方向驱动 Alpha 裁切
 
 `0xA6EB1B34` 出现在全部 4,133 个 Metal-family material 中，1,246 个为真。真值以玩家角色为主；奶刀 `pl1400` 中身体/衣物部分槽为真，刀鞘槽为假。
 
-EXE `0x1446EA5F3` 读取该参数。为真时会取得对象数据与 0 号骨骼变换，归一化根位置相关向量、计算点积并建立一组额外运行时数据；初始化路径 `0x1446EAEB5` 还会进入一段额外资源绑定流程。结合 Metal pixel shader 中只在完整 forward 变体出现的 `CharacterDirectionalDataBuf` 和 `CharacterPointLightDataBuf`，它很可能控制角色专用方向/光照数据，但“光照”仍是推断，原始字段名尚未恢复。当前按 B/C 级显示为“启用角色根位置相关的运行时方向数据”。
+角色专项样本把范围收紧到了 2,499 个 Metal：981 个真值全部是 `shadow_type=3 / bool12=true`，1,518 个假值全部不是该状态，错配为 0。它不再只是“身体上较多”的弱相关。
 
-这条路径与已观察到的“表面噪波随模型到世界原点方向变化”在现象上相关，但尚未证明因果。必须比较同一模型中该参数真/假的相邻材质，或用帧捕获确认其最终绑定与 shader 消费者后，才能把它列为噪波根因。
+EXE `0x1446EA5F3` 读取该参数。为真时，代码取得对象向量与 0 号骨骼变换（无骨骼时回退到对象变换），将根/对象平移方向归一化并计算点积，随后写入：
+
+`threshold = 0.6 - 0.4 * dot(normalized(root_or_object_position), object_vector)`
+
+当 `objectVector` 按调用约定为单位方向时，标称阈值范围为 `0.2..1.0`；当前函数没有再次归一化它，因此不能把该范围写成无条件格式约束。该 float 写入 `g_InstanceParam` 的第 4 项；已反汇编的 Metal `5discard` 和 depth-only DXBC 都从 `instanceBase + 4` 读取它，再执行 `sampledAlpha < threshold -> discard`。`instanceBase + 5` 是另一项深度/遮挡开关，不能和这个阈值混为一谈。原始字段名尚未恢复，但 CPU 写入、DXBC 消费和角色全量样本三条证据已把行为提升为 B 级。
+
+这解释了为什么受影响材质的破碎边缘可能随模型相对世界原点的方向变化。它只能裁掉接近阈值的像素，不会直接制造法线或光照噪声：如果毛躁发生在完全不透明区域，仍应继续检查切线、法线、精度和阴影；如果只发生在 alpha 边缘或带灰度遮罩的平面，它就是首要候选。
 
 `0x9C83F56F` 在同一构建函数的 `0x1446EA83A` 被读取。真值且类型正确时，代码从当前 Metal 描述记录的 `+0x0C` 位置取 32 位 ID；否则取默认的 `+0x08`，随后还会固定写入 `+0x10` 的另一项 ID。它因此是备用管线/资源描述符选择开关，不是颜色、粗糙度或透明度的直接数值。22 个真值多为特殊颜色变体，只能说明资产使用场景，不能作为官方命名。
 
@@ -211,7 +220,14 @@ MMAT 的 `constant_buffer_indices` 首项可与对应 shader family 的 `ParamBu
 - UberEnv 及其 2/3/4 层、两种 pivot painter、textureless：逐层 UV、颜色/金属/粗糙度覆盖、法线、湿润、植被风、grass shine、贴图平铺和 camera fade。
 - Plant middle/shake、Sky cloud、Water lake、Grid：对应 RDEF 中的植被、天空、水面和网格参数。
 
-目录由 `generate_mmat_cbuffer_catalog.py` 从 25 个明确指定的 DXBC 基准文件生成，生成时校验每个 `ParamBuffer` 的预期字节数、字段对齐和字段类型。它覆盖完整样本中的 27,399/27,980 个 material entry（约 97.9%）。不匹配的 buffer 继续只显示 raw/hex/float，不按相似长度强行套布局；silhouette、foliage、plant billboard 和未知类型等没有可直接对应的 pixel `ParamBuffer`。
+目录由 `generate_mmat_cbuffer_catalog.py` 从 27 个明确指定的 DXBC 基准文件生成，生成时校验每个 `ParamBuffer` 的预期字节数、字段对齐和字段类型。它覆盖完整样本中全部 27,491 条带首缓冲的 material；其余 489 条本身没有首缓冲。字段名来自 A 级 RDEF，MMAT shader type 到基准 DXBC 的绑定仍单独标为 C 级全量契约。未匹配的 buffer 继续只显示 raw/hex/float，不按相似长度强行套布局。
+
+本次补齐了此前仅有的两类带缓冲缺口：
+
+- shader type 1 共 43 条，全部是 `1/6` 且首缓冲为 48 字节。基准 `ps/model/foward/ps_characterconstant.pso` 的 RDEF 给出 `g_AlbedoColor`、`g_Intensity`、`g_UvAnimation`、`g_bAlbedoOverWrite`、`g_UseNormalMap`、`g_UberEmissivePower`；布尔槽和仅出现的 `600/1300` emissive 值均与样本字节契约一致。
+- shader type 17 共 49 条，全部是 `17/1` 且首缓冲为 16 字节。基准 `vs/model/vs_plantbillboard.vso` 的 RDEF 给出 `g_GeneralWindStrength`、`g_SwingNoiseSpeed`、`g_IsUseYAxisBillboard`；前三个 4 字节槽的值域与全量样本一致，末尾 4 字节恒为零填充。
+
+以上字段名本身是 A 级 RDEF 证据；“MMAT type 1/17 使用该 DXBC 布局”是由 shader family、全量长度和值域共同支持的 C 级绑定，编辑器会把两种等级分开显示。
 
 ## 奶刀工作区的封回语义验证
 
@@ -227,7 +243,7 @@ MMAT 的 `constant_buffer_indices` 首项可与对应 shader family 的 `ParamBu
 
 ## 复现命令
 
-先构建 `gbfr_shader_reflect`，然后在仓库根目录执行：
+先构建 `gbfr_shader_reflect` 和 `gbfr_shader_disasm`，然后在仓库根目录执行：
 
 ```powershell
 $gbfrPython = "D:\Blender\Blender 4.5\4.5\python\bin\python.exe"
@@ -235,6 +251,16 @@ $gbfrPython = "D:\Blender\Blender 4.5\4.5\python\bin\python.exe"
 out\bin\RelWithDebInfo\gbfr_shader_reflect.exe `
   "D:\Steam\steamapps\common\Granblue Fantasy Relink\data\shader" `
   research_output\mmat\shader_reflection.jsonl
+
+out\bin\RelWithDebInfo\gbfr_shader_disasm.exe `
+  "D:\Steam\steamapps\common\Granblue Fantasy Relink\data\shader\ps\model\foward\lookdev\ps_charactermetallookdev_5discard.pso" `
+  research_output\mmat\ps_charactermetallookdev_5discard.asm
+
+$dumpbin = "D:\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64\dumpbin.exe"
+$gameExe = "D:\Steam\steamapps\common\Granblue Fantasy Relink\granblue_fantasy_relink.exe"
+& $dumpbin /DISASM /RANGE:0x1446EA5F0,0x1446EA77A $gameExe
+& $dumpbin /RAWDATA /RANGE:0x1454A8EF0,0x1454A8EF4 $gameExe
+& $dumpbin /RAWDATA /RANGE:0x1454A4860,0x1454A4864 $gameExe
 
 & $gbfrPython scripts\research\analyze_mmat.py `
   --data-root "D:\Steam\steamapps\common\Granblue Fantasy Relink\data" `
@@ -248,6 +274,7 @@ out\bin\RelWithDebInfo\gbfr_shader_reflect.exe `
 & $gbfrPython scripts\research\generate_mmat_cbuffer_catalog.py `
   --reflection "research_output\mmat\shader_reflection.jsonl" `
   --materials "research_output\mmat\materials.jsonl" `
+  --coverage-output "research_output\mmat\parambuffer_coverage.json" `
   --output "src\gbfr_editor\src\mmat_param_layouts.generated.hpp"
 
 & $gbfrPython scripts\research\analyze_character_mmat.py `
