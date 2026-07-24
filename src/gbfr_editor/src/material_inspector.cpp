@@ -111,7 +111,7 @@ const char* parameter_meaning(const gbfr::MaterialShaderParameter& parameter) {
     case 0x0A05A26Fu: return "Foliage 专用参数";
     case 0x2AEDA6ADu: return "Elemental 第三管线模板开关（现有样本均关闭）";
     case 0x2B5C866Cu: return "Elemental 稀有附加描述符开关";
-    case 0x4298F7E4u: return "Sky / Cloud 专用开关";
+    case 0x4298F7E4u: return "Sky / Cloud 管线 permutation 位 0x2";
     case 0x93D9F63Au: return "Elemental 7/11 管线模板开关";
     case 0x9C83F56Fu: return "Metal 备用管线 / 资源描述符开关";
     case 0xA6EB1B34u: return "启用角色根位置相关的运行时方向数据";
@@ -143,7 +143,9 @@ const char* parameter_confidence(const gbfr::MaterialShaderParameter& parameter)
         return "B：实例缓冲写入行为";
     case 0xAB261CFAu: case 0xC5BD3DEDu: case 0xC9762248u:
         return "B：管线 permutation 行为";
-    case 0x037BE4E5u: case 0x4298F7E4u:
+    case 0x4298F7E4u:
+        return "B：管线 permutation 行为";
+    case 0x037BE4E5u:
         return "C/D：样本相关";
     case 0x0A05A26Fu:
         return "D：少量样本";
