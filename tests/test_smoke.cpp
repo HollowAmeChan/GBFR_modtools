@@ -60,15 +60,20 @@ int main() {
         for(auto& vertex:mesh.vertices){vertex.joints[0]=0;vertex.weights[0]=1.0f;}
         if(!preview.load(mesh,skeleton))return 96;
         gbfr::AnimationTrack root_rotation;root_rotation.bone_id=0;root_rotation.property=5;root_rotation.keys.push_back({0,.5f,0,0});
+        gbfr::AnimationTrack spine_rotation;spine_rotation.bone_id=3;spine_rotation.property=5;spine_rotation.keys.push_back({0,.7f,0,0});
+        gbfr::AnimationTrack chest_rotation;chest_rotation.bone_id=4;chest_rotation.property=5;chest_rotation.keys.push_back({0,-.4f,0,0});
         gbfr::AnimationTrack neck_rotation;neck_rotation.bone_id=5;neck_rotation.property=5;neck_rotation.keys.push_back({0,.2f,0,0});
         gbfr::AnimationTrack head_rotation;head_rotation.bone_id=6;head_rotation.property=5;head_rotation.keys.push_back({0,DirectX::XM_PIDIV2,0,0});
-        gbfr::AnimationClip clip;clip.frame_count=1;clip.tracks={root_rotation,neck_rotation,head_rotation};
+        gbfr::AnimationClip clip;clip.frame_count=1;clip.tracks={root_rotation,spine_rotation,chest_rotation,neck_rotation,head_rotation};
         if(!preview.apply_animation(&clip,0))return 97;
         if(!preview.set_anchor_links({{1,5}})||!preview.apply_animation(&clip,0))return 99;
         const auto& anchors=preview.bone_positions();if(std::abs(anchors[1].x-anchors[5].x)+std::abs(anchors[1].y-anchors[5].y)+std::abs(anchors[1].z-anchors[5].z)>1e-5f)return 100;
         gbfr::Vec3 body_anchor_x{},head_anchor_x{},body_origin{},body_x{},head_origin{},head_x{};
         if(!preview.transform_bone_point(1,{1,0,0},body_anchor_x)||!preview.transform_bone_point(5,{1,0,0},head_anchor_x)||
            std::abs(body_anchor_x.x-head_anchor_x.x)+std::abs(body_anchor_x.y-head_anchor_x.y)+std::abs(body_anchor_x.z-head_anchor_x.z)>1e-4f)return 102;
+        gbfr::Vec3 expected_head_root{};
+        if(!preview.transform_bone_point(1,{0,-1,0},expected_head_root)||
+           std::abs(expected_head_root.x-anchors[3].x)+std::abs(expected_head_root.y-anchors[3].y)+std::abs(expected_head_root.z-anchors[3].z)>1e-4f)return 106;
         if(!preview.transform_bone_point(2,{0,0,0},body_origin)||!preview.transform_bone_point(2,{1,0,0},body_x)||
            !preview.transform_bone_point(6,{0,0,0},head_origin)||!preview.transform_bone_point(6,{1,0,0},head_x)||
            std::abs((body_x.x-body_origin.x)-(head_x.x-head_origin.x))+std::abs((body_x.y-body_origin.y)-(head_x.y-head_origin.y))+std::abs((body_x.z-body_origin.z)-(head_x.z-head_origin.z))>1e-4f)return 104;

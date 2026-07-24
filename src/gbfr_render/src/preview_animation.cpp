@@ -130,17 +130,32 @@ bool PreviewRenderer::apply_animation(const AnimationClip* clip,float frame) {
     std::vector<std::size_t> object_roots;
     std::vector<std::size_t> components(bone_count);
     for(std::size_t i=0;i<bone_count;++i){const auto& bone=skeleton_.bones[i];positions[i]=bone.position;scales[i]=bone.scale;rotations[i]=quaternion_to_euler(bone.rotation);const int id=bone_name_id(bone.name);if(id>=0)bone_indices[id].push_back(i);if(bone.parent==0xffff){components[i]=i;if(bone.name=="_900")object_roots.push_back(i);}else{if(bone.parent>=i)return false;components[i]=components[bone.parent];}}
+    std::vector<bool> anchor_driven_bones(bone_count,false);
+    for(const auto& [target,follower]:anchor_links_){
+        if(target>=bone_count||follower>=bone_count)continue;
+        for(auto index=follower;;){
+            anchor_driven_bones[index]=true;
+            const auto parent=skeleton_.bones[index].parent;
+            if(parent==0xffff||parent>=bone_count||components[parent]!=components[follower])break;
+            index=parent;
+        }
+    }
     if(clip){
         for(const auto& track:clip->tracks){
             const std::vector<std::size_t>* targets{};
             if(track.bone_id==-1)targets=&object_roots;
             else {const auto found=bone_indices.find(track.bone_id);if(found==bone_indices.end())continue;targets=&found->second;}
             const float sampled=track.sample(frame);
-            for(const auto index:*targets)switch(track.property){
+            for(const auto index:*targets){
+                // The follower's anchor ancestry is already driven by the target's world pose.
+                // Sampling the same local tracks here would apply the body chain twice to fp branches.
+                if(anchor_driven_bones[index])continue;
+                switch(track.property){
                 case 0:positions[index].x=sampled;break;case 1:positions[index].y=sampled;break;case 2:positions[index].z=sampled;break;
                 case 3:rotations[index].x=sampled;break;case 4:rotations[index].y=sampled;break;case 5:rotations[index].z=sampled;break;
                 case 7:scales[index].x=sampled;break;case 8:scales[index].y=sampled;break;case 9:scales[index].z=sampled;break;
                 default:break;
+                }
             }
         }
     }

@@ -1018,7 +1018,7 @@ void draw_preview_controls() {
         if (g_preview && g_preview->has_model() && ImGui::Button("取景")) g_preview->frame(g_camera);
         if(g_loaded_models.size()>1){
             const bool changed=ImGui::Checkbox("同步头部动画（_005 锚定）",&g_link_head_anchor);
-            if(ImGui::IsItemHovered())ImGui::SetTooltip("同编号骨骼共享完整 MOT；_005 额外对齐头身的世界位置和旋转，并保留其余头骨相对动画。只影响预览姿态。");
+            if(ImGui::IsItemHovered())ImGui::SetTooltip("身体 _003/_004/_005 链只计算一次，再用 _005 世界姿态刚性驱动头部；头部内部的其他共享轨道仍会播放。只影响预览姿态。");
             if(changed)load_model_previews(g_loaded_models,true);
         }
         if(!g_model_preview_diagnostics.empty()&&ImGui::CollapsingHeader("姿态锚点诊断",ImGuiTreeNodeFlags_DefaultOpen)){

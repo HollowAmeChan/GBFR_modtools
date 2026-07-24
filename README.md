@@ -38,4 +38,4 @@ Blender 插件导出的 `.minfo/.skeleton/.mmesh` 也应覆盖到 `unpack/data/`
 
 ## 当前边界
 
-C++ 架构已支持工作区生成与检测、模型文件、WTB/UI-image、新建 `.texture`、mmat JSON 写入/恢复 `build`、DDS/网格/多骨架联动预览、MOT 动画、SOP deform 和 cloth 检查编辑。头部会播放共享 MOT 的完整骨骼动画，并以 `_005` 的世界位置和旋转对齐身体；模型预览默认双面显示，可手动开启背面剔除。cloth BXM 编码仍由 Blender 插件负责，当前版本不再携带旧 PowerShell 构建器。
+C++ 架构已支持工作区生成与检测、模型文件、WTB/UI-image、新建 `.texture`、mmat JSON 写入/恢复 `build`、DDS/网格/多骨架联动预览、MOT 动画、SOP deform 和 cloth 检查编辑。头部以 `_005` 的完整世界姿态跟随身体，锚点祖先链不会重复播放局部旋转，其他共享骨轨道仍会同步；模型预览默认双面显示，可手动开启背面剔除。cloth BXM 编码仍由 Blender 插件负责，当前版本不再携带旧 PowerShell 构建器。
