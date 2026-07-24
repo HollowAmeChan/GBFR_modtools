@@ -26,8 +26,26 @@ Shader 目录实际存放裸 DXBC：1,162 个 `.pso`、265 个 `.vso`、170 个 
 3. `summarize_mmat_patterns.py` 生成取值、类别、shader family、稀有样本和参数对列联表。
 4. `find_hash_constants.py` 在 PE section 中定位哈希常量，再用 `dumpbin /DISASM /RANGE` 检查实际取参和分支行为。
 5. `compare_mmat_records.py` 对两份分析结果按材质哈希比较渲染状态、参数实际值、贴图、被引用的常量缓冲和 Granite 配置，忽略 FlatBuffers 的非语义字节布局差异。
+6. `analyze_character_mmat.py` 只抽取 `model/{pl,fp,wp}` 下 Eye、Face、Hair、Metal、Skin 五类角色材质，逐字段解码 `ParamBuffer`，并验证角色渲染状态不变量。
+7. `compare_character_mmat.py` 按角色模型与配色对比材质家族、状态、贴图槽、首缓冲字节指纹和 RDEF 字段值集合。
 
 生成的 `research_output/mmat` 约有上百 MB，已被 Git 忽略；仓库提交的是脚本、精炼结论和以后可由编辑器读取的字段目录。
+
+## 角色专项样本
+
+角色研究主范围固定为 `model/pl`、`model/fp` 和 `model/wp`。敌人、特效或场景道具即使复用了 Eye/Face/Hair/Metal/Skin shader，也只用于旁证，不与玩家角色样本混算。当前专项扫描覆盖 268 个角色模型、1,035 个 MMAT 文件和 5,501 个 material entry：Metal 2,499、Face 1,091、Hair 776、Eye 722、Skin 413。共解码 73,867 个 `ParamBuffer` 字段值和 29,507 个 Shader 参数值。
+
+五类角色 `ParamBuffer` 的首缓冲尺寸全部与 DXBC RDEF 精确匹配，错误数为 0。该结果排除了“当前新 DLC 角色换了另一套未知首缓冲布局，而编辑器仍按旧长度截断”的假设，但不排除字段值、贴图内容、渲染状态或游戏运行时全局角色光照不同。
+
+专项样本还给出以下完整集合不变量：
+
+- 非 Eye 的 4,779 条角色材质均含 `0x53F49792`，其布尔值与 `ignore_alpha=false` 精确一致，错误数为 0。它仍只能命名为角色 pass key 位 `0x4`，不能仅凭相关性改名为透明开关。
+- 5,501 条材质中 `bool12=true` 与 `shadow_type=3` 精确一致；`bool9` 恒为 false，`bool10` 恒为 true。
+- `g_EnableDiscardMask` 在 3,221 条 Eye/Metal 材质中存在，但全部为 false。
+- A 级 `g_TwoSided` 在 `pl/fp/wp` 中一次都没有；它只属于当前样本中的 PlantShake/场景资产，不能用于解释角色背面的异常半透。
+- `0x8B8038FC` 在 4,779 条非 Eye 角色材质中存在但全部为 false。全量数据中的 21 个真值来自 `em/fe` 等复用角色 shader 的资产，不代表普通 `pl/fp/wp` 会启用 subtype 13。
+
+这些关系由 `character_invariants.json` 自动生成，游戏更新后应重新扫描，而不是把当前计数写成永久格式规则。
 
 ## 已恢复的 Shader 名称
 
@@ -100,7 +118,7 @@ EXE `0x1446F2C15` 与 `0x1446F2CFA` 两次读取该参数。为真时会复制�
 
 ### Alpha 与另一条独立变体
 
-`0x53F49792` 与 `0x8B8038FC` 都出现在同一批 7,287 个角色类 material，但列联表证明二者不是别名：
+`0x53F49792` 与 `0x8B8038FC` 都出现在同一批 7,287 个复用角色 shader family 的 material，但列联表证明二者不是别名：
 
 | `0x53F49792` | `0x8B8038FC` | material 数 |
 |---:|---:|---:|
@@ -113,7 +131,7 @@ EXE 对 `0x53F49792` 有 16 个直接读取点。Eye、Face、Hair、Metal、Ski
 
 `0x8B8038FC` 在 Face、Hair、Metal、Skin 的两组构建路径中共有 8 个读取点。描述表路径 `0x1446E7C1E..0x1446E7CCA`、`0x1446E9B7E..0x1446E9C30`、`0x1446ED197..0x1446ED24C`、`0x1446EEA98..0x1446EEB44` 都在值类型为 U8 且值非零时选择有效 subtype `13`；Face/Hair/Skin 的 key 构造器也把原 subtype 高字节替换为 `0x0D000000`。Metal 的 key 布局不同，以专用 `0x400` 位表示同一路径。它因此不是 `0x53F49792` 的别名，也不是写入颜色或透明度的常量。
 
-全量 21 个真值分布为 Face 10、Hair 4、Metal 4、Skin 3，来自 9 个 MMAT：`em2000/vars/1`、`em7700/vars/0`、`em8200/vars/0,1,2`、`em8210/vars/0`、`fe2000/vars/1`、`fe2100/vars/1`、`fe8200/vars/2`。其中既有默认 `vars/0`，也有 `c01/c02` 贴图变体，不能把它命名为“配色开关”。当前 B/C 级解释收紧为“选择角色材质的有效 Shader subtype 13 路径”；subtype 13 的最终视觉语义仍需帧捕获或运行时 A/B 才能命名。
+全量 21 个真值分布为 Face 10、Hair 4、Metal 4、Skin 3，来自 9 个 MMAT：`em2000/vars/1`、`em7700/vars/0`、`em8200/vars/0,1,2`、`em8210/vars/0`、`fe2000/vars/1`、`fe2100/vars/1`、`fe8200/vars/2`。其中既有默认 `vars/0`，也有 `c01/c02` 贴图变体，不能把它命名为“配色开关”。实际 `pl/fp/wp` 的 4,779 个非 Eye 样本全部为 0。当前 B/C 级解释收紧为“选择角色材质的有效 Shader subtype 13 路径”；subtype 13 的最终视觉语义仍需帧捕获或运行时 A/B 才能命名。
 
 ### Elemental 的三层管线模板选择
 
@@ -180,6 +198,8 @@ EXE `0x1446EA5F3` 读取该参数。为真时会取得对象数据与 0 号骨�
 
 MMAT 的 `constant_buffer_indices` 首项可与对应 shader family 的 `ParamBuffer` 直接对齐。`pl1400` 的 Metal 首 buffer 为 96 bytes，Hair/Skin 为 48 bytes，均与 DXBC RDEF 精确匹配。Eye、Face、Hair、Metal、Skin 的所有像素 shader 变体在各自 family 内也保持同一布局。
 
+当前版本的 `pl1400/vars/0` 与新 DLC `pl2900/vars/0` 对照结果为：Hair 与 Skin 的首缓冲字节完全相同；Metal 的字段集合、Shader 参数哈希集合和贴图槽哈希集合相同，唯一 RDEF 字段值差异是 `g_EnableRimLight=true` 对 `false`。`pl1400` 另有 3 个 Metal 条目采用 `shadow_type=3/bool12=true`，`pl2900` 没有。这只能证明两个当前角色资产继续使用同一契约，不能证明 ER 升级前后同一资产的值没有变化；版本升级结论仍需要历史版本的同一 MMAT 作为基线。
+
 检查器只在“shader type + 基准 Shader + 首 buffer 字节数”精确匹配时显示字段表，可直接查看：
 
 - Eye：瞳孔缩放、parallax bias、颜色变体、虹膜自发光遮罩。
@@ -230,6 +250,19 @@ out\bin\RelWithDebInfo\gbfr_shader_reflect.exe `
   --materials "research_output\mmat\materials.jsonl" `
   --output "src\gbfr_editor\src\mmat_param_layouts.generated.hpp"
 
+& $gbfrPython scripts\research\analyze_character_mmat.py `
+  --materials "research_output\mmat\materials.jsonl" `
+  --reflection "research_output\mmat\shader_reflection.jsonl" `
+  --parameter-catalog "research_output\mmat\shader_parameters.csv" `
+  --out-dir "research_output\mmat\characters"
+
+& $gbfrPython scripts\research\compare_character_mmat.py `
+  --materials "research_output\mmat\characters\character_materials.csv" `
+  --fields "research_output\mmat\characters\character_parambuffer_fields.csv" `
+  --left-model pl1400 `
+  --right-model pl2900 `
+  --output "research_output\mmat\characters\pl1400_vs_pl2900.json"
+
 & $gbfrPython scripts\research\compare_mmat_records.py `
   --baseline "research_output\milk_knife_source\materials.jsonl" `
   --candidate "research_output\milk_knife_build\materials.jsonl" `
@@ -243,5 +276,5 @@ out\bin\RelWithDebInfo\gbfr_shader_reflect.exe `
 1. 追踪 face 世界空间中心最终绑定到哪个 constant buffer 和 shader 变量，确认它是光照中心、阴影中心还是视线中心。
 2. 对 `0x8B8038FC` 的 subtype 13 路径做运行时 A/B 或帧捕获，确认它最终选择的 Face/Hair/Metal/Skin shader 资源及视觉语义。
 3. 用运行时 A/B 或帧捕获确认已定位的 pipeline 位最终对应的视觉名称，重点区分透明、深度、阴影和 pass 变体。
-4. 对新 DLC 与旧版同类材质做逐字段 ParamBuffer 对比，继续定位“材质整体发黑”的版本差异。
+4. 找到 ER 升级前的同一角色 MMAT 基线，再与当前版本做逐字段比较；`pl1400` 与 `pl2900` 的横向比较不能替代版本比较。
 5. 持续把新证据同步到独立 MMAT 检查器；当前已显示 A/B/C/D 等级和恢复名称，封回仍保留原哈希和值类型。

@@ -53,9 +53,13 @@ Shader 参数页会按 A/B/C/D 显示证据来源：A 为 DXBC RDEF 或正式 sc
 - `g_IsUseAlbedoAlphaClip` 与 `g_EnableDiscardMask`：与裁切/丢弃路径有关。
 - `shadow_type=2`：schema 命名为 `ShadowEnable_AlphaBlend`。
 - `ignore_alpha`：是否忽略 Alpha。
-- `g_TwoSided`：双面参数。
+- `g_TwoSided`：A 级双面参数，但当前完整 `pl/fp/wp` 角色样本中一次都没有；它不能作为角色背面问题的默认解释。
 
 这些字段不是一个“透明”开关的五种别名。社区资料明确指出双面加透明的完整设置仍未探明，因此游戏内背面出现不规则半透明时，应先与同模型、同材质槽的原版 ER mmat 比较全部参数和 constant buffer，再检查网格绕序、TAA 与遮罩。编辑器会显示可疑组合，但目前不会自动改写。
+
+角色专项扫描进一步确认：非 Eye 的 `0x53F49792` 与 `ignore_alpha=false` 在当前 4,779 条 `pl/fp/wp` 样本中完全同值；`bool12=true` 与 `shadow_type=3` 在全部 5,501 条角色材质中完全同现；`g_EnableDiscardMask` 全部关闭。这些是当前资产集合中的强相关关系，不足以单独命名透明模式，但可用于发现 Mod 相对原版的异常组合。
+
+模型视口当前使用独立的简化预览 shader，只采样 Albedo、眼睛贴图和 Alpha mask，并没有消费 MMAT 的 roughness、hatching、rim、forward-light 等 `ParamBuffer` 字段，也没有游戏运行时的 `CutCharacterMaterialDataBuf`。因此视口中的明暗只能用于制作检查，不能作为游戏 MMAT 光照是否正确的验证结果。后续若要逼近游戏材质，必须单独实现角色材质预览路径，不能仅调高现有预览灯光后宣称已复现。
 
 ## 验证结果
 

@@ -27,9 +27,9 @@ const char* shader_type_name(std::uint8_t value) {
     switch (value) {
     case 0: return "player_silhouette?";
     case 1: return "player_silhouette2?";
-    case 2: return "Eye?";
-    case 3: return "Face?";
-    case 4: return "Hair?";
+    case 2: return "Eye";
+    case 3: return "Face";
+    case 4: return "Hair";
     case 5: return "Metal";
     case 6: return "Skin";
     case 7: return "elementallookdev";
@@ -209,6 +209,57 @@ bool parameter_enabled(const gbfr::MaterialEntry& entry, std::uint32_t hash) {
     return found != entry.shader_parameters.end() && found->value_or_offset != 0;
 }
 
+const gbfr::MaterialShaderParameter* find_parameter(const gbfr::MaterialEntry& entry, std::uint32_t hash) {
+    const auto found = std::find_if(entry.shader_parameters.begin(), entry.shader_parameters.end(),
+        [&](const auto& parameter) { return parameter.hash == hash; });
+    return found == entry.shader_parameters.end() ? nullptr : &*found;
+}
+
+bool is_player_character_path(const std::filesystem::path& path) {
+    bool after_model = false;
+    for (const auto& component : path) {
+        const auto name = component.wstring();
+        if (after_model) return name == L"pl" || name == L"fp" || name == L"wp";
+        after_model = name == L"model";
+    }
+    return false;
+}
+
+const char* character_param_buffer_meaning(std::string_view name) {
+    if (name == "g_VariationMulAlbedoColor") return "配色变体的 Albedo 乘色";
+    if (name == "g_VariationMulAlbedoColor2") return "第二组配色变体的 Albedo 乘色";
+    if (name == "g_VariationMulRoughness") return "配色变体的粗糙度倍率";
+    if (name == "g_VariationMulRoughness2") return "第二组配色变体的粗糙度倍率";
+    if (name == "g_VariationEnable") return "配色变体开关";
+    if (name == "g_Roughness") return "粗糙度";
+    if (name == "g_EnableOutLine") return "描边开关";
+    if (name == "g_EnableForwardLight") return "前向光照开关";
+    if (name == "g_EnableHatching") return "排线阴影开关";
+    if (name == "g_HatchingColor") return "排线阴影颜色";
+    if (name == "g_EnableRimLight") return "边缘光开关";
+    if (name == "g_RimLightIntensity") return "边缘光强度";
+    if (name == "g_EnableEmissive") return "自发光开关";
+    if (name == "g_EmissiveIntensity") return "自发光强度";
+    if (name == "g_EnableSpecularColor") return "高光颜色开关";
+    if (name == "g_EnableDiscardMask") return "discard mask 开关";
+    if (name == "g_EnableBooleanMask") return "布尔遮罩开关";
+    if (name == "g_EnableFlatNormal") return "平面法线开关";
+    if (name == "g_AnisoWidth") return "头发各向异性高光宽度";
+    if (name == "g_UseBlendFaceColor") return "混合面部颜色开关";
+    if (name == "g_WrinkleColor") return "皱纹颜色";
+    if (name == "g_cheekLowColor") return "脸颊暗部颜色";
+    if (name == "g_cheekHighColor") return "脸颊亮部颜色";
+    if (name == "g_AngleLerpWidth") return "面部角度过渡宽度";
+    if (name == "g_AngleBiasA" || name == "g_AngleBiasC") return "面部角度偏置";
+    if (name == "g_IsMouth") return "嘴部材质标记";
+    if (name == "g_IsTooth") return "牙齿材质标记";
+    if (name == "g_UseJointPos") return "使用骨骼位置开关";
+    if (name == "g_ParallaxBias") return "眼球视差偏置";
+    if (name == "g_PupilScaleHeight" || name == "g_PupilScaleWidth") return "瞳孔缩放";
+    if (name == "g_UseMask1ForIrisEmissive") return "使用 Mask1 控制虹膜自发光";
+    return "-";
+}
+
 void label_value(const char* label, const char* value) {
     ImGui::TableNextRow();
     ImGui::TableNextColumn(); ImGui::TextUnformatted(label);
@@ -292,6 +343,7 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
     ImGui::BeginChild("mmat_material_detail", ImVec2(0, 0));
     const auto selected = static_cast<std::size_t>(std::clamp(selected_material_, 0, static_cast<int>(asset_.entries.size() - 1)));
     const auto& material = asset_.entries[selected];
+    const bool player_character = is_player_character_path(path_);
 
     if (ImGui::BeginTabBar("mmat_tabs")) {
         if (ImGui::BeginTabItem("渲染状态")) {
@@ -306,7 +358,8 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
                 const auto shadow = std::to_string(material.shadow_type) + " - " + shadow_type_name(material.shadow_type);
                 label_value("shadow_type", shadow.c_str());
                 label_value("ignore_alpha", material.ignore_alpha ? "true" : "false");
-                label_value("g_TwoSided", parameter_enabled(material, two_sided_shader_parameter_id) ? "1" : "0 / 未设置");
+                label_value("g_TwoSided", find_parameter(material, two_sided_shader_parameter_id) ?
+                    (parameter_enabled(material, two_sided_shader_parameter_id) ? "1" : "0") : "未设置");
                 label_value("0x53F49792 pass key 0x4", parameter_enabled(material, enable_alpha_shader_parameter_id) ? "1（社区推测与 Alpha 相关）" : "0 / 未设置");
                 label_value("bool9 / bool10 / bool12", (std::to_string(material.bool9) + " / " + std::to_string(material.bool10) + " / " + std::to_string(material.bool12) + "（意义未知）").c_str());
                 ImGui::EndTable();
@@ -316,6 +369,19 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
                 ImGui::TextColored(ImVec4(1.0f, .68f, .25f, 1.0f), "注意：社区资料尚未确认透明与双面的完整组合；不要仅凭预览器结果改写字段。");
             if (material.ignore_alpha && parameter_enabled(material, enable_alpha_shader_parameter_id))
                 ImGui::TextColored(ImVec4(1.0f, .68f, .25f, 1.0f), "Alpha 参数已启用但 ignore_alpha=true，请与原版同槽材质逐字段比较。");
+            if (player_character) {
+                const auto* alpha_key = find_parameter(material, enable_alpha_shader_parameter_id);
+                const bool alpha_contract_mismatch = material.shader_type != 2 &&
+                    (!alpha_key || (alpha_key->value_or_offset != 0) == material.ignore_alpha);
+                if (alpha_contract_mismatch)
+                    ImGui::TextColored(ImVec4(1.0f, .68f, .25f, 1.0f), "角色基线偏差：0x53F49792 应与 ignore_alpha=false 同值。");
+                if (material.bool12 != (material.shadow_type == 3))
+                    ImGui::TextColored(ImVec4(1.0f, .68f, .25f, 1.0f), "角色基线偏差：bool12 应与 shadow_type=3 同现。");
+                if (material.bool9 || !material.bool10)
+                    ImGui::TextColored(ImVec4(1.0f, .68f, .25f, 1.0f), "角色基线偏差：完整 pl/fp/wp 样本中 bool9=false、bool10=true。");
+                if (find_parameter(material, two_sided_shader_parameter_id))
+                    ImGui::TextColored(ImVec4(1.0f, .68f, .25f, 1.0f), "角色基线偏差：完整 pl/fp/wp 样本中未出现 g_TwoSided；不要将其当作通用角色双面开关。");
+            }
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Shader 参数")) {
@@ -415,13 +481,14 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
                 ImGui::SeparatorText("ParamBuffer（Shader RDEF 精确匹配）");
                 ImGui::TextWrapped("%s | buffer %zu | %u bytes", layout->shader, param_buffer_index, layout->size);
                 const auto reflected_height = std::clamp(ImGui::GetContentRegionAvail().y * .55f, 180.0f, 480.0f);
-                if (ImGui::BeginTable("mmat_reflected_param_buffer", 4,
+                if (ImGui::BeginTable("mmat_reflected_param_buffer", 5,
                     ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollY, ImVec2(0, reflected_height))) {
                     ImGui::TableSetupScrollFreeze(0, 1);
                     ImGui::TableSetupColumn("字段");
                     ImGui::TableSetupColumn("Offset", ImGuiTableColumnFlags_WidthFixed, 70);
                     ImGui::TableSetupColumn("类型", ImGuiTableColumnFlags_WidthFixed, 70);
                     ImGui::TableSetupColumn("值", ImGuiTableColumnFlags_WidthFixed, 260);
+                    ImGui::TableSetupColumn("用途（RDEF 名称直译）", ImGuiTableColumnFlags_WidthFixed, 210);
                     ImGui::TableHeadersRow();
                     for (const auto& field : layout->fields) {
                         const auto first_word = static_cast<std::size_t>(field.offset / sizeof(std::uint32_t));
@@ -453,6 +520,8 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
                             if (component) ImGui::SameLine(0, 5);
                             ImGui::Text("%.7g", std::bit_cast<float>(param_buffer->words[first_word + component]));
                         }
+                        ImGui::TableNextColumn();
+                        ImGui::TextWrapped("%s", material.shader_type >= 2 && material.shader_type <= 6 ? character_param_buffer_meaning(field.name) : "-");
                     }
                     ImGui::EndTable();
                 }
