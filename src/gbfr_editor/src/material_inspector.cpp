@@ -116,7 +116,7 @@ const char* parameter_meaning(const gbfr::MaterialShaderParameter& parameter) {
     case 0x9C83F56Fu: return "Metal 备用管线 / 资源描述符开关";
     case 0xA6EB1B34u: return "启用角色根位置相关的运行时方向数据";
     case 0xAB261CFAu: return "UberEnv 参数块开关";
-    case 0xAC6F995Du: return "UberEnv 层 / 变体选择值（U16）";
+    case 0xAC6F995Du: return "能量护盾控制的遗迹材质组索引（0 / 1..4 / 5 汇总）";
     case 0xC5BD3DEDu: return "UberEnv layer2 / layer4 开关";
     case 0xC9762248u: return "UberEnv 参数块稀有开关";
     case 0xEB6F1AE7u: return "Foliage 专用开关";
@@ -135,12 +135,12 @@ const char* parameter_confidence(const gbfr::MaterialShaderParameter& parameter)
         return "A：正式 schema";
     case 0x11664BFCu: case 0x2AEDA6ADu: case 0x2B5C866Cu: case 0x56346692u:
     case 0x8B8038FCu: case 0x92339519u: case 0x93D9F63Au: case 0x9C83F56Fu:
-    case 0xA6EB1B34u: case 0xBAEF6920u: case 0xE56343C0u:
+    case 0xA6EB1B34u: case 0xAC6F995Du: case 0xBAEF6920u: case 0xE56343C0u:
         return "B/C：运行时 + 样本";
     case 0x53F49792u:
         return "B：运行时行为";
     case 0x037BE4E5u: case 0x4298F7E4u:
-    case 0xAB261CFAu: case 0xAC6F995Du: case 0xC5BD3DEDu: case 0xC9762248u:
+    case 0xAB261CFAu: case 0xC5BD3DEDu: case 0xC9762248u:
         return "C/D：样本相关";
     case 0x0A05A26Fu: case 0xEB6F1AE7u:
         return "D：少量样本";
