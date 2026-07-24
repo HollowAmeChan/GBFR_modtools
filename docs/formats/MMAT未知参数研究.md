@@ -115,8 +115,7 @@ EXE 在 `0x1446E7B5E` 和 `0x1446E7C1E` 分别取参。`0x53F49792` 影响 alpha
 | 参数组 | 样本范围 | 当前结论 |
 |---|---|---|
 | `0x9C83F56F`, `0xA6EB1B34` | 4,133 个 Metal `5/7`、`5/5` material | 前者选择备用管线/资源描述符，后者启用角色根位置运行时数据；行为不同 |
-| `0x037BE4E5`, `0xAB261CFA`, `0xC9762248` | UberEnv 为主 | 环境 shader 变体/层级参数，行为仍待反汇编 |
-| `0xC5BD3DED` | 3,280 个 UberEnv layer2/layer4 material | 层级专用开关，行为待反汇编 |
+| `0x037BE4E5` | UberEnv 为主 | 环境 shader 变体参数，行为仍待反汇编 |
 | `0x0A05A26F`, `0xEB6F1AE7` | 18 个 foliage `9/1` material | 植被参数块，需与风、pivot painter 数据对照 |
 | `0x4298F7E4` | 25 个 sky/cloud `20/1` material | 天空/云专用开关，尚无足够语义证据 |
 
@@ -125,6 +124,16 @@ EXE 在 `0x1446E7B5E` 和 `0x1446E7C1E` 分别取参。`0x53F49792` 影响 alpha
 `0xAC6F995D` 是唯一使用 U16 的未命名参数，12,784 个样本中 12,712 个为 0；非零值为 1..5。虽然它广泛存在于 UberEnv material，但 EXE `0x1435C9B75` 所在运行时组件直接引用 `energy_shl001/002_green` 资源名，说明消费者是关卡中的能量护盾控制逻辑，不是通用 Shader 层数。
 
 代码逐 material 读取该值：1..4 分别测试一个四位状态掩码中的对应位，并取同索引的强度；5 检查四位是否全部有效并走汇总分支；0 写入禁用值。样本结构与行为一致：`ba4066` 的遗迹中心材质按五个一组依次标为 1、2、3、4、5，第二套材质再重复；`bg46f5` 也用 1 标分段槽、5 标汇总槽。当前 B/C 级解释为“能量护盾控制的遗迹材质组索引”：0 不参与，1..4 为分组，5 为汇总。它不应被显示成泛化的 UberEnv layer count，官方字段名仍未知。
+
+### UberEnv 管线 permutation 位
+
+EXE `0x1446FA6FE..0x1446FA7B7` 在构造 UberEnv 管线 key 时分别读取三个未知布尔参数：
+
+- `0xAB261CFA=1` 给 key 增加 `0x10` 位。
+- `0xC5BD3DED=1` 给 key 增加 `0x100` 位。
+- `0xC9762248=1` 给 key 增加 `0x200` 位；部分 pass 会直接跳过该位。
+
+`0xC5BD3DED` 只出现在 3,280 个 layer2/layer3 material，202 个为真；另两项的分布也受 UberEnv family 和 pass 限制。它们达到 B 级“管线 permutation 行为”证据，但仍不能仅凭 bit 位置命名成透明、法线、颜色噪声或层数。与 `g_IsUseDepthFade`、`g_UseColorNoise` 等已有 A 级名称不同，检查器只显示 key 位和原始哈希，不改 schema 名称。
 
 ### Metal 的角色位置相关运行时数据
 
