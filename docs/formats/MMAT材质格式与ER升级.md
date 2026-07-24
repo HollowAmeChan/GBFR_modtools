@@ -35,7 +35,7 @@ unk2 / bool3 / bool4 / bool5
 
 - “渲染状态”：shader type/subtype、shadow type、`ignore_alpha`、`g_TwoSided`、Alpha 参数和未知布尔值。
 - “Shader 参数”：哈希/名称、U8/U16/浮点向量类型、值或浮点池偏移、已解码值、用途与置信度。
-- “贴图与 Granite”：每条引用最前显示工作区中已解包 DDS 的缩略图，并列出 shader map、贴图名、实际命中的 `unpack` 相对路径、page file、layer 对应关系和 tile set。含 `granite_params` 的材质优先匹配 Granite DDS，普通材质优先匹配 `data/texture`；右键缩略图或该行文字可打开命中文件所在的 `unpack` 文件夹。
+- “贴图与 Granite”：每条引用最前显示工作区中已解包 DDS 的缩略图，并列出 shader map、贴图名、意义、A/C/D 证据、实际命中的 `unpack` 相对路径、page file、layer 对应关系和 tile set。含 `granite_params` 的材质优先匹配 Granite DDS，普通材质优先匹配 `data/texture`；右键缩略图或该行文字可打开命中文件所在的 `unpack` 文件夹。当前仅剩的两个无 RDEF 槽会显示 C 级推断名 `g_OutlineTexture` 与 `g_Mask5`，但封回时仍保留原始哈希。
 - “常量缓冲”：首 buffer 在 shader type、基准 Shader 和字节数三者精确匹配时，按 RDEF `ParamBuffer` 字段显示颜色、roughness、光照、变体、植被、冰、水面等值；当前目录覆盖 25 个 shader type。其余 buffer 保留每个 32 位 word 的十六进制、uint 和 float 重解释。
 - “文件信息”：magic、根级标志和数据规模。
 

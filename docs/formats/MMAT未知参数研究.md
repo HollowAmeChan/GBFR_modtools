@@ -53,6 +53,17 @@ Shader 目录实际存放裸 DXBC：1,162 个 `.pso`、265 个 `.vso`、170 个 
 
 `0xB460A0F0` 的 `g_IsUseDepthFade` 当前来自正式 schema，而不是本批 Shader 反射结果，因此单独记为 schema 命名证据。
 
+## 贴图槽名称覆盖
+
+76 种 MMAT texture map hash 中，74 种可由 DXBC `RDEF` 资源名直接恢复。剩余两种没有出现在 Shader RDEF 或游戏 EXE 的原始字符串中，因此不达到 A 级；但候选名称经定制 XXHash32 精确复算，并与完整样本逐项吻合，按 C 级显示：
+
+| 哈希 | UI 推断名 | 全量证据 |
+|---|---|---|
+| `0x5A2C820C` | `g_OutlineTexture` | 7,534 个槽；角色材质几乎全部引用 `pre_outline`，并固定处于 Eye/Face/Hair/Metal/Skin 对应贴图序列的位置；`XXHash32Custom("g_OutlineTexture")` 精确等于该哈希 |
+| `0x8A0507FB` | `g_Mask5` | 1,491 个槽；只存在于 Face `3/5`、`3/7`，固定为第 7/8 个槽，实际资源名全部为 `*_msk5`；`XXHash32Custom("g_Mask5")` 精确等于该哈希 |
+
+分析器在 `texture_maps.csv` 中将两者标为 `hash_preimage_full_samples`，编辑器显示“C：哈希预像 + 全量样本”。FlatBuffers schema 和封回数据仍保留 `g_5A2C820C`、`g_8A0507FB` 对应的原始数值，不把推断名称写回二进制。若以后从新版 Shader、EXE 字符串或开发符号找到原名，可将证据升级为 A 级。
+
 ## 已收紧的未知参数
 
 ### 左眼与右眼材质索引

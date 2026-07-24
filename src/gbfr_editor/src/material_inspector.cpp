@@ -176,6 +176,8 @@ const char* reflected_parameter_name(std::uint32_t hash) {
 }
 
 const char* texture_meaning(const gbfr::MaterialTextureMap& texture) {
+    if (texture.hash == 0x5A2C820Cu) return "描边纹理（推断）";
+    if (texture.hash == 0x8A0507FBu) return "面部 Mask 5（推断）";
     if (texture.name.find("Albedo") != std::string::npos) return "基础色";
     if (texture.name.find("Normal") != std::string::npos || texture.name.find("Bump") != std::string::npos) return "法线 / 凹凸";
     if (texture.name.find("Mask") != std::string::npos) return "遮罩";
@@ -183,6 +185,22 @@ const char* texture_meaning(const gbfr::MaterialTextureMap& texture) {
     if (texture.name == "g_LUT") return "颜色查找表";
     if (texture.name.find("Eye") != std::string::npos) return "眼部专用";
     return "用途未探明";
+}
+
+const char* inferred_texture_name(std::uint32_t hash) {
+    switch (hash) {
+    case 0x5A2C820Cu: return "g_OutlineTexture";
+    case 0x8A0507FBu: return "g_Mask5";
+    default: return nullptr;
+    }
+}
+
+const char* texture_confidence(const gbfr::MaterialTextureMap& texture) {
+    if (inferred_texture_name(texture.hash)) return "C：哈希预像 + 全量样本";
+    char placeholder[11]{};
+    std::snprintf(placeholder, sizeof(placeholder), "g_%08X", texture.hash);
+    if (texture.name.empty() || texture.name == placeholder) return "D：仅原始哈希";
+    return "A：RDEF / schema";
 }
 
 bool parameter_enabled(const gbfr::MaterialEntry& entry, std::uint32_t hash) {
@@ -329,12 +347,13 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("贴图与 Granite")) {
-            if (ImGui::BeginTable("mmat_textures",5,ImGuiTableFlags_RowBg|ImGuiTableFlags_BordersInnerV|ImGuiTableFlags_ScrollY,ImVec2(0,std::max(180.0f,ImGui::GetContentRegionAvail().y*.62f)))) {
+            if (ImGui::BeginTable("mmat_textures",6,ImGuiTableFlags_RowBg|ImGuiTableFlags_BordersInnerV|ImGuiTableFlags_ScrollY,ImVec2(0,std::max(180.0f,ImGui::GetContentRegionAvail().y*.62f)))) {
                 ImGui::TableSetupScrollFreeze(0,1);
                 ImGui::TableSetupColumn("预览",ImGuiTableColumnFlags_WidthFixed,82);
-                ImGui::TableSetupColumn("Shader map",ImGuiTableColumnFlags_WidthFixed,220);
+                ImGui::TableSetupColumn("Shader map",ImGuiTableColumnFlags_WidthFixed,190);
                 ImGui::TableSetupColumn("贴图名",ImGuiTableColumnFlags_WidthFixed,220);
                 ImGui::TableSetupColumn("意义",ImGuiTableColumnFlags_WidthFixed,120);
+                ImGui::TableSetupColumn("证据",ImGuiTableColumnFlags_WidthFixed,170);
                 ImGui::TableSetupColumn("已解包路径",ImGuiTableColumnFlags_WidthStretch);
                 ImGui::TableHeadersRow();
                 for(std::size_t texture_index=0;texture_index<material.texture_maps.size();++texture_index){
@@ -357,9 +376,11 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
                         ImGui::GetWindowDrawList()->AddText({min.x+(max.x-min.x-text_size.x)*.5f,min.y+(max.y-min.y-text_size.y)*.5f},ImGui::GetColorU32(ImGuiCol_TextDisabled),state);
                     }
                     texture_context_menu("##texture_context_preview",dds);
-                    ImGui::TableNextColumn();ImGui::Text("%s\n%s",texture.name.empty()?"<unknown>":texture.name.c_str(),hex32(texture.hash).c_str());texture_context_menu("##texture_context_map",dds);
+                    const auto* inferred_name=inferred_texture_name(texture.hash);
+                    ImGui::TableNextColumn();ImGui::TextWrapped("%s%s\n%s",inferred_name?inferred_name:(texture.name.empty()?"<unknown>":texture.name.c_str()),inferred_name?"（推断）":"",hex32(texture.hash).c_str());texture_context_menu("##texture_context_map",dds);
                     ImGui::TableNextColumn();ImGui::TextUnformatted(texture.texture_name.c_str());texture_context_menu("##texture_context_name",dds);
                     ImGui::TableNextColumn(); ImGui::TextUnformatted(texture_meaning(texture));texture_context_menu("##texture_context_meaning",dds);
+                    ImGui::TableNextColumn(); ImGui::TextWrapped("%s",texture_confidence(texture));texture_context_menu("##texture_context_confidence",dds);
                     ImGui::TableNextColumn();
                     if(dds.empty())ImGui::TextDisabled("未找到");else ImGui::TextWrapped("%s",utf8(dds.lexically_relative(unpack_root_)).c_str());
                     texture_context_menu("##texture_context_path",dds);

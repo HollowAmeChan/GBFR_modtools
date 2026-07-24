@@ -24,6 +24,13 @@ PRIME3 = 0xC2B2AE3D
 PRIME4 = 0x27D4EB2F
 PRIME5 = 0x165667B1
 
+# These names have no RDEF or executable-string evidence. Each is an exact
+# custom-XXHash32 preimage corroborated by every occurrence in the full MMAT set.
+INFERRED_TEXTURE_NAMES = {
+    0x5A2C820C: "g_OutlineTexture",
+    0x8A0507FB: "g_Mask5",
+}
+
 
 def rotl(value: int, bits: int) -> int:
     return ((value << bits) | (value >> (32 - bits))) & MASK32
@@ -154,7 +161,8 @@ def scan_binary_identifiers(path: pathlib.Path, target_hashes: set[int], evidenc
     return matches
 
 
-def best_name(hash_value: int, schema_names: dict[int, str], shader_names: dict[int, NameEvidence]) -> tuple[str, str]:
+def best_name(hash_value: int, schema_names: dict[int, str], shader_names: dict[int, NameEvidence],
+              inferred_names: dict[int, str] | None = None) -> tuple[str, str]:
     evidence = shader_names.get(hash_value)
     if evidence:
         names = [name for name, _ in evidence.names.most_common()]
@@ -163,6 +171,8 @@ def best_name(hash_value: int, schema_names: dict[int, str], shader_names: dict[
     schema = schema_names.get(hash_value, "")
     if schema and not (len(schema) >= 10 and schema[2:10].upper() == f"{hash_value:08X}"):
         return schema, "schema_named"
+    if inferred_names and hash_value in inferred_names:
+        return inferred_names[hash_value], "hash_preimage_full_samples"
     return schema or f"g_{hash_value:08X}", "hash_only"
 
 
@@ -197,6 +207,9 @@ def main() -> int:
         shader_names = load_shader_names(args.shader_jsonl.resolve())
         if xxhash32_custom("g_AlbedoMap") != 0x3F2B4D59:
             raise RuntimeError("XXHash32Custom implementation does not match GBFRDataTools")
+        for expected_hash, inferred_name in INFERRED_TEXTURE_NAMES.items():
+            if xxhash32_custom(inferred_name) != expected_hash:
+                raise RuntimeError(f"inferred texture name does not hash to 0x{expected_hash:08X}: {inferred_name}")
 
         parameter_stats: dict[int, ParamStat] = {}
         map_stats: dict[int, ParamStat] = {}
@@ -291,7 +304,8 @@ def main() -> int:
         for binary in args.string_binary:
             binary_matches+=scan_binary_identifiers(binary.resolve(),target_hashes,shader_names)
 
-        def write_stats(path: pathlib.Path, stats: dict[int, ParamStat], schema_names: dict[int, str]) -> None:
+        def write_stats(path: pathlib.Path, stats: dict[int, ParamStat], schema_names: dict[int, str],
+                        inferred_names: dict[int, str] | None = None) -> None:
             with path.open("w", encoding="utf-8-sig", newline="") as stream:
                 writer = csv.writer(stream)
                 writer.writerow(["hash","resolved_name","evidence","schema_name","shader_aliases","materials","files",
@@ -299,7 +313,7 @@ def main() -> int:
                                  "granite_pct","ignore_alpha_pct","bool9_pct","bool10_pct","bool12_pct","shadow_types",
                                  "cooccurring_maps","shader_files","examples"])
                 for hash_value, stat in sorted(stats.items()):
-                    resolved, source = best_name(hash_value, schema_names, shader_names)
+                    resolved, source = best_name(hash_value, schema_names, shader_names, inferred_names)
                     reflected = shader_names.get(hash_value)
                     writer.writerow([f"0x{hash_value:08X}",resolved,source,schema_names.get(hash_value,""),
                         "; ".join(reflected.names if reflected else []),stat.materials,len(stat.files),top(stat.value_types),
@@ -310,7 +324,7 @@ def main() -> int:
                         len(reflected.files) if reflected else 0,"; ".join(stat.examples)])
 
         write_stats(out_dir / "shader_parameters.csv", parameter_stats, parameter_schema)
-        write_stats(out_dir / "texture_maps.csv", map_stats, map_schema)
+        write_stats(out_dir / "texture_maps.csv", map_stats, map_schema, INFERRED_TEXTURE_NAMES)
         write_stats(out_dir / "constant_buffers.csv", buffer_stats, {})
         with (out_dir / "shader_hash_catalog.csv").open("w", encoding="utf-8-sig", newline="") as stream:
             writer=csv.writer(stream);writer.writerow(["hash","names","kinds","shader_files","examples"])
