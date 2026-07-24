@@ -103,17 +103,17 @@ const char* parameter_meaning(const gbfr::MaterialShaderParameter& parameter) {
     case 0xE208C4C4u: return "使用颜色噪声";
     case 0x11664BFCu: return "按第 5 号骨骼计算面部参考中心";
     case 0x56346692u: return "面部参考中心的骨骼局部偏移";
-    case 0x8B8038FCu: return "稀有角色颜色变体相关开关";
+    case 0x8B8038FCu: return "选择角色材质的独立管线描述表分支";
     case 0x92339519u: return "启用冰 / 晶体模型专用资源路径";
     case 0xBAEF6920u: return "右眼材质标记";
     case 0xE56343C0u: return "左眼材质标记";
     case 0x037BE4E5u: return "UberEnv 变体相关开关";
     case 0x0A05A26Fu: return "Foliage 专用参数";
-    case 0x2AEDA6ADu: return "Elemental LookDev 参数块成员";
-    case 0x2B5C866Cu: return "Elemental LookDev 稀有开关";
+    case 0x2AEDA6ADu: return "Elemental 第三管线模板开关（现有样本均关闭）";
+    case 0x2B5C866Cu: return "Elemental 稀有附加描述符开关";
     case 0x4298F7E4u: return "Sky / Cloud 专用开关";
-    case 0x93D9F63Au: return "Elemental LookDev subtype 相关开关";
-    case 0x9C83F56Fu: return "Metal 参数块稀有开关";
+    case 0x93D9F63Au: return "Elemental 7/11 管线模板开关";
+    case 0x9C83F56Fu: return "Metal 备用管线 / 资源描述符开关";
     case 0xA6EB1B34u: return "启用角色根位置相关的运行时方向数据";
     case 0xAB261CFAu: return "UberEnv 参数块开关";
     case 0xAC6F995Du: return "UberEnv 层 / 变体选择值（U16）";
@@ -133,13 +133,13 @@ const char* parameter_confidence(const gbfr::MaterialShaderParameter& parameter)
         return "A：Shader RDEF";
     case 0xB460A0F0u:
         return "A：正式 schema";
-    case 0x11664BFCu: case 0x56346692u: case 0x92339519u: case 0xA6EB1B34u:
-    case 0xBAEF6920u: case 0xE56343C0u:
+    case 0x11664BFCu: case 0x2AEDA6ADu: case 0x2B5C866Cu: case 0x56346692u:
+    case 0x8B8038FCu: case 0x92339519u: case 0x93D9F63Au: case 0x9C83F56Fu:
+    case 0xA6EB1B34u: case 0xBAEF6920u: case 0xE56343C0u:
         return "B/C：运行时 + 样本";
     case 0x53F49792u:
         return "B：运行时行为";
-    case 0x037BE4E5u: case 0x2AEDA6ADu: case 0x2B5C866Cu: case 0x4298F7E4u:
-    case 0x8B8038FCu: case 0x93D9F63Au: case 0x9C83F56Fu:
+    case 0x037BE4E5u: case 0x4298F7E4u:
     case 0xAB261CFAu: case 0xAC6F995Du: case 0xC5BD3DEDu: case 0xC9762248u:
         return "C/D：样本相关";
     case 0x0A05A26Fu: case 0xEB6F1AE7u:
