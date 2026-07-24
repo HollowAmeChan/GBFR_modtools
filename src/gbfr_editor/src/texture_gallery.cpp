@@ -51,6 +51,11 @@ TextureGallery::CacheEntry* TextureGallery::find_or_load(PreviewRenderer& render
     return &found->second;
 }
 
+const TexturePreviewResource* TextureGallery::thumbnail(PreviewRenderer& renderer,const fs::path& path) {
+    auto* entry=find_or_load(renderer,path);
+    return entry&&!entry->failed&&entry->texture.image?&entry->texture:nullptr;
+}
+
 void TextureGallery::draw(const Workspace& workspace,PreviewRenderer& renderer,std::optional<std::size_t> selected_asset,const SelectCallback& on_select) {
     ImGui::Begin("贴图库");
 

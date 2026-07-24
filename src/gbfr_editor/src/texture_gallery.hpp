@@ -16,6 +16,8 @@ public:
     using SelectCallback = std::function<void(std::size_t, const std::filesystem::path&, bool)>;
 
     void clear();
+    const TexturePreviewResource* thumbnail(PreviewRenderer& renderer,
+                                            const std::filesystem::path& path);
     void draw(const Workspace& workspace, PreviewRenderer& renderer,
               std::optional<std::size_t> selected_asset,
               const SelectCallback& on_select);

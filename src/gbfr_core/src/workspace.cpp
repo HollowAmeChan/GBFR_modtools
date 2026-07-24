@@ -289,11 +289,16 @@ void restore_granite_dds(const fs::path& input, const fs::path& gts,
 void encode_material(const fs::path& input, const fs::path& output) {
     json document;
     { std::ifstream stream(input); if (!stream) throw std::runtime_error("Material JSON is missing"); stream >> document; }
+    if (document.contains("Entries1") || document.contains("Magic"))
+        throw std::runtime_error("This mmat JSON uses the lossy legacy A1/A2/A4 schema. Restore it from source before building.");
+    if (!document.contains("materials") || !document["materials"].is_array() ||
+        (document.contains("constant_buffers") && !document["constant_buffers"].is_array()))
+        throw std::runtime_error("This is not a GBFRDataTools 2.0.0 mmat JSON (a materials array is required).");
     TemporaryDirectory temporary(L"gbfr_mmat_");
     const auto flatc = locate_repo_file(L"_lib/tools/flatc.exe");
     const auto schema = locate_repo_file(L"_lib/MMat_ModelMaterial.fbs");
     run_process(flatc, {L"--binary", L"-o", temporary.path().wstring(), schema.wstring(), input.wstring()});
-    const auto encoded = temporary.path() / (input.stem().wstring() + L".bin");
+    const auto encoded = temporary.path() / (input.stem().wstring() + L".mmat");
     if (!fs::is_regular_file(encoded) || !fs::file_size(encoded)) throw std::runtime_error("flatc did not generate the mmat binary");
     copy_atomic(encoded, output);
 }
@@ -310,11 +315,16 @@ void decode_material(const fs::path& source, const fs::path& input) {
     copy_atomic(decoded, input);
 }
 
-std::size_t count_a4(const json& document) {
-    if (!document.contains("Entries1") || !document["Entries1"].is_array()) return 0;
-    return std::count_if(document["Entries1"].begin(), document["Entries1"].end(), [](const auto& entry) {
-        return entry.is_object() && entry.contains("A4") && !entry["A4"].is_null();
-    });
+std::size_t count_granite(const json& document) {
+    if (document.contains("materials") && document["materials"].is_array())
+        return std::count_if(document["materials"].begin(), document["materials"].end(), [](const auto& entry) {
+            return entry.is_object() && entry.contains("granite_params") && entry["granite_params"].is_object();
+        });
+    if (document.contains("Entries1") && document["Entries1"].is_array())
+        return std::count_if(document["Entries1"].begin(), document["Entries1"].end(), [](const auto& entry) {
+            return entry.is_object() && entry.contains("A4") && !entry["A4"].is_null();
+        });
+    return 0;
 }
 }
 
@@ -550,23 +560,28 @@ void Workspace::restore_asset(std::size_t index) {
     refresh();
 }
 
-std::size_t Workspace::material_a4_count(std::size_t index) const {
+std::size_t Workspace::material_granite_count(std::size_t index) const {
     if (index >= assets_.size() || assets_[index].kind != AssetKind::material) throw std::runtime_error("Selected asset is not a material JSON");
     json document;
     std::ifstream stream(assets_[index].input);
     if (!stream) throw std::runtime_error("Material JSON is missing");
     stream >> document;
-    return count_a4(document);
+    return count_granite(document);
 }
 
-std::size_t Workspace::remove_material_a4(std::size_t index) {
+std::size_t Workspace::remove_material_granite(std::size_t index) {
     if (index >= assets_.size() || assets_[index].kind != AssetKind::material) throw std::runtime_error("Selected asset is not a material JSON");
     auto& asset = assets_[index];
     json document;
     { std::ifstream stream(asset.input); if (!stream) throw std::runtime_error("Material JSON is missing"); stream >> document; }
-    const auto removed = count_a4(document);
+    const auto removed = count_granite(document);
     if (!removed) return 0;
-    for (auto& entry : document["Entries1"]) if (entry.is_object() && entry.contains("A4") && !entry["A4"].is_null()) entry.erase("A4");
+    if (document.contains("materials") && document["materials"].is_array())
+        for (auto& entry : document["materials"])
+            if (entry.is_object() && entry.contains("granite_params") && entry["granite_params"].is_object()) entry.erase("granite_params");
+    else if (document.contains("Entries1") && document["Entries1"].is_array())
+        for (auto& entry : document["Entries1"])
+            if (entry.is_object() && entry.contains("A4") && !entry["A4"].is_null()) entry.erase("A4");
     fs::path temporary = asset.input;
     temporary += L".tmp";
     { std::ofstream stream(temporary, std::ios::trunc); if (!stream) throw std::runtime_error("Cannot write material JSON"); stream << document.dump(2) << '\n'; }

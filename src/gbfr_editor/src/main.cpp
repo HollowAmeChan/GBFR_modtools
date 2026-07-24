@@ -6,6 +6,7 @@
 #include <gbfr/formats/animation.hpp>
 #include <gbfr/render/d3d11_context.hpp>
 #include <gbfr/render/preview_renderer.hpp>
+#include "material_inspector.hpp"
 #include "sop_inspector.hpp"
 #include "texture_gallery.hpp"
 
@@ -45,7 +46,7 @@ std::optional<std::size_t> g_selected_asset;
 ImGuiSelectionBasicStorage g_asset_selection;
 std::vector<std::size_t> g_pending_a4_assets;
 enum class AssetFunction { all, model, texture, ui_image, material, cloth };
-enum class PreviewMode { none, model, texture };
+enum class PreviewMode { none, model, texture, material };
 struct ModelPreviewKey {
     std::filesystem::path minfo;
     std::filesystem::path skeleton;
@@ -114,6 +115,7 @@ std::vector<ClpFile> g_clp_files;
 std::unordered_map<std::string,std::string> g_bone_names;
 gbfr::editor::SopInspector g_sop_inspector;
 gbfr::editor::TextureGallery g_texture_gallery;
+gbfr::editor::MaterialInspector g_material_inspector;
 int g_selected_clh = 0;
 int g_selected_clp = 0;
 int g_selected_bone = -1;
@@ -261,7 +263,7 @@ bool load_workspace(const std::filesystem::path& path) {
         g_texture_gallery.clear();
         g_asset_function=AssetFunction::all;g_asset_search.fill('\0');
         g_preview_mode=PreviewMode::none;g_preview_error.clear();g_loaded_model.reset();g_loaded_models.clear();g_model_preview_diagnostics.clear();g_loaded_texture.clear();g_loaded_texture_is_ui=false;g_loaded_material.clear();g_loaded_sop.clear();g_loaded_materials.clear();g_loaded_sops.clear();
-        g_skeleton.bones.clear(); g_clh_files.clear(); g_clp_files.clear();g_sop_inspector.clear();
+        g_skeleton.bones.clear(); g_clh_files.clear(); g_clp_files.clear();g_sop_inspector.clear();g_material_inspector.clear();
         if(g_preview) g_preview->clear();
         const auto settings_directory=g_workspace->root()/L".gbfr";
         std::filesystem::create_directories(settings_directory);
@@ -469,24 +471,24 @@ void remove_selected_material_a4(const std::vector<std::size_t>& indices) {
     for (const auto index : indices) {
         if (index >= g_workspace->assets().size() || g_workspace->assets()[index].kind != gbfr::AssetKind::material) continue;
         try {
-            const auto count = g_workspace->remove_material_a4(index);
+            const auto count = g_workspace->remove_material_granite(index);
             if (count) { ++files; removed += count; }
         } catch (const std::exception& error) {
-            gbfr::Log::write(gbfr::LogLevel::error, "A4 清除失败：" + std::string(error.what()));
+            gbfr::Log::write(gbfr::LogLevel::error, "Granite 流式引用清除失败：" + std::string(error.what()));
         }
     }
-    gbfr::Log::write(gbfr::LogLevel::info, "已从 " + std::to_string(files) + " 个 mmat 清除 " + std::to_string(removed) + " 个 A4 引用");
+    gbfr::Log::write(gbfr::LogLevel::info, "已从 " + std::to_string(files) + " 个 mmat 清除 " + std::to_string(removed) + " 个 granite_params");
     g_workspace->refresh();
 }
 
 void draw_material_a4_confirmation_popup() {
-    if(!ImGui::BeginPopupModal("确认清除 mmat A4",nullptr,ImGuiWindowFlags_AlwaysAutoResize))return;
+    if(!ImGui::BeginPopupModal("确认清除 Granite 流式引用##mmat_granite",nullptr,ImGuiWindowFlags_AlwaysAutoResize))return;
     if(g_workspace&&!g_pending_a4_assets.empty()){
         std::size_t count{},files{};
         for(const auto index:g_pending_a4_assets) if(index<g_workspace->assets().size()&&g_workspace->assets()[index].kind==gbfr::AssetKind::material){
-            try{const auto current=g_workspace->material_a4_count(index);if(current){++files;count+=current;}}catch(...){}}
-        ImGui::Text("将处理 %zu 个 mmat，删除 %zu 个 A4 流式贴图引用。",files,count);
-        ImGui::TextWrapped("删除后材质会改查 A2.Name 对应的普通 .texture；请同时构建所需的 2k/4k 贴图。");
+            try{const auto current=g_workspace->material_granite_count(index);if(current){++files;count+=current;}}catch(...){}}
+        ImGui::Text("将处理 %zu 个 mmat，删除 %zu 个 Granite 流式贴图配置。",files,count);
+        ImGui::TextWrapped("删除后材质会改查 texture_maps.texture_name 对应的普通 .texture；请同时构建所需的 2k/4k 贴图。");
         if(ImGui::Button("确认清除")){
             remove_selected_material_a4(g_pending_a4_assets);
             g_pending_a4_assets.clear();ImGui::CloseCurrentPopup();
@@ -697,6 +699,14 @@ void preview_asset(std::size_t index) {
     if(!g_workspace||index>=g_workspace->assets().size()||!g_preview)return;
     const auto& asset=g_workspace->assets()[index];
     if(asset.kind==gbfr::AssetKind::model){load_model_preview(index);return;}
+    if(asset.kind==gbfr::AssetKind::material){
+        try{
+            if(!asset.available){g_preview_mode=PreviewMode::none;return;}
+            g_material_inspector.set_asset(gbfr::load_mmat_json(asset.input),asset.input);
+            g_loaded_material=asset.input;g_preview_mode=PreviewMode::material;g_preview_error.clear();
+        }catch(const std::exception& error){g_preview_mode=PreviewMode::none;g_preview_error=std::string("mmat 预览失败：")+error.what();gbfr::Log::write(gbfr::LogLevel::error,g_preview_error);}
+        return;
+    }
     if(asset.kind==gbfr::AssetKind::texture||asset.kind==gbfr::AssetKind::ui_image||asset.kind==gbfr::AssetKind::new_texture||asset.kind==gbfr::AssetKind::granite_texture){
         if(!asset.available||asset.input.extension()!=L".dds"){g_preview_mode=PreviewMode::none;return;}
         g_loaded_texture_is_ui = asset.kind == gbfr::AssetKind::ui_image;
@@ -1029,6 +1039,9 @@ void draw_preview_controls() {
         ImGui::Text("当前预览：%s  |  %u x %u",utf8(g_loaded_texture.filename().wstring()).c_str(),g_preview->texture_width(),g_preview->texture_height());
         ImGui::SameLine(0.0f,16.0f);draw_preview_source("贴图",g_loaded_texture);
         ImGui::TextDisabled("预览不读取 build；build 仅作为最终 Mod 输出。");
+    }else if(g_preview_mode==PreviewMode::material){
+        ImGui::Text("当前 mmat：%s",utf8(g_loaded_material.filename().wstring()).c_str());
+        ImGui::TextDisabled("字段解释来自 2.0.0 schema 与社区格式文档；未知项保留原始值。");
     }else{
         ImGui::TextDisabled("当前没有可调整的预览对象。");
     }
@@ -1037,7 +1050,7 @@ void draw_preview_controls() {
 
 void return_to_start() {
     if(!g_imgui_ini.empty()) ImGui::SaveIniSettingsToDisk(g_imgui_ini.c_str());
-    g_workspace.reset(); g_selected_asset.reset(); g_asset_selection.Clear(); g_skeleton.bones.clear(); g_clh_files.clear(); g_clp_files.clear();g_sop_inspector.clear();
+    g_workspace.reset(); g_selected_asset.reset(); g_asset_selection.Clear(); g_skeleton.bones.clear(); g_clh_files.clear(); g_clp_files.clear();g_sop_inspector.clear();g_material_inspector.clear();
     g_preview_mode=PreviewMode::none;g_preview_error.clear();g_loaded_model.reset();g_loaded_models.clear();g_model_preview_diagnostics.clear();g_loaded_texture.clear();g_loaded_texture_is_ui=false;g_loaded_material.clear();g_loaded_sop.clear();g_loaded_materials.clear();g_loaded_sops.clear();clear_motion_state();
     g_imgui_ini.clear(); ImGui::GetIO().IniFilename=nullptr; g_start_layout_built=false;
     g_texture_gallery.clear();
@@ -1268,6 +1281,8 @@ void draw_editor_shell() {
         const ImVec2 uv_min = g_loaded_texture_is_ui ? ImVec2(0,0) : ImVec2(0,1);
         const ImVec2 uv_max = g_loaded_texture_is_ui ? ImVec2(1,1) : ImVec2(1,0);
         ImGui::Image(reinterpret_cast<ImTextureID>(g_preview->texture_image()),image_size,uv_min,uv_max);
+    }else if(g_preview_mode==PreviewMode::material){
+        g_material_inspector.draw(*g_preview,g_texture_gallery);
     }else if(!g_preview_error.empty()){
         ImGui::PushStyleColor(ImGuiCol_Text,ImVec4(1.0f,.38f,.32f,1.0f));
         ImGui::TextWrapped("%s",g_preview_error.c_str());
@@ -1288,7 +1303,7 @@ void draw_editor_shell() {
     const auto inspector_indices=selected_asset_indices();
     if(g_workspace&&g_asset_selection.Size>1){
         std::size_t available_count{},materials{},a4_files{};
-        for(const auto index:inspector_indices){const auto& item=g_workspace->assets()[index];if(item.available)++available_count;if(item.kind==gbfr::AssetKind::material){++materials;try{if(g_workspace->material_a4_count(index))++a4_files;}catch(...){}}}
+        for(const auto index:inspector_indices){const auto& item=g_workspace->assets()[index];if(item.available)++available_count;if(item.kind==gbfr::AssetKind::material){++materials;try{if(g_workspace->material_granite_count(index))++a4_files;}catch(...){}}}
         ImGui::Text("多选 / %zu 个资源",inspector_indices.size());
         ImGui::Text("可用 %zu  |  mmat %zu",available_count,materials);
         ImGui::SeparatorText("批量操作");
@@ -1298,12 +1313,12 @@ void draw_editor_shell() {
         if(ImGui::Button("恢复选中项"))run_asset_actions(inspector_indices,true);
         ImGui::EndDisabled();
         ImGui::BeginDisabled(a4_files==0);
-        if(ImGui::Button("清除选中 mmat 的 A4")){
-            g_pending_a4_assets.clear();for(const auto index:inspector_indices)if(g_workspace->assets()[index].kind==gbfr::AssetKind::material){try{if(g_workspace->material_a4_count(index))g_pending_a4_assets.push_back(index);}catch(...){}}
-            ImGui::OpenPopup("确认清除 mmat A4");
+        if(ImGui::Button("清除选中 mmat 的 Granite 引用")){
+            g_pending_a4_assets.clear();for(const auto index:inspector_indices)if(g_workspace->assets()[index].kind==gbfr::AssetKind::material){try{if(g_workspace->material_granite_count(index))g_pending_a4_assets.push_back(index);}catch(...){}}
+            ImGui::OpenPopup("确认清除 Granite 流式引用##mmat_granite");
         }
         ImGui::EndDisabled();
-        ImGui::TextDisabled("含 A4 的 mmat：%zu",a4_files);
+        ImGui::TextDisabled("含 Granite 配置的 mmat：%zu",a4_files);
         draw_material_a4_confirmation_popup();
     }else if (g_workspace && g_selected_asset) {
         const auto& asset = g_workspace->assets()[*g_selected_asset];
@@ -1350,16 +1365,16 @@ void draw_editor_shell() {
             std::size_t material_count{}, a4_files{};
             for (const auto index : batch_indices) if (g_workspace->assets()[index].kind == gbfr::AssetKind::material) {
                 ++material_count;
-                try { if (g_workspace->material_a4_count(index)) ++a4_files; } catch (...) {}
+                try { if (g_workspace->material_granite_count(index)) ++a4_files; } catch (...) {}
             }
-            ImGui::Text("其中 mmat：%zu 个，含 A4：%zu 个", material_count, a4_files);
+            ImGui::Text("其中 mmat：%zu 个，含 Granite 配置：%zu 个", material_count, a4_files);
             ImGui::BeginDisabled(a4_files == 0);
-            if (ImGui::Button("清除选中 mmat 的 A4")) {
+            if (ImGui::Button("清除选中 mmat 的 Granite 引用")) {
                 g_pending_a4_assets.clear();
                 for (const auto index : batch_indices) if (g_workspace->assets()[index].kind == gbfr::AssetKind::material) {
-                    try { if (g_workspace->material_a4_count(index)) g_pending_a4_assets.push_back(index); } catch (...) {}
+                    try { if (g_workspace->material_granite_count(index)) g_pending_a4_assets.push_back(index); } catch (...) {}
                 }
-                ImGui::OpenPopup("确认清除 mmat A4");
+                ImGui::OpenPopup("确认清除 Granite 流式引用##mmat_granite");
             }
             ImGui::EndDisabled();
         } else {
@@ -1392,14 +1407,20 @@ void draw_editor_shell() {
             ImGui::TextWrapped("该贴图没有原始 .texture 模板，将使用 nier_cli_mgrr 新建单槽 WTB。");
         }else if(asset.kind==gbfr::AssetKind::material){
             std::size_t a4_count{};std::string a4_error;
-            try{a4_count=g_workspace->material_a4_count(index);}catch(const std::exception& error){a4_error=error.what();}
-            if(a4_error.empty())ImGui::Text("Granite A4 引用：%zu",a4_count);
-            else ImGui::TextWrapped("A4 读取失败：%s",a4_error.c_str());
+            bool legacy_schema{};
+            try{a4_count=g_workspace->material_granite_count(index);}catch(const std::exception& error){a4_error=error.what();}
+            try{legacy_schema=gbfr::load_mmat_json(asset.input).legacy_schema;}catch(const std::exception& error){if(a4_error.empty())a4_error=error.what();}
+            if(legacy_schema)ImGui::TextColored(ImVec4(1.0f,.42f,.30f,1),"旧 A1/A2/A4 JSON：禁止构建，请先从 source 重新解码");
+            if(a4_error.empty())ImGui::Text("Granite streaming 配置：%zu",a4_count);
+            else ImGui::TextWrapped("mmat 读取失败：%s",a4_error.c_str());
+            if(ImGui::Button("打开独立 mmat 检查器"))preview_asset(index);
             ImGui::BeginDisabled(!a4_error.empty()||a4_count==0);
-            if(ImGui::Button("清除全部 A4")){g_pending_a4_assets={index};ImGui::OpenPopup("确认清除 mmat A4");}
+            if(ImGui::Button("清除全部 Granite 引用")){g_pending_a4_assets={index};ImGui::OpenPopup("确认清除 Granite 流式引用##mmat_granite");}
             ImGui::EndDisabled();
+            ImGui::BeginDisabled(legacy_schema||!a4_error.empty());
             if(ImGui::Button("编码 mmat 到 build"))run_selected_asset_action(false);
-            if(ImGui::Button("从 source 恢复 JSON"))run_selected_asset_action(true);
+            ImGui::EndDisabled();
+            if(ImGui::Button("从 source 重新解码 JSON")){run_selected_asset_action(true);preview_asset(index);}
         }else{
             ImGui::TextUnformatted("该资源目前只支持查看和编辑中间态。");
         }

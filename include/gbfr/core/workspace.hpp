@@ -37,8 +37,8 @@ public:
     void restore_model(std::size_t index);
     void build_asset(std::size_t index);
     void restore_asset(std::size_t index);
-    std::size_t material_a4_count(std::size_t index) const;
-    std::size_t remove_material_a4(std::size_t index);
+    std::size_t material_granite_count(std::size_t index) const;
+    std::size_t remove_material_granite(std::size_t index);
     const std::filesystem::path& root() const noexcept { return root_; }
     const std::string& character_id() const noexcept { return character_id_; }
     const std::vector<WorkspaceAsset>& assets() const noexcept { return assets_; }

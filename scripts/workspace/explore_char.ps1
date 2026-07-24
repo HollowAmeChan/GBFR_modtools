@@ -480,17 +480,21 @@ function Get-GraniteTextureReferences {
     foreach ($jsonFile in $jsonFiles) {
         try {
             $mmat = ConvertFrom-Json ([IO.File]::ReadAllText($jsonFile.FullName, [Text.Encoding]::UTF8))
-            foreach ($entry in @($mmat.Entries1)) {
-                if ($null -eq $entry -or -not ($entry.PSObject.Properties.Name -contains "A4") -or $null -eq $entry.A4) { continue }
-                if (-not ($entry.A4.PSObject.Properties.Name -contains "Unk")) { continue }
+            $entries = if ($mmat.PSObject.Properties.Name -contains "materials") { @($mmat.materials) } else { @($mmat.Entries1) }
+            foreach ($entry in $entries) {
+                if ($null -eq $entry) { continue }
+                $isCurrentSchema = $entry.PSObject.Properties.Name -contains "granite_params"
+                $granite = if ($isCurrentSchema) { $entry.granite_params } elseif ($entry.PSObject.Properties.Name -contains "A4") { $entry.A4 } else { $null }
+                if ($null -eq $granite) { continue }
 
-                $names = if ($entry.PSObject.Properties.Name -contains "A2") {
-                    @($entry.A2 | Where-Object {
-                        $null -ne $_ -and $_.Name -match "_(albd|msk1|msk2|nrml|conj|iris|eyeh)$"
-                    } | ForEach-Object { [string]$_.Name })
-                } else { @() }
+                $maps = if ($isCurrentSchema) { @($entry.texture_maps) } elseif ($entry.PSObject.Properties.Name -contains "A2") { @($entry.A2) } else { @() }
+                $names = @($maps | Where-Object {
+                    $name = if ($_.PSObject.Properties.Name -contains "texture_name") { $_.texture_name } else { $_.Name }
+                    $null -ne $_ -and $name -match "_(albd|msk1|msk2|nrml|conj|iris|eyeh)$"
+                } | ForEach-Object { if ($_.PSObject.Properties.Name -contains "texture_name") { [string]$_.texture_name } else { [string]$_.Name } })
 
-                foreach ($hashValue in @($entry.A4.Unk)) {
+                $pageFiles = if ($isCurrentSchema) { @($granite.page_file) } else { @($granite.Unk) }
+                foreach ($hashValue in $pageFiles) {
                     $hash = ([string]$hashValue).ToLowerInvariant()
                     if ($hash -notmatch "^[0-9a-f]{64}$") { continue }
                     if (-not $references.ContainsKey($hash)) {

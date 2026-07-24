@@ -217,12 +217,27 @@ int main() {
 
     const fs::path material_root = test_temp / L"material_workspace";
     fs::create_directories(material_root / L"unpack");
-    nlohmann::json material_fixture={{"Magic",20230727},{"Entries1",nlohmann::json::array({{{"A4",{{"Unk",nlohmann::json::array({"hash"})}}}}})}};
+    nlohmann::json material_fixture={
+        {"magic",20230727},
+        {"materials",nlohmann::json::array({{
+            {"shader_params",nlohmann::json::array()},
+            {"texture_maps",nlohmann::json::array()},
+            {"constant_buffer_indices",nlohmann::json::array()},
+            {"granite_params",{{"page_file",nlohmann::json::array({"hash"})},{"layer_to_shader_map_name_hash",nlohmann::json::array({"g_AlbedoMap"})}}}
+        }})},
+        {"constant_buffers",nlohmann::json::array()},
+        {"shader_param_float_data_pool",nlohmann::json::array()}
+    };
     { std::ofstream stream(material_root/L"unpack/0.mmat.json"); stream << material_fixture.dump(2) << '\n'; }
+    const auto parsed_material=gbfr::load_mmat_json(material_root/L"unpack/0.mmat.json");
+    if(parsed_material.legacy_schema||parsed_material.magic!=20230727||parsed_material.entries.size()!=1||!parsed_material.entries[0].granite||
+       parsed_material.entries[0].granite->layer_hashes.size()!=1||parsed_material.entries[0].granite->layer_hashes[0]!=gbfr::albedo_texture_slot_id)return 106;
     const auto material_fixture_hash=gbfr::sha256_file(material_root/L"unpack/0.mmat.json");
     { std::ofstream manifest(material_root/L"workspace.json"); manifest << "{\"Version\":1,\"CharacterId\":\"material\",\"Materials\":[{\"Json\":\"unpack/0.mmat.json\",\"Source\":\"source/0.mmat\",\"Output\":\"build/0.mmat\",\"BaselineSha256\":\"" << material_fixture_hash << "\",\"SourceSha256\":\"\"}]}"; }
     auto material_workspace=gbfr::Workspace::load(material_root/L"workspace.json");
-    if(material_workspace.assets().size()!=1||material_workspace.material_a4_count(0)!=1||material_workspace.remove_material_a4(0)!=1||material_workspace.material_a4_count(0)!=0||!material_workspace.assets()[0].changed)return 77;
+    if(material_workspace.assets().size()!=1||material_workspace.material_granite_count(0)!=1||material_workspace.remove_material_granite(0)!=1||material_workspace.material_granite_count(0)!=0||!material_workspace.assets()[0].changed)return 77;
+    material_workspace.build_asset(0);
+    if(!fs::is_regular_file(material_root/L"build/0.mmat")||fs::file_size(material_root/L"build/0.mmat")==0)return 107;
     fs::remove_all(material_root);
 
     const fs::path integration = fs::path(GBFR_ROOT_DIR) / L"explore_output/workspace.json";
