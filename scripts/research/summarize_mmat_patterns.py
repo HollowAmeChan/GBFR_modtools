@@ -39,6 +39,8 @@ def main() -> int:
     values = {hash_value: collections.Counter() for hash_value in selected}
     categories = {hash_value: collections.Counter() for hash_value in selected}
     shaders = {hash_value: collections.Counter() for hash_value in selected}
+    categories_by_value: dict[tuple[str, str], collections.Counter] = collections.defaultdict(collections.Counter)
+    shaders_by_value: dict[tuple[str, str], collections.Counter] = collections.defaultdict(collections.Counter)
     examples: dict[tuple[str, str], list[dict]] = collections.defaultdict(list)
     pair_values: dict[tuple[str, str], collections.Counter] = {}
     pair_presence: dict[tuple[str, str], collections.Counter] = {}
@@ -60,6 +62,8 @@ def main() -> int:
                 categories[hash_value][record["category"]] += 1
                 shaders[hash_value][record["shader"]] += 1
                 key = (hash_value, value)
+                categories_by_value[key][record["category"]] += 1
+                shaders_by_value[key][record["shader"]] += 1
                 if len(examples[key]) < args.example_limit:
                     examples[key].append({
                         "file": record["file"],
@@ -89,6 +93,12 @@ def main() -> int:
                 "shaders": top(shaders[hash_value]),
                 "examples_by_value": {
                     value: examples[(hash_value, value)] for value in values[hash_value]
+                },
+                "categories_by_value": {
+                    value: top(categories_by_value[(hash_value, value)]) for value in values[hash_value]
+                },
+                "shaders_by_value": {
+                    value: top(shaders_by_value[(hash_value, value)]) for value in values[hash_value]
                 },
             }
             for hash_value in selected

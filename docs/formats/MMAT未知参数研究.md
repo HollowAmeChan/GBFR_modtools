@@ -110,6 +110,28 @@ EXE 在 `0x1446E7B5E` 和 `0x1446E7C1E` 分别取参，并把结果用于不同�
 | `0x0A05A26F`, `0xEB6F1AE7` | 18 个 foliage `9/1` material | 植被参数块，需与风、pivot painter 数据对照 |
 | `0x4298F7E4` | 25 个 sky/cloud `20/1` material | 天空/云专用开关，尚无足够语义证据 |
 
+### Metal 的角色位置相关运行时数据
+
+`0xA6EB1B34` 出现在全部 4,133 个 Metal-family material 中，1,246 个为真。真值以玩家角色为主；奶刀 `pl1400` 中身体/衣物部分槽为真，刀鞘槽为假。
+
+EXE `0x1446EA5F3` 读取该参数。为真时会取得对象数据与 0 号骨骼变换，归一化根位置相关向量、计算点积并建立一组额外运行时数据；初始化路径 `0x1446EAEB5` 还会进入一段额外资源绑定流程。结合 Metal pixel shader 中只在完整 forward 变体出现的 `CharacterDirectionalDataBuf` 和 `CharacterPointLightDataBuf`，它很可能控制角色专用方向/光照数据，但“光照”仍是推断，原始字段名尚未恢复。当前按 B/C 级显示为“启用角色根位置相关的运行时方向数据”。
+
+这条路径与已观察到的“表面噪波随模型到世界原点方向变化”在现象上相关，但尚未证明因果。必须比较同一模型中该参数真/假的相邻材质，或用帧捕获确认其最终绑定与 shader 消费者后，才能把它列为噪波根因。
+
+## Constant Buffer 的 RDEF 解码
+
+MMAT 的 `constant_buffer_indices` 首项可与对应 shader family 的 `ParamBuffer` 直接对齐。`pl1400` 的 Metal 首 buffer 为 96 bytes，Hair/Skin 为 48 bytes，均与 DXBC RDEF 精确匹配。Eye、Face、Hair、Metal、Skin 的所有像素 shader 变体在各自 family 内也保持同一布局。
+
+检查器现只在“shader type + 首 buffer 字节数”同时精确匹配时显示字段表，可直接查看：
+
+- Eye：瞳孔缩放、parallax bias、颜色变体、虹膜自发光遮罩。
+- Face：皱纹/脸颊颜色、roughness、mouth/tooth、joint position、flat normal、forward light。
+- Hair：anisotropic width、roughness、emissive、face color blend、forward light。
+- Metal：hatching、rim light、specular color、emissive、颜色/roughness 变体和各类 mask 开关。
+- Skin：roughness、hatching、颜色变体、outline、forward light。
+
+不匹配的 buffer 继续只显示 raw/hex/float，不按相似长度强行套布局。Elemental、Ice 和 UberEnv 已从 RDEF 得到多个合法布局，下一阶段需结合 shader subtype 与 buffer 长度逐一接入。
+
 ## 复现命令
 
 先构建 `gbfr_shader_reflect`，然后在仓库根目录执行：

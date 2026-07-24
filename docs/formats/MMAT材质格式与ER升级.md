@@ -36,7 +36,7 @@ unk2 / bool3 / bool4 / bool5
 - “渲染状态”：shader type/subtype、shadow type、`ignore_alpha`、`g_TwoSided`、Alpha 参数和未知布尔值。
 - “Shader 参数”：哈希/名称、U8/U16/浮点向量类型、值或浮点池偏移、已解码值、用途与置信度。
 - “贴图与 Granite”：每条引用最前显示工作区中已解包 DDS 的缩略图，并列出 shader map、贴图名、实际命中的 `unpack` 相对路径、page file、layer 对应关系和 tile set。含 `granite_params` 的材质优先匹配 Granite DDS，普通材质优先匹配 `data/texture`；右键缩略图或该行文字可打开命中文件所在的 `unpack` 文件夹。
-- “常量缓冲”：材质引用的 buffer 索引，以及每个 32 位 word 的十六进制、uint 和 float 重解释。
+- “常量缓冲”：Eye/Face/Hair/Metal/Skin 首 buffer 在字节数与 Shader RDEF 精确匹配时，按 `ParamBuffer` 字段显示颜色、roughness、光照和变体值；其余 buffer 保留每个 32 位 word 的十六进制、uint 和 float 重解释。
 - “文件信息”：magic、根级标志和数据规模。
 
 当前阶段只提供无损检查和安全封回。未知常量缓冲不提供猜测性编辑；后续编辑器必须在写入前保留未修改字段、校验参数排序和索引范围，并提供 source 差异视图。
