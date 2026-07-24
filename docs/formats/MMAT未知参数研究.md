@@ -115,7 +115,7 @@ EXE 在 `0x1446E7B5E` 和 `0x1446E7C1E` 分别取参。`0x53F49792` 影响 alpha
 | 参数组 | 样本范围 | 当前结论 |
 |---|---|---|
 | `0x9C83F56F`, `0xA6EB1B34` | 4,133 个 Metal `5/7`、`5/5` material | 前者选择备用管线/资源描述符，后者启用角色根位置运行时数据；行为不同 |
-| `0x037BE4E5` | UberEnv 为主 | 环境 shader 变体参数，行为仍待反汇编 |
+| `0x037BE4E5` | UberEnv / 植被 | 禁用背面剔除，选择双面光栅路径；官方字段名未知 |
 | `0x0A05A26F` | 18 个 foliage `9/1` material | 17 真 1 假；EXE 无直接哈希常量引用，行为仍未知 |
 | `0x4298F7E4` | 25 个 sky/cloud `20/1` material | Sky/Cloud 管线 permutation 位 `0x2`，官方视觉名称未知 |
 
@@ -134,6 +134,12 @@ EXE `0x1446FA6FE..0x1446FA7B7` 在构造 UberEnv 管线 key 时分别读取三�
 - `0xC9762248=1` 给 key 增加 `0x200` 位；部分 pass 会直接跳过该位。
 
 `0xC5BD3DED` 只出现在 3,280 个 layer2/layer3 material，202 个为真；另两项的分布也受 UberEnv family 和 pass 限制。它们达到 B 级“管线 permutation 行为”证据，但仍不能仅凭 bit 位置命名成透明、法线、颜色噪声或层数。与 `g_IsUseDepthFade`、`g_UseColorNoise` 等已有 A 级名称不同，检查器只显示 key 位和原始哈希，不改 schema 名称。
+
+### UberEnv / 植被双面光栅路径
+
+`0x037BE4E5` 出现在 14,582 个 UberEnv、UberEnvTextureless、PlantMiddleView 和 PivotPainter material 中，829 个为真。EXE 有 9 个直接读取点；不同 shader 构建器都会用它切换同一对 24 字节静态光栅描述记录，并把对应布尔状态写入各自的 pipeline key。两条记录只有首枚举不同：默认路径为 `2`，真值路径为 `0`，其余 23 字节完全一致。
+
+样本也与该状态吻合：真值高度集中于树叶、藤蔓、绳索、布料、旗帜、帐篷和其他薄片几何，PivotPainter `26/1` 中 307 个材质有 259 个为真。综合运行时状态切换和资产分布，当前达到 B/C 级“禁用背面剔除、选择双面光栅路径”。它与 PlantShake `19/1` 中 A 级命名的 `g_TwoSided` 行为同类，但属于另一组 shader family，未找到原始名称字符串，因此 schema 仍保留 `g_037BE4E5`，不把它强行改名为 `g_TwoSided`。
 
 ### Foliage 实例变换首分量
 
@@ -219,5 +225,6 @@ py -3 scripts\research\compare_mmat_records.py `
 
 1. 追踪 face 世界空间中心最终绑定到哪个 constant buffer 和 shader 变量，确认它是光照中心、阴影中心还是视线中心。
 2. 对 `0x8B8038FC` 的 21 个真值资产逐一与同角色 `vars/0` 对比 constant buffer、texture map 和实际 pipeline 表项。
-3. 继续反汇编 Elemental、Metal、UberEnv、foliage 和 sky/cloud 的取参函数，并记录每个分支影响的 resource/pipeline slot。
-4. 持续把新证据同步到独立 MMAT 检查器；当前已显示 A/B/C/D 等级和恢复名称，封回仍保留原哈希和值类型。
+3. 用运行时 A/B 或帧捕获确认已定位的 pipeline 位最终对应的视觉名称，重点区分透明、深度、阴影和 pass 变体。
+4. 对新 DLC 与旧版同类材质做逐字段 ParamBuffer 对比，继续定位“材质整体发黑”的版本差异。
+5. 持续把新证据同步到独立 MMAT 检查器；当前已显示 A/B/C/D 等级和恢复名称，封回仍保留原哈希和值类型。
