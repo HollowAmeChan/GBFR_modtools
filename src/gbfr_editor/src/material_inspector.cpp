@@ -82,22 +82,88 @@ const char* parameter_meaning(const gbfr::MaterialShaderParameter& parameter) {
     switch (parameter.hash) {
     case 0x06CFE5A4u: return "自发光强度";
     case 0x24C1ABA9u: return "启用丢弃遮罩";
+    case 0x372C03F0u: return "tsubasa 第四阶段机关特化参数";
+    case 0x3C966EE3u: return "冰材质自发光开关 0";
     case 0x49D8C1B9u: return "启用描边";
-    case 0x53F49792u: return "启用 Alpha（社区推测）";
+    case 0x53F49792u: return "影响 Alpha / pass 变体选择（原名未确认）";
     case 0x60F31A22u: return "使用 Albedo Alpha Clip";
     case 0x6C5CB9ACu: return "使用细节法线";
     case 0x7920C84Fu: return "使用抖动贴图";
+    case 0x8E6B4C53u: return "使用立方体贴图反射";
     case 0x920821E1u: return "启用布尔遮罩";
     case 0x98EBBEC2u: return "摆动幅度";
+    case 0x9F1DA064u: return "启用 Container 路径";
     case 0xB460A0F0u: return "使用深度淡化";
+    case 0xCA06A6B6u: return "使用冰材质自发光";
     case 0xD94F2821u: return "双面材质";
+    case 0xE208C4C4u: return "使用颜色噪声";
+    case 0x11664BFCu: return "按第 5 号骨骼计算面部参考中心";
+    case 0x56346692u: return "面部参考中心的骨骼局部偏移";
+    case 0x8B8038FCu: return "稀有角色颜色变体相关开关";
+    case 0x92339519u: return "启用冰 / 晶体模型专用资源路径";
+    case 0xBAEF6920u: return "右眼材质标记";
+    case 0xE56343C0u: return "左眼材质标记";
+    case 0x037BE4E5u: return "UberEnv 变体相关开关";
+    case 0x0A05A26Fu: return "Foliage 专用参数";
+    case 0x2AEDA6ADu: return "Elemental LookDev 参数块成员";
+    case 0x2B5C866Cu: return "Elemental LookDev 稀有开关";
+    case 0x4298F7E4u: return "Sky / Cloud 专用开关";
+    case 0x93D9F63Au: return "Elemental LookDev subtype 相关开关";
+    case 0x9C83F56Fu: return "Metal 参数块稀有开关";
+    case 0xA6EB1B34u: return "Metal 参数块开关";
+    case 0xAB261CFAu: return "UberEnv 参数块开关";
+    case 0xAC6F995Du: return "UberEnv 层 / 变体选择值（U16）";
+    case 0xC5BD3DEDu: return "UberEnv layer2 / layer4 开关";
+    case 0xC9762248u: return "UberEnv 参数块稀有开关";
+    case 0xEB6F1AE7u: return "Foliage 专用开关";
     default: return "尚未探明";
     }
 }
 
 const char* parameter_confidence(const gbfr::MaterialShaderParameter& parameter) {
-    if (parameter.hash == 0x53F49792u) return "社区推测";
-    return std::string_view(parameter_meaning(parameter)) == "尚未探明" ? "未知" : "字段命名已确认";
+    switch (parameter.hash) {
+    case 0x06CFE5A4u: case 0x24C1ABA9u: case 0x372C03F0u: case 0x3C966EE3u:
+    case 0x49D8C1B9u: case 0x60F31A22u: case 0x6C5CB9ACu: case 0x7920C84Fu:
+    case 0x8E6B4C53u: case 0x920821E1u: case 0x98EBBEC2u: case 0x9F1DA064u:
+    case 0xCA06A6B6u: case 0xD94F2821u: case 0xE208C4C4u:
+        return "A：Shader RDEF";
+    case 0xB460A0F0u:
+        return "A：正式 schema";
+    case 0x11664BFCu: case 0x56346692u: case 0x92339519u:
+    case 0xBAEF6920u: case 0xE56343C0u:
+        return "B/C：运行时 + 样本";
+    case 0x53F49792u:
+        return "B：运行时行为";
+    case 0x037BE4E5u: case 0x2AEDA6ADu: case 0x2B5C866Cu: case 0x4298F7E4u:
+    case 0x8B8038FCu: case 0x93D9F63Au: case 0x9C83F56Fu: case 0xA6EB1B34u:
+    case 0xAB261CFAu: case 0xAC6F995Du: case 0xC5BD3DEDu: case 0xC9762248u:
+        return "C/D：样本相关";
+    case 0x0A05A26Fu: case 0xEB6F1AE7u:
+        return "D：少量样本";
+    default:
+        return "未知";
+    }
+}
+
+const char* reflected_parameter_name(std::uint32_t hash) {
+    switch (hash) {
+    case 0x06CFE5A4u: return "g_EmissivePower";
+    case 0x24C1ABA9u: return "g_EnableDiscardMask";
+    case 0x372C03F0u: return "g_tsubasa_Param0_4stGimmick";
+    case 0x3C966EE3u: return "g_UseIceEmissive0";
+    case 0x49D8C1B9u: return "g_EnableOutLine";
+    case 0x60F31A22u: return "g_IsUseAlbedoAlphaClip";
+    case 0x6C5CB9ACu: return "g_IsUseDetailNormal";
+    case 0x7920C84Fu: return "g_IsUseDitherMap";
+    case 0x8E6B4C53u: return "g_UseCubeMapReflection";
+    case 0x920821E1u: return "g_EnableBooleanMask";
+    case 0x98EBBEC2u: return "g_SwayAmplitude";
+    case 0x9F1DA064u: return "g_ContainerUse";
+    case 0xCA06A6B6u: return "g_UseIceEmissive";
+    case 0xD94F2821u: return "g_TwoSided";
+    case 0xE208C4C4u: return "g_UseColorNoise";
+    default: return nullptr;
+    }
 }
 
 const char* texture_meaning(const gbfr::MaterialTextureMap& texture) {
@@ -226,6 +292,7 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Shader 参数")) {
+            ImGui::TextDisabled("证据：A=RDEF/schema 命名；B=游戏运行时行为；C=全量样本推断；D=少量样本，待验证。");
             if (ImGui::BeginTable("mmat_parameters", 6, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollY, ImVec2(0, 0))) {
                 ImGui::TableSetupScrollFreeze(0, 1);
                 ImGui::TableSetupColumn("Hash / 名称", ImGuiTableColumnFlags_WidthFixed, 235);
@@ -233,11 +300,13 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
                 ImGui::TableSetupColumn("值 / 偏移", ImGuiTableColumnFlags_WidthFixed, 85);
                 ImGui::TableSetupColumn("浮点值", ImGuiTableColumnFlags_WidthFixed, 180);
                 ImGui::TableSetupColumn("意义");
-                ImGui::TableSetupColumn("置信度", ImGuiTableColumnFlags_WidthFixed, 95);
+                ImGui::TableSetupColumn("证据", ImGuiTableColumnFlags_WidthFixed, 145);
                 ImGui::TableHeadersRow();
                 for (const auto& parameter : material.shader_parameters) {
                     ImGui::TableNextRow();
-                    ImGui::TableNextColumn(); ImGui::Text("%s\n%s", parameter.name.empty() ? "<unknown>" : parameter.name.c_str(), hex32(parameter.hash).c_str());
+                    const auto* reflected_name = reflected_parameter_name(parameter.hash);
+                    const auto* display_name = reflected_name ? reflected_name : (parameter.name.empty() ? "<unknown>" : parameter.name.c_str());
+                    ImGui::TableNextColumn(); ImGui::Text("%s\n%s", display_name, hex32(parameter.hash).c_str());
                     ImGui::TableNextColumn(); ImGui::TextUnformatted(material_value_type_name(parameter.type));
                     ImGui::TableNextColumn(); ImGui::Text("%u", parameter.value_or_offset);
                     ImGui::TableNextColumn();

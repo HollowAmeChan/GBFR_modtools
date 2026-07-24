@@ -136,4 +136,4 @@ py -3 scripts\research\analyze_mmat.py `
 1. 追踪 face 世界空间中心最终绑定到哪个 constant buffer 和 shader 变量，确认它是光照中心、阴影中心还是视线中心。
 2. 对 `0x8B8038FC` 的 21 个真值资产逐一与同角色 `vars/0` 对比 constant buffer、texture map 和实际 pipeline 表项。
 3. 继续反汇编 Elemental、Metal、UberEnv、foliage 和 sky/cloud 的取参函数，并记录每个分支影响的 resource/pipeline slot。
-4. 将 A/B/C/D 证据目录接入独立 MMAT 检查器；编辑器显示推断意义，但封回仍保留原哈希和值类型。
+4. 持续把新证据同步到独立 MMAT 检查器；当前已显示 A/B/C/D 等级和恢复名称，封回仍保留原哈希和值类型。
