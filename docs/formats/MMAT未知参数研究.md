@@ -122,15 +122,18 @@ EXE `0x1446EA5F3` 读取该参数。为真时会取得对象数据与 0 号骨�
 
 MMAT 的 `constant_buffer_indices` 首项可与对应 shader family 的 `ParamBuffer` 直接对齐。`pl1400` 的 Metal 首 buffer 为 96 bytes，Hair/Skin 为 48 bytes，均与 DXBC RDEF 精确匹配。Eye、Face、Hair、Metal、Skin 的所有像素 shader 变体在各自 family 内也保持同一布局。
 
-检查器现只在“shader type + 首 buffer 字节数”同时精确匹配时显示字段表，可直接查看：
+检查器只在“shader type + 基准 Shader + 首 buffer 字节数”精确匹配时显示字段表，可直接查看：
 
 - Eye：瞳孔缩放、parallax bias、颜色变体、虹膜自发光遮罩。
 - Face：皱纹/脸颊颜色、roughness、mouth/tooth、joint position、flat normal、forward light。
 - Hair：anisotropic width、roughness、emissive、face color blend、forward light。
 - Metal：hatching、rim light、specular color、emissive、颜色/roughness 变体和各类 mask 开关。
 - Skin：roughness、hatching、颜色变体、outline、forward light。
+- Elemental、Flowmap、Glowing、Ice、Lava、Lucilius：自发光、Fresnel、视差、闪烁、容器、晶体和流动参数。
+- UberEnv 及其 2/3/4 层、两种 pivot painter、textureless：逐层 UV、颜色/金属/粗糙度覆盖、法线、湿润、植被风、grass shine、贴图平铺和 camera fade。
+- Plant middle/shake、Sky cloud、Water lake、Grid：对应 RDEF 中的植被、天空、水面和网格参数。
 
-不匹配的 buffer 继续只显示 raw/hex/float，不按相似长度强行套布局。Elemental、Ice 和 UberEnv 已从 RDEF 得到多个合法布局，下一阶段需结合 shader subtype 与 buffer 长度逐一接入。
+目录由 `generate_mmat_cbuffer_catalog.py` 从 25 个明确指定的 DXBC 基准文件生成，生成时校验每个 `ParamBuffer` 的预期字节数、字段对齐和字段类型。它覆盖完整样本中的 27,399/27,980 个 material entry（约 97.9%）。不匹配的 buffer 继续只显示 raw/hex/float，不按相似长度强行套布局；silhouette、foliage、plant billboard 和未知类型等没有可直接对应的 pixel `ParamBuffer`。
 
 ## 复现命令
 
@@ -149,6 +152,11 @@ py -3 scripts\research\analyze_mmat.py `
   --shader-jsonl "research_output\mmat\shader_reflection.jsonl" `
   --string-binary "D:\Steam\steamapps\common\Granblue Fantasy Relink\granblue_fantasy_relink.exe" `
   --out-dir "research_output\mmat"
+
+py -3 scripts\research\generate_mmat_cbuffer_catalog.py `
+  --reflection "research_output\mmat\shader_reflection.jsonl" `
+  --materials "research_output\mmat\materials.jsonl" `
+  --output "src\gbfr_editor\src\mmat_param_layouts.generated.hpp"
 ```
 
 模式汇总脚本的 `--hash` 可以重复传入。它会输出 `parameter_patterns.json` 和所有选中参数对的 `parameter_pair_values.csv`。

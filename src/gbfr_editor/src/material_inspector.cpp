@@ -1,4 +1,5 @@
 #include "material_inspector.hpp"
+#include "mmat_param_layouts.generated.hpp"
 #include "texture_gallery.hpp"
 
 #include <gbfr/render/preview_renderer.hpp>
@@ -16,105 +17,6 @@
 #include <string_view>
 
 namespace {
-enum class ReflectedFieldType { floating, boolean };
-
-struct ReflectedField {
-    const char* name;
-    std::uint16_t offset;
-    std::uint16_t size;
-    ReflectedFieldType type;
-};
-
-struct ReflectedLayout {
-    const char* shader;
-    std::uint16_t size;
-    const ReflectedField* fields;
-    std::size_t field_count;
-};
-
-constexpr ReflectedField eye_fields[] = {
-    {"g_VariationMulAlbedoColor", 0, 12, ReflectedFieldType::floating},
-    {"g_ParallaxBias", 12, 4, ReflectedFieldType::floating},
-    {"g_PupilScaleHeight", 16, 4, ReflectedFieldType::floating},
-    {"g_PupilScaleWidth", 20, 4, ReflectedFieldType::floating},
-    {"g_VariationEnable", 24, 4, ReflectedFieldType::boolean},
-    {"g_VariationMulRoughness", 28, 4, ReflectedFieldType::floating},
-    {"g_EnableDiscardMask", 32, 4, ReflectedFieldType::boolean},
-    {"g_UseMask1ForIrisEmissive", 36, 4, ReflectedFieldType::boolean},
-};
-
-constexpr ReflectedField face_fields[] = {
-    {"g_WrinkleColor", 0, 12, ReflectedFieldType::floating},
-    {"g_AngleLerpWidth", 12, 4, ReflectedFieldType::floating},
-    {"g_VariationMulAlbedoColor", 16, 12, ReflectedFieldType::floating},
-    {"g_AngleBiasA", 28, 4, ReflectedFieldType::floating},
-    {"g_cheekLowColor", 32, 12, ReflectedFieldType::floating},
-    {"g_AngleBiasC", 44, 4, ReflectedFieldType::floating},
-    {"g_cheekHighColor", 48, 12, ReflectedFieldType::floating},
-    {"g_IsMouth", 60, 4, ReflectedFieldType::boolean},
-    {"g_Roughness", 64, 4, ReflectedFieldType::floating},
-    {"g_UseJointPos", 68, 4, ReflectedFieldType::boolean},
-    {"g_VariationEnable", 72, 4, ReflectedFieldType::boolean},
-    {"g_VariationMulRoughness", 76, 4, ReflectedFieldType::floating},
-    {"g_EnableOutLine", 80, 4, ReflectedFieldType::boolean},
-    {"g_IsTooth", 84, 4, ReflectedFieldType::boolean},
-    {"g_EnableFlatNormal", 88, 4, ReflectedFieldType::boolean},
-    {"g_EnableForwardLight", 92, 4, ReflectedFieldType::boolean},
-};
-
-constexpr ReflectedField hair_fields[] = {
-    {"g_VariationMulAlbedoColor", 0, 12, ReflectedFieldType::floating},
-    {"g_EnableEmissive", 12, 4, ReflectedFieldType::boolean},
-    {"g_AnisoWidth", 16, 4, ReflectedFieldType::floating},
-    {"g_Roughness", 20, 4, ReflectedFieldType::floating},
-    {"g_VariationEnable", 24, 4, ReflectedFieldType::boolean},
-    {"g_VariationMulRoughness", 28, 4, ReflectedFieldType::floating},
-    {"g_EmissiveIntensity", 32, 4, ReflectedFieldType::floating},
-    {"g_EnableOutLine", 36, 4, ReflectedFieldType::boolean},
-    {"g_UseBlendFaceColor", 40, 4, ReflectedFieldType::boolean},
-    {"g_EnableForwardLight", 44, 4, ReflectedFieldType::boolean},
-};
-
-constexpr ReflectedField metal_fields[] = {
-    {"g_HatchingColor", 0, 12, ReflectedFieldType::floating},
-    {"g_EmissiveIntensity", 12, 4, ReflectedFieldType::floating},
-    {"g_VariationMulAlbedoColor", 16, 12, ReflectedFieldType::floating},
-    {"g_VariationMulRoughness", 28, 4, ReflectedFieldType::floating},
-    {"g_VariationMulAlbedoColor2", 32, 12, ReflectedFieldType::floating},
-    {"g_VariationMulRoughness2", 44, 4, ReflectedFieldType::floating},
-    {"g_RimLightIntensity", 48, 4, ReflectedFieldType::floating},
-    {"g_EnableRimLight", 52, 4, ReflectedFieldType::boolean},
-    {"g_VariationEnable", 56, 4, ReflectedFieldType::boolean},
-    {"g_EnableEmissive", 60, 4, ReflectedFieldType::boolean},
-    {"g_EnableSpecularColor", 64, 4, ReflectedFieldType::boolean},
-    {"g_EnableHatching", 68, 4, ReflectedFieldType::boolean},
-    {"g_EnableOutLine", 72, 4, ReflectedFieldType::boolean},
-    {"g_EnableDiscardMask", 76, 4, ReflectedFieldType::boolean},
-    {"g_EnableBooleanMask", 80, 4, ReflectedFieldType::boolean},
-    {"g_EnableFlatNormal", 84, 4, ReflectedFieldType::boolean},
-};
-
-constexpr ReflectedField skin_fields[] = {
-    {"g_VariationMulAlbedoColor", 0, 12, ReflectedFieldType::floating},
-    {"g_EnableHatching", 12, 4, ReflectedFieldType::boolean},
-    {"g_Roughness", 16, 4, ReflectedFieldType::floating},
-    {"g_VariationEnable", 20, 4, ReflectedFieldType::boolean},
-    {"g_VariationMulRoughness", 24, 4, ReflectedFieldType::floating},
-    {"g_EnableOutLine", 28, 4, ReflectedFieldType::boolean},
-    {"g_EnableForwardLight", 32, 4, ReflectedFieldType::boolean},
-};
-
-const ReflectedLayout* reflected_param_layout(std::uint8_t shader_type) {
-    static constexpr ReflectedLayout layouts[] = {
-        {"ps_charactereyelookdev", 48, eye_fields, std::size(eye_fields)},
-        {"ps_characterfacelookdev", 96, face_fields, std::size(face_fields)},
-        {"ps_characterhairlookdev", 48, hair_fields, std::size(hair_fields)},
-        {"ps_charactermetallookdev", 96, metal_fields, std::size(metal_fields)},
-        {"ps_characterskinlookdev", 48, skin_fields, std::size(skin_fields)},
-    };
-    return shader_type >= 2 && shader_type <= 6 ? &layouts[shader_type - 2] : nullptr;
-}
-
 std::string hex32(std::uint32_t value) {
     char text[11]{};
     std::snprintf(text, sizeof(text), "0x%08X", value);
@@ -129,6 +31,7 @@ const char* shader_type_name(std::uint8_t value) {
     case 3: return "Face?";
     case 4: return "Hair?";
     case 5: return "Metal";
+    case 6: return "Skin";
     case 7: return "elementallookdev";
     case 8: return "flowmap";
     case 9: return "foliage";
@@ -149,6 +52,7 @@ const char* shader_type_name(std::uint8_t value) {
     case 25: return "uberenv_layer4";
     case 26: return "uberenv_plantpivotpainter?";
     case 27: return "uberenvtextureless?";
+    case 28: return "water_lake";
     case 29: return "grid";
     default: return "未知 / 不支持";
     }
@@ -472,7 +376,7 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("常量缓冲")) {
-            const auto* layout = reflected_param_layout(material.shader_type);
+            const auto* layout = gbfr::editor::mmat_catalog::find(material.shader_type);
             const gbfr::MaterialConstantBuffer* param_buffer = nullptr;
             std::size_t param_buffer_index = 0;
             if (layout && !material.constant_buffer_indices.empty()) {
@@ -483,24 +387,42 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
             }
             if (param_buffer) {
                 ImGui::SeparatorText("ParamBuffer（Shader RDEF 精确匹配）");
-                ImGui::Text("%s | buffer %zu | %u bytes", layout->shader, param_buffer_index, layout->size);
-                if (ImGui::BeginTable("mmat_reflected_param_buffer", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV)) {
+                ImGui::TextWrapped("%s | buffer %zu | %u bytes", layout->shader, param_buffer_index, layout->size);
+                const auto reflected_height = std::clamp(ImGui::GetContentRegionAvail().y * .55f, 180.0f, 480.0f);
+                if (ImGui::BeginTable("mmat_reflected_param_buffer", 4,
+                    ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollY, ImVec2(0, reflected_height))) {
+                    ImGui::TableSetupScrollFreeze(0, 1);
                     ImGui::TableSetupColumn("字段");
                     ImGui::TableSetupColumn("Offset", ImGuiTableColumnFlags_WidthFixed, 70);
                     ImGui::TableSetupColumn("类型", ImGuiTableColumnFlags_WidthFixed, 70);
                     ImGui::TableSetupColumn("值", ImGuiTableColumnFlags_WidthFixed, 260);
                     ImGui::TableHeadersRow();
-                    for (const auto& field : std::span(layout->fields, layout->field_count)) {
+                    for (const auto& field : layout->fields) {
                         const auto first_word = static_cast<std::size_t>(field.offset / sizeof(std::uint32_t));
                         const auto components = static_cast<std::size_t>(field.size / sizeof(std::uint32_t));
                         ImGui::TableNextRow();
                         ImGui::TableNextColumn(); ImGui::TextUnformatted(field.name);
                         ImGui::TableNextColumn(); ImGui::Text("%u", field.offset);
-                        ImGui::TableNextColumn(); ImGui::TextUnformatted(field.type == ReflectedFieldType::boolean ? "bool" : components == 1 ? "float" : "float vector");
+                        ImGui::TableNextColumn();
+                        using gbfr::editor::mmat_catalog::FieldType;
+                        if (field.type == FieldType::boolean) ImGui::TextUnformatted("bool");
+                        else if (field.type == FieldType::signed_integer) ImGui::TextUnformatted(components == 1 ? "int" : "int vector");
+                        else if (field.type == FieldType::unsigned_integer) ImGui::TextUnformatted(components == 1 ? "uint" : "uint vector");
+                        else ImGui::TextUnformatted(components == 1 ? "float" : "float vector");
                         ImGui::TableNextColumn();
                         if (first_word + components > param_buffer->words.size()) ImGui::TextDisabled("越界");
-                        else if (field.type == ReflectedFieldType::boolean)
+                        else if (field.type == FieldType::boolean)
                             ImGui::Text("%s (raw %u)", param_buffer->words[first_word] ? "true" : "false", param_buffer->words[first_word]);
+                        else if (field.type == FieldType::signed_integer)
+                            for (std::size_t component = 0; component < components; ++component) {
+                                if (component) ImGui::SameLine(0, 5);
+                                ImGui::Text("%d", static_cast<std::int32_t>(param_buffer->words[first_word + component]));
+                            }
+                        else if (field.type == FieldType::unsigned_integer)
+                            for (std::size_t component = 0; component < components; ++component) {
+                                if (component) ImGui::SameLine(0, 5);
+                                ImGui::Text("%u", param_buffer->words[first_word + component]);
+                            }
                         else for (std::size_t component = 0; component < components; ++component) {
                             if (component) ImGui::SameLine(0, 5);
                             ImGui::Text("%.7g", std::bit_cast<float>(param_buffer->words[first_word + component]));
