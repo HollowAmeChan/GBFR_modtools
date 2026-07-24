@@ -89,7 +89,7 @@ const char* parameter_meaning(const gbfr::MaterialShaderParameter& parameter) {
     case 0x372C03F0u: return "tsubasa 第四阶段机关特化参数";
     case 0x3C966EE3u: return "冰材质自发光开关 0";
     case 0x49D8C1B9u: return "启用描边";
-    case 0x53F49792u: return "影响 Alpha / pass 变体选择（原名未确认）";
+    case 0x53F49792u: return "角色材质 pass key 位 0x4（社区推测与 Alpha 相关）";
     case 0x60F31A22u: return "使用 Albedo Alpha Clip";
     case 0x6C5CB9ACu: return "使用细节法线";
     case 0x7920C84Fu: return "使用抖动贴图";
@@ -138,7 +138,7 @@ const char* parameter_confidence(const gbfr::MaterialShaderParameter& parameter)
     case 0xA6EB1B34u: case 0xAC6F995Du: case 0xBAEF6920u: case 0xE56343C0u:
         return "B/C：运行时 + 样本";
     case 0x53F49792u:
-        return "B：运行时行为";
+        return "B/C：pass key + 社区推测";
     case 0xEB6F1AE7u:
         return "B：实例缓冲写入行为";
     case 0xAB261CFAu: case 0xC5BD3DEDu: case 0xC9762248u:
@@ -289,7 +289,7 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
                 label_value("shadow_type", shadow.c_str());
                 label_value("ignore_alpha", material.ignore_alpha ? "true" : "false");
                 label_value("g_TwoSided", parameter_enabled(material, two_sided_shader_parameter_id) ? "1" : "0 / 未设置");
-                label_value("g_53F49792_EnableAlpha_GUESSED", parameter_enabled(material, enable_alpha_shader_parameter_id) ? "1（社区推测）" : "0 / 未设置");
+                label_value("0x53F49792 pass key 0x4", parameter_enabled(material, enable_alpha_shader_parameter_id) ? "1（社区推测与 Alpha 相关）" : "0 / 未设置");
                 label_value("bool9 / bool10 / bool12", (std::to_string(material.bool9) + " / " + std::to_string(material.bool10) + " / " + std::to_string(material.bool12) + "（意义未知）").c_str());
                 ImGui::EndTable();
             }
