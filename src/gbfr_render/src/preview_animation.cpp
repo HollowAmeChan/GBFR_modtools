@@ -115,25 +115,32 @@ XMMATRIX local_matrix(const gbfr::Vec3& position,const gbfr::Vec3& scale,FXMVECT
 }
 
 namespace gbfr {
+bool PreviewRenderer::set_anchor_links(const std::vector<std::pair<std::size_t,std::size_t>>& links) {
+    for(const auto& [target,follower]:links)if(target>=skeleton_.bones.size()||follower>=skeleton_.bones.size())return false;
+    anchor_links_=links;
+    return apply_animation(nullptr,0.0f);
+}
+
 bool PreviewRenderer::apply_animation(const AnimationClip* clip,float frame) {
     if(!index_count_||skeleton_.bones.empty()||!vertices_||!bones_)return false;
     const auto bone_count=skeleton_.bones.size();
     std::vector<Vec3> positions(bone_count),scales(bone_count);
     std::vector<XMFLOAT3> rotations(bone_count);
-    std::unordered_map<int,std::size_t> bone_indices;bone_indices.reserve(bone_count);
-    std::size_t object_root{};
-    for(std::size_t i=0;i<bone_count;++i){const auto& bone=skeleton_.bones[i];positions[i]=bone.position;scales[i]=bone.scale;rotations[i]=quaternion_to_euler(bone.rotation);const int id=bone_name_id(bone.name);if(id>=0)bone_indices.emplace(id,i);if(bone.parent==0xffff&&bone.name=="_900")object_root=i;}
+    std::unordered_map<int,std::vector<std::size_t>> bone_indices;bone_indices.reserve(bone_count);
+    std::vector<std::size_t> object_roots;
+    std::vector<std::size_t> components(bone_count);
+    for(std::size_t i=0;i<bone_count;++i){const auto& bone=skeleton_.bones[i];positions[i]=bone.position;scales[i]=bone.scale;rotations[i]=quaternion_to_euler(bone.rotation);const int id=bone_name_id(bone.name);if(id>=0)bone_indices[id].push_back(i);if(bone.parent==0xffff){components[i]=i;if(bone.name=="_900")object_roots.push_back(i);}else{if(bone.parent>=i)return false;components[i]=components[bone.parent];}}
     if(clip){
         for(const auto& track:clip->tracks){
-            std::size_t index{};
-            if(track.bone_id==-1)index=object_root;
-            else {const auto found=bone_indices.find(track.bone_id);if(found==bone_indices.end())continue;index=found->second;}
-            const float value=track.sample(frame);
-            switch(track.property){
-            case 0:positions[index].x=value;break;case 1:positions[index].y=value;break;case 2:positions[index].z=value;break;
-            case 3:rotations[index].x=value;break;case 4:rotations[index].y=value;break;case 5:rotations[index].z=value;break;
-            case 7:scales[index].x=value;break;case 8:scales[index].y=value;break;case 9:scales[index].z=value;break;
-            default:break;
+            const std::vector<std::size_t>* targets{};
+            if(track.bone_id==-1)targets=&object_roots;
+            else {const auto found=bone_indices.find(track.bone_id);if(found==bone_indices.end())continue;targets=&found->second;}
+            const float sampled=track.sample(frame);
+            for(const auto index:*targets)switch(track.property){
+                case 0:positions[index].x=sampled;break;case 1:positions[index].y=sampled;break;case 2:positions[index].z=sampled;break;
+                case 3:rotations[index].x=sampled;break;case 4:rotations[index].y=sampled;break;case 5:rotations[index].z=sampled;break;
+                case 7:scales[index].x=sampled;break;case 8:scales[index].y=sampled;break;case 9:scales[index].z=sampled;break;
+                default:break;
             }
         }
     }
@@ -143,19 +150,37 @@ bool PreviewRenderer::apply_animation(const AnimationClip* clip,float frame) {
     applied_sop_operation_count_=0;
     if(clip){
         for(const auto& operation:sop_.operations){
-            const auto source=bone_indices.find(static_cast<int>(operation.source_bone));
-            const auto target=bone_indices.find(static_cast<int>(operation.target_bone));
-            if(source==bone_indices.end()||target==bone_indices.end())continue;
-            XMFLOAT4 rest_output{};
-            if(!evaluate_core_sop(operation,to_float4(skeleton_.bones[source->second].rotation),rest_output)||
-               quaternion_error(rest_output,to_float4(skeleton_.bones[target->second].rotation))>1e-4f)continue;
-            XMFLOAT4 animated_output{};
-            if(!evaluate_core_sop(operation,local_rotations[source->second],animated_output))continue;
-            local_rotations[target->second]=animated_output;++applied_sop_operation_count_;
+            const auto sources=bone_indices.find(static_cast<int>(operation.source_bone));
+            const auto targets=bone_indices.find(static_cast<int>(operation.target_bone));
+            if(sources==bone_indices.end()||targets==bone_indices.end())continue;
+            for(const auto target:targets->second){
+                const auto source=std::find_if(sources->second.begin(),sources->second.end(),[&](std::size_t candidate){return components[candidate]==components[target];});
+                if(source==sources->second.end())continue;
+                XMFLOAT4 rest_output{};
+                if(!evaluate_core_sop(operation,to_float4(skeleton_.bones[*source].rotation),rest_output)||
+                   quaternion_error(rest_output,to_float4(skeleton_.bones[target].rotation))>1e-4f)continue;
+                XMFLOAT4 animated_output{};
+                if(!evaluate_core_sop(operation,local_rotations[*source],animated_output))continue;
+                local_rotations[target]=animated_output;++applied_sop_operation_count_;
+            }
         }
     }
 
     std::vector<XMMATRIX> rest_world(bone_count),posed_world(bone_count);
+    for(std::size_t i=0;i<bone_count;++i){
+        const auto& bone=skeleton_.bones[i];
+        const auto rest_local=local_matrix(bone.position,bone.scale,XMVectorSet(bone.rotation.x,bone.rotation.y,bone.rotation.z,bone.rotation.w));
+        const auto posed_local=clip?local_matrix(positions[i],scales[i],XMLoadFloat4(&local_rotations[i])):rest_local;
+        if(bone.parent==0xffff){rest_world[i]=rest_local;posed_world[i]=posed_local;}
+        else {if(bone.parent>=i)return false;rest_world[i]=rest_local*rest_world[bone.parent];posed_world[i]=posed_local*posed_world[bone.parent];}
+    }
+    for(const auto& [target,follower]:anchor_links_){
+        if(target>=bone_count||follower>=bone_count)continue;
+        XMFLOAT4X4 target_world{},follower_world{};XMStoreFloat4x4(&target_world,posed_world[target]);XMStoreFloat4x4(&follower_world,posed_world[follower]);
+        const auto translation=XMMatrixTranslation(target_world._41-follower_world._41,target_world._42-follower_world._42,target_world._43-follower_world._43);
+        const auto follower_component=components[follower];
+        for(std::size_t i=0;i<bone_count;++i)if(components[i]==follower_component)posed_world[i]=posed_world[i]*translation;
+    }
     BoneConstants gpu_bones{};
     const auto identity=XMMatrixIdentity();
     for(auto& matrix:gpu_bones.skin)XMStoreFloat4x4(&matrix,XMMatrixTranspose(identity));
@@ -163,11 +188,6 @@ bool PreviewRenderer::apply_animation(const AnimationClip* clip,float frame) {
     animated_bone_world_.resize(bone_count);
     pose_hash_=1469598103934665603ull;
     for(std::size_t i=0;i<bone_count;++i){
-        const auto& bone=skeleton_.bones[i];
-        const auto rest_local=local_matrix(bone.position,bone.scale,XMVectorSet(bone.rotation.x,bone.rotation.y,bone.rotation.z,bone.rotation.w));
-        const auto posed_local=clip?local_matrix(positions[i],scales[i],XMLoadFloat4(&local_rotations[i])):rest_local;
-        if(bone.parent==0xffff){rest_world[i]=rest_local;posed_world[i]=posed_local;}
-        else {if(bone.parent>=i)return false;rest_world[i]=rest_local*rest_world[bone.parent];posed_world[i]=posed_local*posed_world[bone.parent];}
         XMVECTOR determinant{};const auto inverse=XMMatrixInverse(&determinant,rest_world[i]);
         const auto skin=std::abs(XMVectorGetX(determinant))<1e-8f?XMMatrixIdentity():inverse*posed_world[i];
         XMStoreFloat4x4(&gpu_bones.skin[i],XMMatrixTranspose(skin));

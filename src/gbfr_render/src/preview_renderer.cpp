@@ -58,7 +58,7 @@ bool PreviewRenderer::initialize(ID3D11Device* device,ID3D11DeviceContext* conte
     if(FAILED(device_->CreateBuffer(&cb,nullptr,&bones_)))return false;
     D3D11_SAMPLER_DESC sd{}; sd.Filter=D3D11_FILTER_MIN_MAG_MIP_LINEAR; sd.AddressU=sd.AddressV=sd.AddressW=D3D11_TEXTURE_ADDRESS_WRAP; sd.MaxLOD=D3D11_FLOAT32_MAX;
     device_->CreateSamplerState(&sd,&sampler_);
-    D3D11_RASTERIZER_DESC rd{}; rd.CullMode=D3D11_CULL_BACK; rd.FillMode=D3D11_FILL_SOLID; rd.DepthClipEnable=TRUE;
+    D3D11_RASTERIZER_DESC rd{}; rd.CullMode=D3D11_CULL_BACK; rd.FillMode=D3D11_FILL_SOLID; rd.DepthClipEnable=TRUE; rd.FrontCounterClockwise=TRUE;
     if(FAILED(device_->CreateRasterizerState(&rd,&solid_)))return false;
     rd.CullMode=D3D11_CULL_NONE;rd.FillMode=D3D11_FILL_WIREFRAME;if(FAILED(device_->CreateRasterizerState(&rd,&wire_)))return false;
     rd.FillMode=D3D11_FILL_SOLID;rd.DepthBias=-10000;rd.SlopeScaledDepthBias=-2.0f;
@@ -142,6 +142,13 @@ bool PreviewRenderer::load(const MeshAsset& mesh,const SkeletonAsset& skeleton,c
     bone_marker_size_=std::max(.001f,std::sqrt(dx*dx+dy*dy+dz*dz)*.004f);std::vector<DebugVertex> points;points.reserve(skeleton.bones.size()*6);
     for(std::size_t i=0;i<skeleton.bones.size();++i){if(!visible_bones_[i])continue;const auto p=skeleton.bones[i].world_position;points.push_back({{p.x-bone_marker_size_,p.y,p.z}});points.push_back({{p.x+bone_marker_size_,p.y,p.z}});points.push_back({{p.x,p.y-bone_marker_size_,p.z}});points.push_back({{p.x,p.y+bone_marker_size_,p.z}});points.push_back({{p.x,p.y,p.z-bone_marker_size_}});points.push_back({{p.x,p.y,p.z+bone_marker_size_}});}
     bone_point_vertex_count_=static_cast<unsigned>(points.size());if(!points.empty())create_buffer(device_,points,D3D11_BIND_VERTEX_BUFFER,bone_points_);
+    const float horizontal_extent=std::max({1.0f,std::abs(bounds_min_.x),std::abs(bounds_max_.x),std::abs(bounds_min_.z),std::abs(bounds_max_.z)})*1.25f;
+    float grid_spacing=.1f;while(horizontal_extent/grid_spacing>20.0f)grid_spacing*=2.0f;
+    const int grid_steps=std::max(10,static_cast<int>(std::ceil(horizontal_extent/grid_spacing)));
+    const float grid_extent=grid_steps*grid_spacing,grid_y=-.001f;
+    std::vector<DebugVertex> ground;ground.reserve(static_cast<std::size_t>(grid_steps*2+1)*4);
+    for(int step=-grid_steps;step<=grid_steps;++step){const float coordinate=step*grid_spacing;ground.push_back({{-grid_extent,grid_y,coordinate}});ground.push_back({{grid_extent,grid_y,coordinate}});ground.push_back({{coordinate,grid_y,-grid_extent}});ground.push_back({{coordinate,grid_y,grid_extent}});}
+    ground_vertex_count_=static_cast<unsigned>(ground.size());if(!ground.empty())create_buffer(device_,ground,D3D11_BIND_VERTEX_BUFFER,ground_lines_);
     return apply_animation(nullptr,0.0f);
 }
 
@@ -161,12 +168,12 @@ bool PreviewRenderer::load_texture_thumbnail(const fs::path& dds,TexturePreviewR
 }
 
 void PreviewRenderer::clear() {
-    index_count_=0; line_vertex_count_=0; bone_point_vertex_count_=0; collision_vertex_count_=0;
+    index_count_=0; line_vertex_count_=0; bone_point_vertex_count_=0; collision_vertex_count_=0;ground_vertex_count_=0;
     cloth_longitudinal_vertex_count_=0;cloth_lateral_vertex_count_=0;cloth_polygon_vertex_count_=0;
-    vertices_.Reset(); indices_.Reset(); lines_.Reset(); bone_points_.Reset(); collision_lines_.Reset();
+    vertices_.Reset(); indices_.Reset(); lines_.Reset(); bone_points_.Reset(); collision_lines_.Reset();ground_lines_.Reset();
     cloth_longitudinal_lines_.Reset();cloth_lateral_lines_.Reset();cloth_polygon_lines_.Reset();
     draw_ranges_.clear(); materials_.clear();
-    skeleton_={};sop_={};animated_bone_positions_.clear();animated_bone_world_.clear();visible_bones_.clear();visible_bone_count_=0;applied_sop_operation_count_=0;pose_hash_=0;
+    skeleton_={};sop_={};animated_bone_positions_.clear();animated_bone_world_.clear();visible_bones_.clear();anchor_links_.clear();visible_bone_count_=0;applied_sop_operation_count_=0;pose_hash_=0;
     texture_preview_srv_.Reset();texture_width_=0;texture_height_=0;
 }
 
@@ -243,18 +250,21 @@ bool PreviewRenderer::load_dds(const fs::path& path,ComPtr<ID3D11ShaderResourceV
 void PreviewRenderer::frame(OrbitCamera& camera) const { camera.target={(bounds_min_.x+bounds_max_.x)*.5f,(bounds_min_.y+bounds_max_.y)*.5f,(bounds_min_.z+bounds_max_.z)*.5f};const float dx=bounds_max_.x-bounds_min_.x,dy=bounds_max_.y-bounds_min_.y,dz=bounds_max_.z-bounds_min_.z;camera.distance=std::max(0.2f,std::sqrt(dx*dx+dy*dy+dz*dz)*0.85f); }
 
 bool PreviewRenderer::project(Vec3 world,const OrbitCamera& camera,Vec2& screen) const {
-    const float cp=std::cos(camera.pitch),sp=std::sin(camera.pitch),cy=std::cos(camera.yaw),sy=std::sin(camera.yaw);const XMVECTOR target=XMVectorSet(camera.target.x,camera.target.y,camera.target.z,1);const XMVECTOR eye=target+XMVectorSet(camera.distance*cp*sy,camera.distance*sp,camera.distance*cp*cy,0);const auto view=XMMatrixLookAtLH(eye,target,XMVectorSet(0,1,0,0));const auto projection=XMMatrixPerspectiveFovLH(XM_PIDIV4,static_cast<float>(width_)/height_,std::max(.001f,camera.distance*.001f),std::max(100.f,camera.distance*20));const auto point=XMVector3Project(XMVectorSet(world.x,world.y,world.z,1),0,0,static_cast<float>(width_),static_cast<float>(height_),0,1,projection,view,XMMatrixIdentity());XMFLOAT3 p{};XMStoreFloat3(&p,point);screen={p.x,p.y};return p.z>=0&&p.z<=1;
+    const float cp=std::cos(camera.pitch),sp=std::sin(camera.pitch),cy=std::cos(camera.yaw),sy=std::sin(camera.yaw);const XMVECTOR target=XMVectorSet(camera.target.x,camera.target.y,camera.target.z,1);const XMVECTOR eye=target+XMVectorSet(camera.distance*cp*sy,camera.distance*sp,camera.distance*cp*cy,0);const auto view=XMMatrixLookAtRH(eye,target,XMVectorSet(0,1,0,0));const auto projection=XMMatrixPerspectiveFovRH(XM_PIDIV4,static_cast<float>(width_)/height_,std::max(.001f,camera.distance*.001f),std::max(100.f,camera.distance*20));const auto point=XMVector3Project(XMVectorSet(world.x,world.y,world.z,1),0,0,static_cast<float>(width_),static_cast<float>(height_),0,1,projection,view,XMMatrixIdentity());XMFLOAT3 p{};XMStoreFloat3(&p,point);screen={p.x,p.y};return p.z>=0&&p.z<=1;
 }
 
-void PreviewRenderer::render(const OrbitCamera& camera,bool show_mesh,PreviewShadingMode shading,bool show_skeleton,bool show_collisions,bool show_alpha_overlays,bool show_cloth_links) {
+void PreviewRenderer::render(const OrbitCamera& camera,bool show_mesh,PreviewShadingMode shading,bool show_skeleton,bool show_collisions,bool show_alpha_overlays,bool show_cloth_links,bool show_ground) {
     const float clear[4]={0.12f,0.13f,0.145f,1};context_->OMSetRenderTargets(1,color_rtv_.GetAddressOf(),depth_dsv_.Get());context_->ClearRenderTargetView(color_rtv_.Get(),clear);context_->ClearDepthStencilView(depth_dsv_.Get(),D3D11_CLEAR_DEPTH|D3D11_CLEAR_STENCIL,1,0);
     D3D11_VIEWPORT viewport{0,0,static_cast<float>(width_),static_cast<float>(height_),0,1};context_->RSSetViewports(1,&viewport);
     const float cp=std::cos(camera.pitch),sp=std::sin(camera.pitch),cy=std::cos(camera.yaw),sy=std::sin(camera.yaw);XMVECTOR target=XMVectorSet(camera.target.x,camera.target.y,camera.target.z,1);XMVECTOR eye=target+XMVectorSet(camera.distance*cp*sy,camera.distance*sp,camera.distance*cp*cy,0);
-    const auto vp=XMMatrixLookAtLH(eye,target,XMVectorSet(0,1,0,0))*XMMatrixPerspectiveFovLH(XM_PIDIV4,static_cast<float>(width_)/height_,std::max(.001f,camera.distance*.001f),std::max(100.f,camera.distance*20));
+    const auto vp=XMMatrixLookAtRH(eye,target,XMVectorSet(0,1,0,0))*XMMatrixPerspectiveFovRH(XM_PIDIV4,static_cast<float>(width_)/height_,std::max(.001f,camera.distance*.001f),std::max(100.f,camera.distance*20));
     SceneConstants constants{};XMStoreFloat4x4(&constants.view_projection,XMMatrixTranspose(vp));constants.color={.72f,.76f,.82f,1};constants.light={-.28f,.82f,.48f,0};constants.lighting=shading==PreviewShadingMode::lit?1u:0u;constants.alpha_threshold=.2f;
     D3D11_MAPPED_SUBRESOURCE mapped{};
     auto upload_constants=[&](){if(SUCCEEDED(context_->Map(constants_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped))){std::memcpy(mapped.pData,&constants,sizeof(constants));context_->Unmap(constants_.Get(),0);}};
-    UINT stride=sizeof(GpuVertex),offset=0;context_->IASetInputLayout(input_layout_.Get());context_->VSSetShader(vertex_shader_.Get(),nullptr,0);context_->PSSetShader(pixel_shader_.Get(),nullptr,0);context_->VSSetConstantBuffers(0,1,constants_.GetAddressOf());context_->VSSetConstantBuffers(1,1,bones_.GetAddressOf());context_->PSSetConstantBuffers(0,1,constants_.GetAddressOf());context_->PSSetSamplers(0,1,sampler_.GetAddressOf());
+    UINT stride=sizeof(DebugVertex),offset=0;context_->VSSetConstantBuffers(0,1,constants_.GetAddressOf());context_->VSSetConstantBuffers(1,1,bones_.GetAddressOf());context_->PSSetConstantBuffers(0,1,constants_.GetAddressOf());context_->PSSetSamplers(0,1,sampler_.GetAddressOf());
+    if(show_ground&&ground_vertex_count_){constants.color={.31f,.33f,.36f,1};constants.textured=0;constants.eye_material=0;constants.lighting=0;constants.alpha_blended=0;constants.alpha_masked=0;constants.alpha_clipped=0;constants.skinning_enabled=0;upload_constants();context_->OMSetDepthStencilState(nullptr,0);context_->RSSetState(solid_.Get());context_->IASetInputLayout(debug_input_layout_.Get());context_->VSSetShader(debug_vertex_shader_.Get(),nullptr,0);context_->PSSetShader(pixel_shader_.Get(),nullptr,0);context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST);context_->IASetVertexBuffers(0,1,ground_lines_.GetAddressOf(),&stride,&offset);context_->Draw(ground_vertex_count_,0);}
+    constants.color={.72f,.76f,.82f,1};constants.lighting=shading==PreviewShadingMode::lit?1u:0u;
+    stride=sizeof(GpuVertex);context_->IASetInputLayout(input_layout_.Get());context_->VSSetShader(vertex_shader_.Get(),nullptr,0);context_->PSSetShader(pixel_shader_.Get(),nullptr,0);
     if(show_mesh&&index_count_){
         constants.skinning_enabled=1;
         const bool wireframe=shading==PreviewShadingMode::wireframe;context_->RSSetState(wireframe?wire_.Get():solid_.Get());context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);context_->IASetVertexBuffers(0,1,vertices_.GetAddressOf(),&stride,&offset);context_->IASetIndexBuffer(indices_.Get(),DXGI_FORMAT_R32_UINT,0);

@@ -39,6 +39,36 @@ int main() {
         large_skeleton_mesh.vertices[0].joints[0]=639;large_skeleton_mesh.vertices[0].weights[0]=1.0f;
         if(!shader_smoke.load(large_skeleton_mesh,large_skeleton))return 86;
     }
+    {
+        Microsoft::WRL::ComPtr<ID3D11Device> device;Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
+        if(FAILED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_WARP,nullptr,0,nullptr,0,D3D11_SDK_VERSION,&device,nullptr,&context)))return 94;
+        gbfr::PreviewRenderer preview;
+        if(!preview.initialize(device.Get(),context.Get(),fs::path(GBFR_ROOT_DIR)/L"assets/shaders/preview.hlsl"))return 95;
+        gbfr::SkeletonAsset skeleton;
+        skeleton.bones={
+            {"_000",0xffff,{0,0,0},{0,0,0,1},{1,1,1},{0,0,0}},
+            {"_005",0,{0,1,0},{0,0,0,1},{1,1,1},{0,1,0}},
+            {"_000",0xffff,{2,0,0},{0,0,0,1},{1,1,1},{2,0,0}},
+            {"_005",2,{0,1,0},{0,0,0,1},{1,1,1},{2,1,0}}
+        };
+        gbfr::MeshAsset mesh;mesh.vertices.resize(3);mesh.indices={0,1,2};
+        mesh.vertices[0].position={-.5f,0,0};mesh.vertices[1].position={.5f,0,0};mesh.vertices[2].position={0,1,0};
+        mesh.vertices[0].joints[0]=0;mesh.vertices[1].joints[0]=2;mesh.vertices[2].joints[0]=2;
+        for(auto& vertex:mesh.vertices)vertex.weights[0]=1.0f;
+        if(!preview.load(mesh,skeleton))return 96;
+        gbfr::AnimationTrack root_x;root_x.bone_id=0;root_x.property=0;root_x.keys.push_back({0,3.0f,0,0});
+        gbfr::AnimationClip clip;clip.frame_count=1;clip.tracks.push_back(root_x);
+        if(!preview.apply_animation(&clip,0)||std::abs(preview.bone_positions()[0].x-3.0f)>1e-5f||std::abs(preview.bone_positions()[2].x-3.0f)>1e-5f)return 97;
+        if(!preview.set_anchor_links({{1,3}})||!preview.apply_animation(&clip,0))return 99;
+        const auto& anchors=preview.bone_positions();if(std::abs(anchors[1].x-anchors[3].x)+std::abs(anchors[1].y-anchors[3].y)+std::abs(anchors[1].z-anchors[3].z)>1e-5f)return 100;
+        gbfr::OrbitCamera camera;camera.pitch=0;camera.target={0,.5f,0};preview.resize(128,128);
+        gbfr::Vec2 projected_left{},projected_right{};
+        if(!preview.project({-.25f,.5f,0},camera,projected_left)||!preview.project({.25f,.5f,0},camera,projected_right)||projected_left.x>=projected_right.x)return 98;
+        preview.frame(camera);
+        preview.render(camera,false,gbfr::PreviewShadingMode::unlit,false,false,true,true,false);const auto without_ground=preview.render_target_hash();
+        preview.render(camera,false,gbfr::PreviewShadingMode::unlit,false,false,true,true,true);const auto with_ground=preview.render_target_hash();
+        if(!without_ground||!with_ground||without_ground==with_ground)return 101;
+    }
 
     const fs::path test_temp = fs::current_path() / L".gbfr_test_temp";
     const fs::path root = test_temp / L"workspace";
@@ -231,7 +261,13 @@ int main() {
             document.value("Materials",nlohmann::json::array()).size()+
             document.value("ClothFiles",nlohmann::json::array()).size()+
             document.value("ModelFiles",nlohmann::json::array()).size()+
-            document.value("NewTextures",nlohmann::json::array()).size();
+            document.value("NewTextures",nlohmann::json::array()).size()+[&]{
+                std::vector<std::string> registered;
+                for(const auto& texture:document.value("NewTextures",nlohmann::json::array()))registered.push_back(texture.value("Input",std::string{}));
+                std::size_t count{};
+                for(const auto& texture:document.value("GraniteTextures",nlohmann::json::array()))for(const auto& file:texture.value("Files",nlohmann::json::array()))if(file.is_string()&&std::find(registered.begin(),registered.end(),file.get<std::string>())==registered.end())++count;
+                return count;
+            }();
         if (pl1400.assets().size() != expected_assets) return 6;
         for(std::size_t i=1;i<pl1400.assets().size();++i)if(gbfr::natural_less_case_insensitive(pl1400.assets()[i].input.filename().native(),pl1400.assets()[i-1].input.filename().native()))return 32;
         if(!gbfr::natural_less_case_insensitive(L"2.mmat.json",L"10.mmat.json")||gbfr::natural_less_case_insensitive(L"10.mmat.json",L"2.mmat.json"))return 45;
