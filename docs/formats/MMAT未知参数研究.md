@@ -116,7 +116,7 @@ EXE 在 `0x1446E7B5E` 和 `0x1446E7C1E` 分别取参。`0x53F49792` 影响 alpha
 |---|---|---|
 | `0x9C83F56F`, `0xA6EB1B34` | 4,133 个 Metal `5/7`、`5/5` material | 前者选择备用管线/资源描述符，后者启用角色根位置运行时数据；行为不同 |
 | `0x037BE4E5` | UberEnv 为主 | 环境 shader 变体参数，行为仍待反汇编 |
-| `0x0A05A26F`, `0xEB6F1AE7` | 18 个 foliage `9/1` material | 植被参数块，需与风、pivot painter 数据对照 |
+| `0x0A05A26F` | 18 个 foliage `9/1` material | 17 真 1 假；EXE 无直接哈希常量引用，行为仍未知 |
 | `0x4298F7E4` | 25 个 sky/cloud `20/1` material | 天空/云专用开关，尚无足够语义证据 |
 
 ### 能量护盾控制的遗迹材质组索引
@@ -134,6 +134,12 @@ EXE `0x1446FA6FE..0x1446FA7B7` 在构造 UberEnv 管线 key 时分别读取三�
 - `0xC9762248=1` 给 key 增加 `0x200` 位；部分 pass 会直接跳过该位。
 
 `0xC5BD3DED` 只出现在 3,280 个 layer2/layer3 material，202 个为真；另两项的分布也受 UberEnv family 和 pass 限制。它们达到 B 级“管线 permutation 行为”证据，但仍不能仅凭 bit 位置命名成透明、法线、颜色噪声或层数。与 `g_IsUseDepthFade`、`g_UseColorNoise` 等已有 A 级名称不同，检查器只显示 key 位和原始哈希，不改 schema 名称。
+
+### Foliage 实例变换首分量
+
+`0xEB6F1AE7` 只出现在 18 个 foliage `9/1` 控制材质，3 个为真。EXE `0x1446F143A..0x1446F1471` 将它转换成 `0.0/1.0`，写入一项 48 字节实例记录的第一个 float，随后从对象复制另外 32 字节变换数据。Shader RDEF 中 `vs_foliage.vso` 的 `g_InstanceWorldTbl` 元素正是 48 字节 `float4x3`，尺寸和绑定用途吻合。因此当前 B 级解释是“控制 foliage 实例世界变换首分量/首轴是否启用”，不是风强度或颜色参数；它造成的具体几何行为仍需运行时 A/B 捕获。
+
+与它共现的 `0x0A05A26F` 有 17 真 1 假，但 EXE 中没有直接出现该哈希常量，可能由表驱动代码读取，也可能是当前版本未消费的兼容字段。没有数据流证据前继续保留 D 级。
 
 ### Metal 的角色位置相关运行时数据
 

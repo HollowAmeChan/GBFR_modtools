@@ -119,7 +119,7 @@ const char* parameter_meaning(const gbfr::MaterialShaderParameter& parameter) {
     case 0xAC6F995Du: return "能量护盾控制的遗迹材质组索引（0 / 1..4 / 5 汇总）";
     case 0xC5BD3DEDu: return "UberEnv 管线 permutation 位 0x100";
     case 0xC9762248u: return "UberEnv 管线 permutation 位 0x200";
-    case 0xEB6F1AE7u: return "Foliage 专用开关";
+    case 0xEB6F1AE7u: return "Foliage 实例世界变换首分量开关";
     default: return "尚未探明";
     }
 }
@@ -139,11 +139,13 @@ const char* parameter_confidence(const gbfr::MaterialShaderParameter& parameter)
         return "B/C：运行时 + 样本";
     case 0x53F49792u:
         return "B：运行时行为";
+    case 0xEB6F1AE7u:
+        return "B：实例缓冲写入行为";
     case 0xAB261CFAu: case 0xC5BD3DEDu: case 0xC9762248u:
         return "B：管线 permutation 行为";
     case 0x037BE4E5u: case 0x4298F7E4u:
         return "C/D：样本相关";
-    case 0x0A05A26Fu: case 0xEB6F1AE7u:
+    case 0x0A05A26Fu:
         return "D：少量样本";
     default:
         return "未知";
