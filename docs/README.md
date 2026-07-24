@@ -15,6 +15,8 @@
 ## 格式研究
 
 - [MMAT 材质格式与 ER 升级](formats/MMAT材质格式与ER升级.md)：2.0.0 schema、旧 JSON 丢失根因、独立检查器、透明/双面字段与迁移步骤。
+- [MMAT 未知参数与 Shader 研究](formats/MMAT未知参数研究.md)：全量 MMAT/DXBC/EXE 交叉分析、证据等级和未知哈希的当前解释。
+- [本机资源路径](本机资源路径.md)：游戏数据、工作区、Blender 插件、格式工具和研究输出的本机位置。
 - [SOP 骨骼后处理与 Deform 骨](formats/SOP骨骼后处理与Deform骨.md)：平行骨链、swing/twist、corrective 和求值顺序。
 
 文档中的“已验证”表示已用当前角色样本或渲染回归测试确认；“推断”不代表游戏官方实现公开。

@@ -32,6 +32,8 @@ Blender 插件导出的 `.minfo/.skeleton/.mmesh` 也应覆盖到 `unpack/data/`
 - [模型与骨架 Mod 流程](docs/模型与骨架Mod制作流程.md)
 - [模型骨架、预览器与材质问题记录](docs/模型骨架预览与材质问题记录.md)
 - [MMAT 材质格式与 ER 升级](docs/formats/MMAT材质格式与ER升级.md)
+- [MMAT 未知参数与 Shader 研究](docs/formats/MMAT未知参数研究.md)
+- [本机资源路径](docs/本机资源路径.md)
 - [C++ 架构](docs/架构.md)
 
 ## 当前边界

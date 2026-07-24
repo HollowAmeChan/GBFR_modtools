@@ -1,0 +1,4 @@
+add_executable(gbfr_shader_reflect shader_reflect.cpp)
+target_compile_options(gbfr_shader_reflect PRIVATE /W4 /permissive- /Zc:__cplusplus)
+target_compile_definitions(gbfr_shader_reflect PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+target_link_libraries(gbfr_shader_reflect PRIVATE nlohmann_json::nlohmann_json d3dcompiler dxguid)

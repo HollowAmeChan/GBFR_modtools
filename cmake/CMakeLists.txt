@@ -52,6 +52,7 @@ add_subdirectory("${GBFR_ROOT_DIR}/src/gbfr_core" "${CMAKE_BINARY_DIR}/src/gbfr_
 add_subdirectory("${GBFR_ROOT_DIR}/src/gbfr_formats" "${CMAKE_BINARY_DIR}/src/gbfr_formats")
 add_subdirectory("${GBFR_ROOT_DIR}/src/gbfr_render" "${CMAKE_BINARY_DIR}/src/gbfr_render")
 add_subdirectory("${GBFR_ROOT_DIR}/src/gbfr_editor" "${CMAKE_BINARY_DIR}/src/gbfr_editor")
+add_subdirectory("${GBFR_ROOT_DIR}/scripts/research" "${CMAKE_BINARY_DIR}/research")
 
 if(GBFR_BUILD_TESTS)
   enable_testing()
