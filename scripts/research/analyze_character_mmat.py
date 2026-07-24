@@ -374,6 +374,9 @@ def main() -> int:
     discard_present = discard_enabled = 0
     subtype13_present = subtype13_enabled = 0
     directional_alpha_present = directional_alpha_enabled = directional_alpha_mismatches = 0
+    alternate_emissive_present = alternate_emissive_enabled = 0
+    alternate_emissive_models: set[str] = set()
+    alternate_emissive_variants: set[str] = set()
     for record in records:
         alpha_key = raw_parameter(record, "0x53F49792")
         if alpha_key is None:
@@ -387,6 +390,7 @@ def main() -> int:
         discard = raw_parameter(record, "0x24C1ABA9")
         subtype13 = raw_parameter(record, "0x8B8038FC")
         directional_alpha = raw_parameter(record, "0xA6EB1B34")
+        alternate_emissive = raw_parameter(record, "0x9C83F56F")
         if two_sided is not None:
             two_sided_present += 1
             two_sided_enabled += int(bool(two_sided))
@@ -402,6 +406,13 @@ def main() -> int:
             directional_alpha_mismatches += int(
                 bool(directional_alpha) != (int(record["shadow"]) == 3 and bool(record["bool12"]))
             )
+        if alternate_emissive is not None:
+            alternate_emissive_present += 1
+            alternate_emissive_enabled += int(bool(alternate_emissive))
+            if alternate_emissive:
+                model, variant = model_and_variant(record["file"])
+                alternate_emissive_models.add(model)
+                alternate_emissive_variants.add(variant)
 
     invariants = {
         "scope": "model/{pl,fp,wp} with character shader types 2..6",
@@ -423,6 +434,13 @@ def main() -> int:
             "present": directional_alpha_present,
             "enabled": directional_alpha_enabled,
             "mismatches_against_shadow_type_3_and_bool12": directional_alpha_mismatches,
+        },
+        "metal_alternate_runtime_emissive_factor_0x9C83F56F": {
+            "present": alternate_emissive_present,
+            "enabled": alternate_emissive_enabled,
+            "enabled_models": sorted(alternate_emissive_models),
+            "enabled_variants": sorted(alternate_emissive_variants),
+            "runtime_behavior": "shading sub-record [2] selects runtime +0x0C instead of +0x08; shader multiplies sub-record [2] * [3] in g_EnableEmissive branch",
         },
     }
     (out_dir / "character_invariants.json").write_text(

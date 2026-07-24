@@ -113,7 +113,7 @@ const char* parameter_meaning(const gbfr::MaterialShaderParameter& parameter) {
     case 0x2B5C866Cu: return "Elemental 稀有附加描述符开关";
     case 0x4298F7E4u: return "Sky / Cloud 管线 permutation 位 0x2";
     case 0x93D9F63Au: return "Elemental 7/11 管线模板开关";
-    case 0x9C83F56Fu: return "Metal 备用管线 / 资源描述符开关";
+    case 0x9C83F56Fu: return "Metal 运行时自发光第一乘数：在结构 +0x08 / +0x0C 两套值间选择";
     case 0xA6EB1B34u: return "Metal 阴影类型 3 的方向驱动 Alpha 裁切阈值（标称范围 0.2..1.0）";
     case 0xAB261CFAu: return "UberEnv 管线 permutation 位 0x10";
     case 0xAC6F995Du: return "能量护盾控制的遗迹材质组索引（0 / 1..4 / 5 汇总）";
@@ -134,13 +134,15 @@ const char* parameter_confidence(const gbfr::MaterialShaderParameter& parameter)
     case 0xB460A0F0u:
         return "A：正式 schema";
     case 0x11664BFCu: case 0x2AEDA6ADu: case 0x2B5C866Cu: case 0x56346692u:
-    case 0x92339519u: case 0x93D9F63Au: case 0x9C83F56Fu:
+    case 0x92339519u: case 0x93D9F63Au:
     case 0xAC6F995Du: case 0xBAEF6920u: case 0xE56343C0u:
         return "B/C：运行时 + 样本";
     case 0x8B8038FCu:
         return "B：EXE 管线状态表 + 全量样本";
     case 0xA6EB1B34u:
         return "B：CPU 写入 + DXBC 消费 + 角色全量样本";
+    case 0x9C83F56Fu:
+        return "B：CPU 选择 + DXBC 自发光分支消费";
     case 0x53F49792u:
         return "B/C：pass key + 社区推测";
     case 0xEB6F1AE7u:

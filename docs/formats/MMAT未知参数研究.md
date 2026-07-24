@@ -47,6 +47,7 @@ Shader 目录实际存放裸 DXBC：1,162 个 `.pso`、265 个 `.vso`、170 个 
 - A 级 `g_TwoSided` 在 `pl/fp/wp` 中一次都没有；它只属于当前样本中的 PlantShake/场景资产，不能用于解释角色背面的异常半透。
 - `0x8B8038FC` 在 4,779 条非 Eye 角色材质中存在但全部为 false。全量数据中的 21 个真值来自 `em/fe` 等复用角色 shader 的资产，不代表普通 `pl/fp/wp` 会启用 subtype 13。
 - Metal 的 `0xA6EB1B34` 在 2,499 条样本中存在，981 个真值与 `shadow_type=3 / bool12=true` 完全同现，1,518 个假值均不属于该状态，错误数为 0。
+- Metal 的 `0x9C83F56F` 同样在 2,499 条样本中存在，但只有 18 个真值，全部集中于 `pl1100/pl1101/pl1102/pl1700` 的 `vars/10`。
 
 这些关系由 `character_invariants.json` 自动生成，游戏更新后应重新扫描，而不是把当前计数写成永久格式规则。
 
@@ -162,7 +163,7 @@ EXE 对 `0x53F49792` 有 16 个直接读取点。Eye、Face、Hair、Metal、Ski
 | 参数组 | 样本范围 | 当前结论 |
 |---|---|---|
 | `0x8B8038FC` | 7,287 个角色 shader family material | 21 个真值选择 24 字节管线状态表记录 13/29；不更换 VS/PS Shader 哈希，视觉状态名未知 |
-| `0x9C83F56F`, `0xA6EB1B34` | 4,133 个 Metal `5/7`、`5/5` material | 前者选择备用管线/资源描述符；后者为阴影类型 3 追加方向驱动的 Alpha 裁切阈值，行为不同 |
+| `0x9C83F56F`, `0xA6EB1B34` | 4,133 个 Metal `5/7`、`5/5` material | 前者选择备用运行时自发光乘数；后者为阴影类型 3 追加方向驱动的 Alpha 裁切阈值，行为不同 |
 | `0x037BE4E5` | UberEnv / 植被 | 禁用背面剔除，选择双面光栅路径；官方字段名未知 |
 | `0x0A05A26F` | 18 个 foliage `9/1` material | 17 真 1 假；EXE 无直接哈希常量引用，行为仍未知 |
 | `0x4298F7E4` | 25 个 sky/cloud `20/1` material | Sky/Cloud 管线 permutation 位 `0x2`，官方视觉名称未知 |
@@ -213,7 +214,9 @@ EXE `0x1446EA5F3` 读取该参数。为真时，代码取得对象向量与 0 �
 
 这解释了为什么受影响材质的破碎边缘可能随模型相对世界原点的方向变化。它只能裁掉接近阈值的像素，不会直接制造法线或光照噪声：如果毛躁发生在完全不透明区域，仍应继续检查切线、法线、精度和阴影；如果只发生在 alpha 边缘或带灰度遮罩的平面，它就是首要候选。
 
-`0x9C83F56F` 在同一构建函数的 `0x1446EA83A` 被读取。真值且类型正确时，代码从当前 Metal 描述记录的 `+0x0C` 位置取 32 位 ID；否则取默认的 `+0x08`，随后还会固定写入 `+0x10` 的另一项 ID。它因此是备用管线/资源描述符选择开关，不是颜色、粗糙度或透明度的直接数值。22 个真值多为特殊颜色变体，只能说明资产使用场景，不能作为官方命名。
+`0x9C83F56F` 在同一构建函数的 `0x1446EA83A` 被读取。真值且类型正确时，CPU 将 Metal 运行时结构 `+0x0C` 的 32 位 float 写入着色子记录的 `+2`；否则写入默认的 `+0x08`。子记录 `+3` 始终来自结构 `+0x10`。当方向 Alpha 路径存在时，CPU 会在该子记录前插入五项数据，因此这里的 `+2/+3` 是相对着色子记录的槽位，不能写成整个实例缓冲的固定绝对索引。Metal DXBC 只在 `g_EnableEmissive` 为真时读取这两项并计算 `[2] * [3]`，再与自发光贴图、`g_EmissiveIntensity` 和角色材质全局强度共同生成自发光贡献。因此旧结论“备用管线 / 资源描述符”已被否定，当前 B 级行为名为“选择备用运行时自发光第一乘数”。
+
+全量 4,133 个 Metal 中只有 22 个真值：角色范围内 18 个全部来自 `pl1100/pl1101/pl1102/pl1700` 的 `vars/10`，贴图均为 `_c10_` 特殊盔甲/布料变体；另 4 个来自 `em0010/em7530/em7531/em7600`。解码后的场景配置还公开了 `emissiveIntensity_`、`itemEmissiveIntensity_` 与拼写如此的 `useNewEmissiveParamters_`，说明运行时确有多套自发光强度，但目前没有结构偏移或原始名称字符串把 `0x9C83F56F` 唯一绑定到其中某一项。`Item Emissive` 只能作为后续 C 级候选，不能写成正式字段名。
 
 ## Constant Buffer 的 RDEF 解码
 
@@ -280,6 +283,10 @@ $gameExe = "D:\Steam\steamapps\common\Granblue Fantasy Relink\granblue_fantasy_r
 & $dumpbin /DISASM /RANGE:0x1446ED197,0x1446ED25E $gameExe
 & $dumpbin /DISASM /RANGE:0x1446EEA98,0x1446EEB44 $gameExe
 & $dumpbin /RAWDATA /RANGE:0x146138780,0x146138A80 $gameExe
+
+& $gbfrPython scripts\research\find_pe_relative_xrefs.py `
+  $gameExe 0x1444B7540 0x146138780 --rip-relative `
+  --output "research_output\mmat\pe_xrefs.csv"
 
 & $gbfrPython scripts\research\analyze_mmat.py `
   --data-root "D:\Steam\steamapps\common\Granblue Fantasy Relink\data" `
