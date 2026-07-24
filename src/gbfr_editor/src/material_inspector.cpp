@@ -103,7 +103,7 @@ const char* parameter_meaning(const gbfr::MaterialShaderParameter& parameter) {
     case 0xE208C4C4u: return "使用颜色噪声";
     case 0x11664BFCu: return "按第 5 号骨骼计算面部参考中心";
     case 0x56346692u: return "面部参考中心的骨骼局部偏移";
-    case 0x8B8038FCu: return "选择角色材质的独立管线描述表分支";
+    case 0x8B8038FCu: return "选择角色材质的有效 Shader subtype 13 路径";
     case 0x92339519u: return "启用冰 / 晶体模型专用资源路径";
     case 0xBAEF6920u: return "右眼材质标记";
     case 0xE56343C0u: return "左眼材质标记";
