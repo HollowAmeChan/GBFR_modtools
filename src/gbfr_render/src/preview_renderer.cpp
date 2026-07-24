@@ -59,8 +59,9 @@ bool PreviewRenderer::initialize(ID3D11Device* device,ID3D11DeviceContext* conte
     D3D11_SAMPLER_DESC sd{}; sd.Filter=D3D11_FILTER_MIN_MAG_MIP_LINEAR; sd.AddressU=sd.AddressV=sd.AddressW=D3D11_TEXTURE_ADDRESS_WRAP; sd.MaxLOD=D3D11_FLOAT32_MAX;
     device_->CreateSamplerState(&sd,&sampler_);
     D3D11_RASTERIZER_DESC rd{}; rd.CullMode=D3D11_CULL_BACK; rd.FillMode=D3D11_FILL_SOLID; rd.DepthClipEnable=TRUE; rd.FrontCounterClockwise=TRUE;
-    if(FAILED(device_->CreateRasterizerState(&rd,&solid_)))return false;
-    rd.CullMode=D3D11_CULL_NONE;rd.FillMode=D3D11_FILL_WIREFRAME;if(FAILED(device_->CreateRasterizerState(&rd,&wire_)))return false;
+    if(FAILED(device_->CreateRasterizerState(&rd,&solid_culled_)))return false;
+    rd.CullMode=D3D11_CULL_NONE;if(FAILED(device_->CreateRasterizerState(&rd,&solid_)))return false;
+    rd.FillMode=D3D11_FILL_WIREFRAME;if(FAILED(device_->CreateRasterizerState(&rd,&wire_)))return false;
     rd.FillMode=D3D11_FILL_SOLID;rd.DepthBias=-10000;rd.SlopeScaledDepthBias=-2.0f;
     if(FAILED(device_->CreateRasterizerState(&rd,&alpha_overlay_raster_)))return false;
     D3D11_DEPTH_STENCIL_DESC depth{};depth.DepthEnable=FALSE;depth.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ZERO;depth.DepthFunc=D3D11_COMPARISON_ALWAYS;
@@ -253,7 +254,7 @@ bool PreviewRenderer::project(Vec3 world,const OrbitCamera& camera,Vec2& screen)
     const float cp=std::cos(camera.pitch),sp=std::sin(camera.pitch),cy=std::cos(camera.yaw),sy=std::sin(camera.yaw);const XMVECTOR target=XMVectorSet(camera.target.x,camera.target.y,camera.target.z,1);const XMVECTOR eye=target+XMVectorSet(camera.distance*cp*sy,camera.distance*sp,camera.distance*cp*cy,0);const auto view=XMMatrixLookAtRH(eye,target,XMVectorSet(0,1,0,0));const auto projection=XMMatrixPerspectiveFovRH(XM_PIDIV4,static_cast<float>(width_)/height_,std::max(.001f,camera.distance*.001f),std::max(100.f,camera.distance*20));const auto point=XMVector3Project(XMVectorSet(world.x,world.y,world.z,1),0,0,static_cast<float>(width_),static_cast<float>(height_),0,1,projection,view,XMMatrixIdentity());XMFLOAT3 p{};XMStoreFloat3(&p,point);screen={p.x,p.y};return p.z>=0&&p.z<=1;
 }
 
-void PreviewRenderer::render(const OrbitCamera& camera,bool show_mesh,PreviewShadingMode shading,bool show_skeleton,bool show_collisions,bool show_alpha_overlays,bool show_cloth_links,bool show_ground) {
+void PreviewRenderer::render(const OrbitCamera& camera,bool show_mesh,PreviewShadingMode shading,bool show_skeleton,bool show_collisions,bool show_alpha_overlays,bool show_cloth_links,bool show_ground,bool cull_backfaces) {
     const float clear[4]={0.12f,0.13f,0.145f,1};context_->OMSetRenderTargets(1,color_rtv_.GetAddressOf(),depth_dsv_.Get());context_->ClearRenderTargetView(color_rtv_.Get(),clear);context_->ClearDepthStencilView(depth_dsv_.Get(),D3D11_CLEAR_DEPTH|D3D11_CLEAR_STENCIL,1,0);
     D3D11_VIEWPORT viewport{0,0,static_cast<float>(width_),static_cast<float>(height_),0,1};context_->RSSetViewports(1,&viewport);
     const float cp=std::cos(camera.pitch),sp=std::sin(camera.pitch),cy=std::cos(camera.yaw),sy=std::sin(camera.yaw);XMVECTOR target=XMVectorSet(camera.target.x,camera.target.y,camera.target.z,1);XMVECTOR eye=target+XMVectorSet(camera.distance*cp*sy,camera.distance*sp,camera.distance*cp*cy,0);
@@ -267,7 +268,7 @@ void PreviewRenderer::render(const OrbitCamera& camera,bool show_mesh,PreviewSha
     stride=sizeof(GpuVertex);context_->IASetInputLayout(input_layout_.Get());context_->VSSetShader(vertex_shader_.Get(),nullptr,0);context_->PSSetShader(pixel_shader_.Get(),nullptr,0);
     if(show_mesh&&index_count_){
         constants.skinning_enabled=1;
-        const bool wireframe=shading==PreviewShadingMode::wireframe;context_->RSSetState(wireframe?wire_.Get():solid_.Get());context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);context_->IASetVertexBuffers(0,1,vertices_.GetAddressOf(),&stride,&offset);context_->IASetIndexBuffer(indices_.Get(),DXGI_FORMAT_R32_UINT,0);
+        const bool wireframe=shading==PreviewShadingMode::wireframe;ID3D11RasterizerState* mesh_raster=wireframe?wire_.Get():(cull_backfaces?solid_culled_.Get():solid_.Get());context_->RSSetState(mesh_raster);context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);context_->IASetVertexBuffers(0,1,vertices_.GetAddressOf(),&stride,&offset);context_->IASetIndexBuffer(indices_.Get(),DXGI_FORMAT_R32_UINT,0);
         auto draw_pass=[&](int pass){
             for(const auto& draw:draw_ranges_){
                 GpuMaterialTextures* material=!wireframe&&draw.material<materials_.size()?&materials_[draw.material]:nullptr;
@@ -289,7 +290,7 @@ void PreviewRenderer::render(const OrbitCamera& camera,bool show_mesh,PreviewSha
                 context_->OMSetBlendState(alpha_blend_.Get(),blend_factor,0xffffffffu);
                 context_->OMSetDepthStencilState(alpha_depth_.Get(),0);context_->RSSetState(alpha_overlay_raster_.Get());draw_pass(2);
             }
-            context_->RSSetState(solid_.Get());
+            context_->RSSetState(mesh_raster);
             context_->OMSetBlendState(nullptr,blend_factor,0xffffffffu);
         }
     }

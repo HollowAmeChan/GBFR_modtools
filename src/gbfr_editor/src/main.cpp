@@ -94,6 +94,7 @@ bool g_show_collisions = true;
 bool g_show_cloth_links = true;
 bool g_show_alpha_overlays = true;
 bool g_show_ground = true;
+bool g_cull_backfaces = false;
 bool g_link_head_anchor = true;
 std::vector<std::filesystem::path> g_motion_files;
 std::optional<gbfr::AnimationClip> g_motion;
@@ -1000,16 +1001,17 @@ void draw_preview_controls() {
         if(ImGui::Combo("显示模式",&mode,modes,3))g_preview_shading=static_cast<gbfr::PreviewShadingMode>(mode);ImGui::SameLine();
         ImGui::Checkbox("骨架", &g_show_skeleton); ImGui::SameLine();
         ImGui::Checkbox("地板",&g_show_ground);ImGui::SameLine();
+        ImGui::Checkbox("背面剔除",&g_cull_backfaces);ImGui::SameLine();
         if(ImGui::Checkbox("碰撞体", &g_show_collisions)&&g_show_collisions)update_collision_debug(); ImGui::SameLine();
         if(ImGui::Checkbox("Cloth 连接", &g_show_cloth_links)&&g_show_cloth_links)update_collision_debug(); ImGui::SameLine();
         ImGui::Checkbox("透明覆盖",&g_show_alpha_overlays);ImGui::SameLine();
         if (g_preview && g_preview->has_model() && ImGui::Button("取景")) g_preview->frame(g_camera);
         if(g_loaded_models.size()>1){
-            const bool changed=ImGui::Checkbox("联动头部 _005",&g_link_head_anchor);
-            if(ImGui::IsItemHovered())ImGui::SetTooltip("默认开启；只影响预览姿态，不修改 unpack、build 或 Blender 数据。");
+            const bool changed=ImGui::Checkbox("同步头部动画（_005 锚定）",&g_link_head_anchor);
+            if(ImGui::IsItemHovered())ImGui::SetTooltip("同编号骨骼共享完整 MOT；_005 额外对齐头身的世界位置和旋转，并保留其余头骨相对动画。只影响预览姿态。");
             if(changed)load_model_previews(g_loaded_models,true);
         }
-        if(!g_model_preview_diagnostics.empty()&&ImGui::CollapsingHeader("位移锚点诊断",ImGuiTreeNodeFlags_DefaultOpen)){
+        if(!g_model_preview_diagnostics.empty()&&ImGui::CollapsingHeader("姿态锚点诊断",ImGuiTreeNodeFlags_DefaultOpen)){
             constexpr ImGuiTableFlags flags=ImGuiTableFlags_Borders|ImGuiTableFlags_RowBg|ImGuiTableFlags_Resizable|ImGuiTableFlags_SizingStretchProp;
             if(ImGui::BeginTable("##anchor_diagnostics",6,flags)){
                 ImGui::TableSetupColumn("模型");ImGui::TableSetupColumn("骨骼");ImGui::TableSetupColumn("source rest");ImGui::TableSetupColumn("当前帧");ImGui::TableSetupColumn("帧位移");ImGui::TableSetupColumn("联动");ImGui::TableHeadersRow();
@@ -1232,7 +1234,7 @@ void draw_editor_shell() {
     ImVec2 available = ImGui::GetContentRegionAvail();
     if (g_preview&&g_preview_mode==PreviewMode::model&&available.x > 1 && available.y > 1) {
         g_preview->resize(static_cast<unsigned>(available.x), static_cast<unsigned>(available.y));
-        g_preview->render(g_camera, g_show_mesh, g_preview_shading, g_show_skeleton, g_show_collisions, g_show_alpha_overlays, g_show_cloth_links, g_show_ground);
+        g_preview->render(g_camera, g_show_mesh, g_preview_shading, g_show_skeleton, g_show_collisions, g_show_alpha_overlays, g_show_cloth_links, g_show_ground, g_cull_backfaces);
         const ImVec2 image_origin=ImGui::GetCursorScreenPos();
         ImGui::Image(reinterpret_cast<ImTextureID>(g_preview->image()), available);
         if (ImGui::IsItemHovered()) {

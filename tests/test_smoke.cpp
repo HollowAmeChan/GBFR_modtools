@@ -48,19 +48,30 @@ int main() {
         skeleton.bones={
             {"_000",0xffff,{0,0,0},{0,0,0,1},{1,1,1},{0,0,0}},
             {"_005",0,{0,1,0},{0,0,0,1},{1,1,1},{0,1,0}},
-            {"_000",0xffff,{2,0,0},{0,0,0,1},{1,1,1},{2,0,0}},
-            {"_005",2,{0,1,0},{0,0,0,1},{1,1,1},{2,1,0}}
+            {"_006",1,{0,1,0},{0,0,0,1},{1,1,1},{0,2,0}},
+            {"_003",0xffff,{2,0,0},{0,0,0,1},{1,1,1},{2,0,0}},
+            {"_004",3,{0,.5f,0},{0,0,0,1},{1,1,1},{2,.5f,0}},
+            {"_005",4,{0,.5f,0},{0,0,0,1},{1,1,1},{2,1,0}},
+            {"_006",5,{0,1,0},{0,0,0,1},{1,1,1},{2,2,0}}
         };
-        gbfr::MeshAsset mesh;mesh.vertices.resize(3);mesh.indices={0,1,2};
-        mesh.vertices[0].position={-.5f,0,0};mesh.vertices[1].position={.5f,0,0};mesh.vertices[2].position={0,1,0};
-        mesh.vertices[0].joints[0]=0;mesh.vertices[1].joints[0]=2;mesh.vertices[2].joints[0]=2;
-        for(auto& vertex:mesh.vertices)vertex.weights[0]=1.0f;
+        gbfr::MeshAsset mesh;mesh.vertices.resize(6);mesh.indices={0,1,2,3,5,4};
+        mesh.vertices[0].position={-.8f,0,0};mesh.vertices[1].position={-.1f,0,0};mesh.vertices[2].position={-.45f,1,0};
+        mesh.vertices[3].position={.1f,0,0};mesh.vertices[4].position={.8f,0,0};mesh.vertices[5].position={.45f,1,0};
+        for(auto& vertex:mesh.vertices){vertex.joints[0]=0;vertex.weights[0]=1.0f;}
         if(!preview.load(mesh,skeleton))return 96;
-        gbfr::AnimationTrack root_x;root_x.bone_id=0;root_x.property=0;root_x.keys.push_back({0,3.0f,0,0});
-        gbfr::AnimationClip clip;clip.frame_count=1;clip.tracks.push_back(root_x);
-        if(!preview.apply_animation(&clip,0)||std::abs(preview.bone_positions()[0].x-3.0f)>1e-5f||std::abs(preview.bone_positions()[2].x-3.0f)>1e-5f)return 97;
-        if(!preview.set_anchor_links({{1,3}})||!preview.apply_animation(&clip,0))return 99;
-        const auto& anchors=preview.bone_positions();if(std::abs(anchors[1].x-anchors[3].x)+std::abs(anchors[1].y-anchors[3].y)+std::abs(anchors[1].z-anchors[3].z)>1e-5f)return 100;
+        gbfr::AnimationTrack root_rotation;root_rotation.bone_id=0;root_rotation.property=5;root_rotation.keys.push_back({0,.5f,0,0});
+        gbfr::AnimationTrack neck_rotation;neck_rotation.bone_id=5;neck_rotation.property=5;neck_rotation.keys.push_back({0,.2f,0,0});
+        gbfr::AnimationTrack head_rotation;head_rotation.bone_id=6;head_rotation.property=5;head_rotation.keys.push_back({0,DirectX::XM_PIDIV2,0,0});
+        gbfr::AnimationClip clip;clip.frame_count=1;clip.tracks={root_rotation,neck_rotation,head_rotation};
+        if(!preview.apply_animation(&clip,0))return 97;
+        if(!preview.set_anchor_links({{1,5}})||!preview.apply_animation(&clip,0))return 99;
+        const auto& anchors=preview.bone_positions();if(std::abs(anchors[1].x-anchors[5].x)+std::abs(anchors[1].y-anchors[5].y)+std::abs(anchors[1].z-anchors[5].z)>1e-5f)return 100;
+        gbfr::Vec3 body_anchor_x{},head_anchor_x{},body_origin{},body_x{},head_origin{},head_x{};
+        if(!preview.transform_bone_point(1,{1,0,0},body_anchor_x)||!preview.transform_bone_point(5,{1,0,0},head_anchor_x)||
+           std::abs(body_anchor_x.x-head_anchor_x.x)+std::abs(body_anchor_x.y-head_anchor_x.y)+std::abs(body_anchor_x.z-head_anchor_x.z)>1e-4f)return 102;
+        if(!preview.transform_bone_point(2,{0,0,0},body_origin)||!preview.transform_bone_point(2,{1,0,0},body_x)||
+           !preview.transform_bone_point(6,{0,0,0},head_origin)||!preview.transform_bone_point(6,{1,0,0},head_x)||
+           std::abs((body_x.x-body_origin.x)-(head_x.x-head_origin.x))+std::abs((body_x.y-body_origin.y)-(head_x.y-head_origin.y))+std::abs((body_x.z-body_origin.z)-(head_x.z-head_origin.z))>1e-4f)return 104;
         gbfr::OrbitCamera camera;camera.pitch=0;camera.target={0,.5f,0};preview.resize(128,128);
         gbfr::Vec2 projected_left{},projected_right{};
         if(!preview.project({-.25f,.5f,0},camera,projected_left)||!preview.project({.25f,.5f,0},camera,projected_right)||projected_left.x>=projected_right.x)return 98;
@@ -68,6 +79,11 @@ int main() {
         preview.render(camera,false,gbfr::PreviewShadingMode::unlit,false,false,true,true,false);const auto without_ground=preview.render_target_hash();
         preview.render(camera,false,gbfr::PreviewShadingMode::unlit,false,false,true,true,true);const auto with_ground=preview.render_target_hash();
         if(!without_ground||!with_ground||without_ground==with_ground)return 101;
+        if(!preview.apply_animation(nullptr,0))return 105;
+        preview.frame(camera);
+        preview.render(camera,true,gbfr::PreviewShadingMode::unlit,false,false,true,true,false,false);const auto double_sided=preview.render_target_hash();
+        preview.render(camera,true,gbfr::PreviewShadingMode::unlit,false,false,true,true,false,true);const auto culled=preview.render_target_hash();
+        if(!double_sided||!culled||double_sided==culled)return 103;
     }
 
     const fs::path test_temp = fs::current_path() / L".gbfr_test_temp";

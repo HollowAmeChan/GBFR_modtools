@@ -176,10 +176,15 @@ bool PreviewRenderer::apply_animation(const AnimationClip* clip,float frame) {
     }
     for(const auto& [target,follower]:anchor_links_){
         if(target>=bone_count||follower>=bone_count)continue;
-        XMFLOAT4X4 target_world{},follower_world{};XMStoreFloat4x4(&target_world,posed_world[target]);XMStoreFloat4x4(&follower_world,posed_world[follower]);
-        const auto translation=XMMatrixTranslation(target_world._41-follower_world._41,target_world._42-follower_world._42,target_world._43-follower_world._43);
+        XMVECTOR target_scale{},target_rotation{},target_translation{};
+        XMVECTOR follower_scale{},follower_rotation{},follower_translation{};
+        if(!XMMatrixDecompose(&target_scale,&target_rotation,&target_translation,posed_world[target])||
+           !XMMatrixDecompose(&follower_scale,&follower_rotation,&follower_translation,posed_world[follower]))continue;
+        const auto target_anchor=XMMatrixRotationQuaternion(XMQuaternionNormalize(target_rotation))*XMMatrixTranslationFromVector(target_translation);
+        const auto follower_anchor=XMMatrixRotationQuaternion(XMQuaternionNormalize(follower_rotation))*XMMatrixTranslationFromVector(follower_translation);
+        const auto anchor_correction=XMMatrixInverse(nullptr,follower_anchor)*target_anchor;
         const auto follower_component=components[follower];
-        for(std::size_t i=0;i<bone_count;++i)if(components[i]==follower_component)posed_world[i]=posed_world[i]*translation;
+        for(std::size_t i=0;i<bone_count;++i)if(components[i]==follower_component)posed_world[i]=posed_world[i]*anchor_correction;
     }
     BoneConstants gpu_bones{};
     const auto identity=XMMatrixIdentity();

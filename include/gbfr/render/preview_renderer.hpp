@@ -54,7 +54,8 @@ public:
     void resize(unsigned width, unsigned height);
     void render(const OrbitCamera& camera, bool show_mesh, PreviewShadingMode shading,
                 bool show_skeleton, bool show_collisions, bool show_alpha_overlays = true,
-                bool show_cloth_links = true, bool show_ground = true);
+                bool show_cloth_links = true, bool show_ground = true,
+                bool cull_backfaces = false);
     void frame(OrbitCamera& camera) const;
     bool project(Vec3 world, const OrbitCamera& camera, Vec2& screen) const;
     ID3D11ShaderResourceView* image() const noexcept { return color_srv_.Get(); }
@@ -110,7 +111,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D11InputLayout> input_layout_;
     Microsoft::WRL::ComPtr<ID3D11InputLayout> debug_input_layout_;
     Microsoft::WRL::ComPtr<ID3D11SamplerState> sampler_;
-    Microsoft::WRL::ComPtr<ID3D11RasterizerState> solid_, wire_, alpha_overlay_raster_;
+    Microsoft::WRL::ComPtr<ID3D11RasterizerState> solid_, solid_culled_, wire_, alpha_overlay_raster_;
     Microsoft::WRL::ComPtr<ID3D11DepthStencilState> overlay_depth_, alpha_depth_;
     Microsoft::WRL::ComPtr<ID3D11BlendState> alpha_blend_;
     std::vector<DrawRange> draw_ranges_;
