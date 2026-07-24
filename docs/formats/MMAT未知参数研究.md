@@ -25,6 +25,7 @@ Shader 目录实际存放裸 DXBC：1,162 个 `.pso`、265 个 `.vso`、170 个 
 2. `analyze_mmat.py` 用正式 2.0.0 FlatBuffers schema 直接读取全部 MMAT，并用 GBFRDataTools 的定制 XXHash32 关联名称。
 3. `summarize_mmat_patterns.py` 生成取值、类别、shader family、稀有样本和参数对列联表。
 4. `find_hash_constants.py` 在 PE section 中定位哈希常量，再用 `dumpbin /DISASM /RANGE` 检查实际取参和分支行为。
+5. `compare_mmat_records.py` 对两份分析结果按材质哈希比较渲染状态、参数实际值、贴图、被引用的常量缓冲和 Granite 配置，忽略 FlatBuffers 的非语义字节布局差异。
 
 生成的 `research_output/mmat` 约有上百 MB，已被 Git 忽略；仓库提交的是脚本、精炼结论和以后可由编辑器读取的字段目录。
 
@@ -135,6 +136,18 @@ MMAT 的 `constant_buffer_indices` 首项可与对应 shader family 的 `ParamBu
 
 目录由 `generate_mmat_cbuffer_catalog.py` 从 25 个明确指定的 DXBC 基准文件生成，生成时校验每个 `ParamBuffer` 的预期字节数、字段对齐和字段类型。它覆盖完整样本中的 27,399/27,980 个 material entry（约 97.9%）。不匹配的 buffer 继续只显示 raw/hex/float，不按相似长度强行套布局；silhouette、foliage、plant billboard 和未知类型等没有可直接对应的 pixel `ParamBuffer`。
 
+## 奶刀工作区的封回语义验证
+
+对奶刀工作区当前已有的 6 个 `build/*.mmat`（`fp1400 vars/0` 与 `pl1400 vars/0,7,8,9,10`）做了逐材质比较，共匹配 62 个 material：
+
+- shader type/subtype、shadow 和四个布尔渲染状态：62/62 相同。
+- Shader 参数的类型和实际值：62/62 相同。
+- 贴图引用及顺序：62/62 相同。
+- 每个材质实际引用的 constant buffer 哈希和全部 uint word：62/62 相同。
+- 唯一差异是 source 的 62 个 `granite_params` 在 build 中均为空。
+
+继续检查 `unpack/*.mmat.json` 后确认，这些 JSON 本身已经不含 `granite_params`；用当前 schema 和 `flatc` 临时重封全部 6 个 JSON，再与现有 build 比较，62/62 个材质完全无差异。因此 Granite 的移除发生在用户显式执行“清除 Granite 流式引用”时，不是当前 MMAT 编码器暗中丢字段。将 Granite 贴图改成独立 `.texture` 时这可能是有意的资源路径切换，不能单独证明它是发黑根因。
+
 ## 复现命令
 
 先构建 `gbfr_shader_reflect`，然后在仓库根目录执行：
@@ -157,6 +170,11 @@ py -3 scripts\research\generate_mmat_cbuffer_catalog.py `
   --reflection "research_output\mmat\shader_reflection.jsonl" `
   --materials "research_output\mmat\materials.jsonl" `
   --output "src\gbfr_editor\src\mmat_param_layouts.generated.hpp"
+
+py -3 scripts\research\compare_mmat_records.py `
+  --baseline "research_output\milk_knife_source\materials.jsonl" `
+  --candidate "research_output\milk_knife_build\materials.jsonl" `
+  --output "research_output\milk_knife_build_compare.json"
 ```
 
 模式汇总脚本的 `--hash` 可以重复传入。它会输出 `parameter_patterns.json` 和所有选中参数对的 `parameter_pair_values.csv`。

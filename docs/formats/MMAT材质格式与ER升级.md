@@ -11,7 +11,7 @@
 - `ConstantBuffer.buffer:[uint]` 被当成 `[float]`，原始 32 位位模式可能在 JSON 序列化时丢失。
 - `granite_params` 只显示为旧名 `A4`，其他渲染状态只显示为无意义编号。
 
-因此，旧 JSON 不是新版 JSON 的等价别名，不能作为通用编辑格式继续使用。奶刀工作区的 `source` 与当前游戏原件 SHA-256 一致；进一步逐字段比较 `pl1400/fp1400 vars/0` 后，旧 build 中的 constant buffer word 与 `constant_buffer_indices` 在这两个样本上仍和 source 一致，文件缩小主要是因为用户主动移除了 Granite 配置。不能仅凭文件变小就把当前发黑归因于封回损坏。旧 schema 的确定问题是无法正确表达带浮点池的材质、字段意义不可见，而且任何新字段编辑都不可靠。
+因此，旧 JSON 不是新版 JSON 的等价别名，不能作为通用编辑格式继续使用。奶刀工作区的 `source` 与当前游戏原件 SHA-256 一致；进一步逐字段比较现有 6 个 build 中的 62 个材质后，渲染状态、参数实际值、贴图引用和被引用的 constant buffer 均与 source 相同，唯一差异是用户主动移除了全部 Granite 配置。用当前 schema 重封相同 unpack JSON 后又与现有 build 62/62 完全一致，证明当前编码器没有再丢字段。不能仅凭文件变小或 Granite 缺失就把发黑归因于封回损坏。旧 schema 的确定问题是无法正确表达带浮点池的材质、字段意义不可见，而且任何新字段编辑都不可靠。
 
 ## 必须执行的迁移
 
