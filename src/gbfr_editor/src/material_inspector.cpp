@@ -108,7 +108,7 @@ const char* parameter_meaning(const gbfr::MaterialShaderParameter& parameter) {
     case 0xBAEF6920u: return "右眼材质标记";
     case 0xE56343C0u: return "左眼材质标记";
     case 0x037BE4E5u: return "UberEnv / 植被禁用背面剔除（双面光栅路径）";
-    case 0x0A05A26Fu: return "Foliage 专用参数";
+    case 0x0A05A26Fu: return "Foliage 兼容 / 作者字段候选（当前 EXE 未发现消费者）";
     case 0x2AEDA6ADu: return "Elemental 第三管线模板开关（现有样本均关闭）";
     case 0x2B5C866Cu: return "Elemental 稀有附加描述符开关";
     case 0x4298F7E4u: return "Sky / Cloud 管线 permutation 位 0x2";
@@ -154,7 +154,7 @@ const char* parameter_confidence(const gbfr::MaterialShaderParameter& parameter)
     case 0x037BE4E5u:
         return "B/C：光栅状态 + 样本";
     case 0x0A05A26Fu:
-        return "D：少量样本";
+        return "D：少量样本 + 当前 EXE 无消费者";
     default:
         return "未知";
     }

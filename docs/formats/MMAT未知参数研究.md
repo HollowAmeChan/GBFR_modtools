@@ -165,7 +165,7 @@ EXE 对 `0x53F49792` 有 16 个直接读取点。Eye、Face、Hair、Metal、Ski
 | `0x8B8038FC` | 7,287 个角色 shader family material | 21 个真值选择 24 字节管线状态表记录 13/29；不更换 VS/PS Shader 哈希，视觉状态名未知 |
 | `0x9C83F56F`, `0xA6EB1B34` | 4,133 个 Metal `5/7`、`5/5` material | 前者选择备用运行时自发光乘数；后者为阴影类型 3 追加方向驱动的 Alpha 裁切阈值，行为不同 |
 | `0x037BE4E5` | UberEnv / 植被 | 禁用背面剔除，选择双面光栅路径；官方字段名未知 |
-| `0x0A05A26F` | 18 个 foliage `9/1` material | 17 真 1 假；EXE 无直接哈希常量引用，行为仍未知 |
+| `0x0A05A26F` | 18 个 foliage `9/1` material | 17 真 1 假；完整 EXE 与 type 9 三阶段构建函数均无直接消费者，保留为 D 级兼容/作者字段候选 |
 | `0x4298F7E4` | 25 个 sky/cloud `20/1` material | Sky/Cloud 管线 permutation 位 `0x2`，官方视觉名称未知 |
 
 ### 能量护盾控制的遗迹材质组索引
@@ -194,7 +194,15 @@ EXE `0x1446FA6FE..0x1446FA7B7` 在构造 UberEnv 管线 key 时分别读取三�
 
 `0xEB6F1AE7` 只出现在 18 个 foliage `9/1` 控制材质，3 个为真。EXE `0x1446F143A..0x1446F1471` 将它转换成 `0.0/1.0`，写入一项 48 字节实例记录的第一个 float，随后从对象复制另外 32 字节变换数据。Shader RDEF 中 `vs_foliage.vso` 的 `g_InstanceWorldTbl` 元素正是 48 字节 `float4x3`，尺寸和绑定用途吻合。因此当前 B 级解释是“控制 foliage 实例世界变换首分量/首轴是否启用”，不是风强度或颜色参数；它造成的具体几何行为仍需运行时 A/B 捕获。
 
-与它共现的 `0x0A05A26F` 有 17 真 1 假，但 EXE 中没有直接出现该哈希常量，可能由表驱动代码读取，也可能是当前版本未消费的兼容字段。没有数据流证据前继续保留 D 级。
+与它共现的 `0x0A05A26F` 有 17 真 1 假。三张 30 项 shader-family dispatch 表位于 `0x146103100`、`0x1461031F0`、`0x1461032E0`；调用器从材质对象的类型字节取索引，再执行 `call/jmp [table + type*8]`。type 9 的三阶段函数范围分别是 `0x1446F0A00..0x1446F1082`、`0x1446F1A20..0x1446F1ACF`、`0x1446F1090..0x1446F1619`。自动审计确认只有 instance 阶段直接读取 `0xEB6F1AE7`，`0x0A05A26F` 在完整 EXE 哈希常量扫描中为零出现，在三阶段函数中也没有直接消费者。
+
+这否定了“它只是另一处显式 Foliage 管线开关”的弱推测，但仍不能排除动态哈希、外部工具作者字段或旧版本兼容数据。18 个样本均为空贴图、空 ParamBuffer 的 `9/1` 控制材质，唯一假值为 `bg3000`；这些分布不足以命名视觉用途。因此编辑器显示为“兼容 / 作者字段候选（当前 EXE 未发现消费者）”，证据仍为 D 级，不允许猜测性编辑。
+
+### Shader family 三阶段 dispatch 目录
+
+当前 EXE 的 30 个 MMAT shader type 通过三张并行函数表分派。`0x1444B7820` 所在调用器从材质记录中解出类型字节，并对 `0x146103100` 执行 `call [table + type*8]`；相邻短跳板对 `0x1461031F0`、`0x1461032E0` 执行同样的索引跳转。三阶段在研究目录中暂记为 `pipeline/state/instance`，名称只描述当前数据流位置，不主张它们是官方术语。
+
+`analyze_shader_family_dispatch.py` 使用 `.pdata` 恢复每个入口的完整函数边界，再把 `exe_hash_constants.csv` 的直接常量出现点归属到具体 shader type 和阶段。当前四项回归不变量全部通过：Face `0x11664BFC -> type 3`、Metal `0x9C83F56F -> type 5`、Foliage `0xEB6F1AE7 -> type 9`、Sky `0x4298F7E4 -> type 20`。该目录只证明“直接哈希常量位于哪个分派函数”，被下级 helper 间接消费的参数仍需继续沿调用图追踪。
 
 ### Sky / Cloud 管线 permutation 位
 
@@ -217,6 +225,8 @@ EXE `0x1446EA5F3` 读取该参数。为真时，代码取得对象向量与 0 �
 `0x9C83F56F` 在同一构建函数的 `0x1446EA83A` 被读取。真值且类型正确时，CPU 将 Metal 运行时结构 `+0x0C` 的 32 位 float 写入着色子记录的 `+2`；否则写入默认的 `+0x08`。子记录 `+3` 始终来自结构 `+0x10`。当方向 Alpha 路径存在时，CPU 会在该子记录前插入五项数据，因此这里的 `+2/+3` 是相对着色子记录的槽位，不能写成整个实例缓冲的固定绝对索引。Metal DXBC 只在 `g_EnableEmissive` 为真时读取这两项并计算 `[2] * [3]`，再与自发光贴图、`g_EmissiveIntensity` 和角色材质全局强度共同生成自发光贡献。因此旧结论“备用管线 / 资源描述符”已被否定，当前 B 级行为名为“选择备用运行时自发光第一乘数”。
 
 全量 4,133 个 Metal 中只有 22 个真值：角色范围内 18 个全部来自 `pl1100/pl1101/pl1102/pl1700` 的 `vars/10`，贴图均为 `_c10_` 特殊盔甲/布料变体；另 4 个来自 `em0010/em7530/em7531/em7600`。解码后的场景配置还公开了 `emissiveIntensity_`、`itemEmissiveIntensity_` 与拼写如此的 `useNewEmissiveParamters_`，说明运行时确有多套自发光强度，但目前没有结构偏移或原始名称字符串把 `0x9C83F56F` 唯一绑定到其中某一项。`Item Emissive` 只能作为后续 C 级候选，不能写成正式字段名。
+
+RTTI 与虚表分析进一步恢复了这份“Metal 运行时结构”的所有者。三阶段材质分派入口 `0x1444B7820` 所在虚表的 MSVC RTTI 名为 `asset::impl::MaterialSet_Mmat`；Metal 构建器收到的模型上下文会调用虚表槽 `+0x198`（零基槽 51）。`ModelImpl` 的对应实现位于 `0x1439DDD50`：它把 8 位材质索引乘以 `0x58`，加到 `this+0x58` 保存的数据指针，并以 `this+0x38` 的记录数做边界检查。因此 `+0x08/+0x0C/+0x10/+0x28` 不是 MMAT FlatBuffer 内偏移，而是 `ModelImpl` 每材质 `0x58` 字节运行时记录内部字段。模型资源加载作业 `0x140237420..0x1402399B4` 会构造并挂接该 `ModelImpl`；精确的字段生产子调用仍待继续追踪，当前不能把 `+0x0C` 直接命名为 `itemEmissiveIntensity_`。
 
 ## Constant Buffer 的 RDEF 解码
 
@@ -287,6 +297,34 @@ $gameExe = "D:\Steam\steamapps\common\Granblue Fantasy Relink\granblue_fantasy_r
 & $gbfrPython scripts\research\find_pe_relative_xrefs.py `
   $gameExe 0x1444B7540 0x146138780 --rip-relative `
   --output "research_output\mmat\pe_xrefs.csv"
+
+& $gbfrPython scripts\research\disassemble_pe_range.py `
+  $gameExe 0x1446F143C --function `
+  --output "research_output\mmat\foliage_instance_builder.asm"
+
+& $gbfrPython scripts\research\enumerate_msvc_vtables.py `
+  $gameExe --name '^\.\?AVModelImpl@@$' `
+  --output "research_output\mmat\model_impl_vtable.csv" `
+  --slots-output "research_output\mmat\model_impl_vtable_slots.csv"
+
+& $gbfrPython scripts\research\disassemble_pe_range.py `
+  $gameExe 0x1439DDD50 --size 0x20 `
+  --output "research_output\mmat\model_impl_material_record_getter.asm"
+
+& $gbfrPython scripts\research\resolve_pe_functions.py `
+  $gameExe 0x140237F46 0x1446EA570 `
+  --output "research_output\mmat\runtime_function_ranges.csv"
+
+& $gbfrPython scripts\research\analyze_shader_family_dispatch.py `
+  $gameExe "research_output\mmat\exe_hash_constants.csv" `
+  --table pipeline=0x146103100 `
+  --table state=0x1461031F0 `
+  --table instance=0x1461032E0 `
+  --count 30 `
+  --focus-hash 0x0A05A26F --focus-hash 0xEB6F1AE7 `
+  --expect 0x11664BFC:3 --expect 0x9C83F56F:5 `
+  --expect 0xEB6F1AE7:9 --expect 0x4298F7E4:20 `
+  --output "research_output\mmat\shader_family_dispatch.json"
 
 & $gbfrPython scripts\research\analyze_mmat.py `
   --data-root "D:\Steam\steamapps\common\Granblue Fantasy Relink\data" `
