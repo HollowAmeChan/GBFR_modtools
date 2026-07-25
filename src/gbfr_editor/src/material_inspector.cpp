@@ -312,11 +312,11 @@ void texture_context_menu(const char* id,const std::filesystem::path& dds) {
 }
 
 namespace gbfr::editor {
-void MaterialInspector::set_asset(MaterialAsset asset, std::filesystem::path path) {
+void MaterialInspector::set_asset(MaterialAsset asset, std::filesystem::path path, std::size_t selected_material) {
     asset_ = std::move(asset);
     path_ = std::move(path);
     unpack_root_=find_unpack_root(path_);
-    selected_material_ = 0;
+    selected_material_ = asset_.entries.empty() ? 0 : static_cast<int>(std::min(selected_material, asset_.entries.size() - 1));
 }
 
 void MaterialInspector::clear() {

@@ -11,7 +11,7 @@ class TextureGallery;
 
 class MaterialInspector {
 public:
-    void set_asset(MaterialAsset asset, std::filesystem::path path);
+    void set_asset(MaterialAsset asset, std::filesystem::path path, std::size_t selected_material = 0);
     void clear();
     void draw(PreviewRenderer& renderer, TextureGallery& texture_gallery);
 

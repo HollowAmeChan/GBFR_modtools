@@ -72,6 +72,19 @@ struct ModelPreviewDiagnostic {
     AnchorDiagnostic head;
     bool head_linked{};
 };
+struct ModelMaterialBinding {
+    std::filesystem::path minfo;
+    std::filesystem::path mmat;
+    std::size_t material_id{};
+    bool has_minfo_slot{};
+    std::uint32_t minfo_name_hash{};
+    bool has_mmat_slot{};
+    std::uint32_t mmat_name_hash{};
+    std::uint8_t shader_type{}, shader_sub_type{};
+    std::string primary_texture;
+    std::vector<std::string> submeshes;
+    std::size_t chunk_count{};
+};
 AssetFunction g_asset_function = AssetFunction::all;
 std::array<char,256> g_asset_search{};
 PreviewMode g_preview_mode = PreviewMode::none;
@@ -86,6 +99,8 @@ std::filesystem::path g_loaded_sop;
 std::vector<std::filesystem::path> g_loaded_materials;
 std::vector<std::filesystem::path> g_loaded_sops;
 std::vector<ModelPreviewDiagnostic> g_model_preview_diagnostics;
+std::vector<ModelMaterialBinding> g_model_material_bindings;
+int g_selected_model_material = -1;
 gbfr::OrbitCamera g_camera;
 gbfr::SkeletonAsset g_skeleton;
 bool g_show_mesh = true;
@@ -262,7 +277,7 @@ bool load_workspace(const std::filesystem::path& path) {
         g_asset_selection.Clear();
         g_texture_gallery.clear();
         g_asset_function=AssetFunction::all;g_asset_search.fill('\0');
-        g_preview_mode=PreviewMode::none;g_preview_error.clear();g_loaded_model.reset();g_loaded_models.clear();g_model_preview_diagnostics.clear();g_loaded_texture.clear();g_loaded_texture_is_ui=false;g_loaded_material.clear();g_loaded_sop.clear();g_loaded_materials.clear();g_loaded_sops.clear();
+        g_preview_mode=PreviewMode::none;g_preview_error.clear();g_loaded_model.reset();g_loaded_models.clear();g_model_preview_diagnostics.clear();g_model_material_bindings.clear();g_selected_model_material=-1;g_loaded_texture.clear();g_loaded_texture_is_ui=false;g_loaded_material.clear();g_loaded_sop.clear();g_loaded_materials.clear();g_loaded_sops.clear();
         g_skeleton.bones.clear(); g_clh_files.clear(); g_clp_files.clear();g_sop_inspector.clear();g_material_inspector.clear();
         if(g_preview) g_preview->clear();
         const auto settings_directory=g_workspace->root()/L".gbfr";
@@ -616,6 +631,15 @@ std::vector<ModelPreviewKey> selected_model_preview_keys(std::size_t preferred_i
     return keys;
 }
 
+std::string primary_material_texture(const gbfr::MaterialEntry& material) {
+    if(!material.albedo_name.empty())return material.albedo_name;
+    if(!material.eye_conjunctiva_name.empty())return material.eye_conjunctiva_name;
+    if(!material.eye_iris_name.empty())return material.eye_iris_name;
+    if(!material.eye_highlight_name.empty())return material.eye_highlight_name;
+    const auto texture=std::find_if(material.texture_maps.begin(),material.texture_maps.end(),[](const auto& map){return !map.texture_name.empty();});
+    return texture==material.texture_maps.end()?std::string{}:texture->texture_name;
+}
+
 bool load_model_previews(const std::vector<ModelPreviewKey>& keys,bool force) {
     if(!g_workspace||!g_preview||keys.empty())return false;
     try {
@@ -632,6 +656,7 @@ bool load_model_previews(const std::vector<ModelPreviewKey>& keys,bool force) {
             std::size_t resolved_materials{};
         };
         std::vector<LoadedPart> parts;parts.reserve(keys.size());
+        std::vector<ModelMaterialBinding> material_bindings;
         for(const auto& key:keys){
             LoadedPart part;part.key=key;part.info=gbfr::load_minfo(key.minfo);part.skeleton=gbfr::load_skeleton(key.skeleton);part.mesh=gbfr::load_mmesh(key.mesh,part.info,key.lod_index,key.shadow_lod);
             part.sop_path=g_workspace->root()/L"source/data"/key.minfo.lexically_relative(g_workspace->root()/L"unpack/data");part.sop_path.replace_extension(L".sop");
@@ -645,6 +670,20 @@ bool load_model_previews(const std::vector<ModelPreviewKey>& keys,bool force) {
                 if(!preview.albedo.empty()||(!preview.eye_conjunctiva.empty()&&!preview.eye_iris.empty()&&!preview.eye_highlight.empty()))++part.resolved_materials;
             }
             for(const auto& chunk:part.mesh.chunks)if(chunk.material>=part.materials.entries.size())throw std::runtime_error(utf8(key.minfo.stem().wstring())+" 的 minfo MaterialID 超出 0.mmat 条目范围");
+            std::size_t material_slot_count=std::max(part.info.materials.size(),part.materials.entries.size());
+            for(const auto& chunk:part.mesh.chunks)material_slot_count=std::max(material_slot_count,static_cast<std::size_t>(chunk.material)+1);
+            for(std::size_t material_id=0;material_id<material_slot_count;++material_id){
+                ModelMaterialBinding binding;binding.minfo=key.minfo;binding.mmat=part.material_json;binding.material_id=material_id;
+                binding.has_minfo_slot=material_id<part.info.materials.size();if(binding.has_minfo_slot)binding.minfo_name_hash=part.info.materials[material_id];
+                binding.has_mmat_slot=material_id<part.materials.entries.size();
+                if(binding.has_mmat_slot){const auto& material=part.materials.entries[material_id];binding.mmat_name_hash=material.material_name_hash;binding.shader_type=material.shader_type;binding.shader_sub_type=material.shader_sub_type;binding.primary_texture=primary_material_texture(material);}
+                for(const auto& chunk:part.mesh.chunks)if(chunk.material==material_id){
+                    ++binding.chunk_count;
+                    const auto submesh=chunk.submesh<part.info.submesh_names.size()&&!part.info.submesh_names[chunk.submesh].empty()?part.info.submesh_names[chunk.submesh]:"#"+std::to_string(chunk.submesh);
+                    if(std::find(binding.submeshes.begin(),binding.submeshes.end(),submesh)==binding.submeshes.end())binding.submeshes.push_back(submesh);
+                }
+                material_bindings.push_back(std::move(binding));
+            }
             parts.push_back(std::move(part));
         }
 
@@ -676,7 +715,7 @@ bool load_model_previews(const std::vector<ModelPreviewKey>& keys,bool force) {
 
         const auto& primary=parts.front();g_sop_inspector.set_asset(primary.sop,primary.sop_path);g_loaded_material=primary.material_json;g_loaded_sop=primary.sop_path;
         g_loaded_materials.clear();g_loaded_sops.clear();for(const auto& part:parts){g_loaded_materials.push_back(part.material_json);if(!part.sop_path.empty())g_loaded_sops.push_back(part.sop_path);}
-        g_skeleton=std::move(merged_skeleton);g_loaded_model=keys.front();g_loaded_models=keys;g_model_preview_diagnostics=std::move(diagnostics);g_loaded_texture.clear();g_preview_mode=PreviewMode::model;g_preview_error.clear();g_loaded_model_stats=stats;
+        g_skeleton=std::move(merged_skeleton);g_loaded_model=keys.front();g_loaded_models=keys;g_model_preview_diagnostics=std::move(diagnostics);g_model_material_bindings=std::move(material_bindings);g_selected_model_material=g_model_material_bindings.empty()?-1:0;g_loaded_texture.clear();g_preview_mode=PreviewMode::model;g_preview_error.clear();g_loaded_model_stats=stats;
         discover_motions(keys.front());g_preview->frame(g_camera);
         g_clh_files.clear();g_clp_files.clear();g_selected_collision=-1;g_selected_bone=-1;g_selected_bone_index=-1;g_selected_clh=0;g_selected_clp=0;g_all_clp_groups=false;
         const auto model_id=keys.front().minfo.stem().wstring(),cloth_prefix=model_id+L"_";
@@ -687,7 +726,7 @@ bool load_model_previews(const std::vector<ModelPreviewKey>& keys,bool force) {
         std::size_t resolved_materials{},material_count{},sop_operations{};for(const auto& part:parts){resolved_materials+=part.resolved_materials;material_count+=part.materials.entries.size();sop_operations+=part.sop.operations.size();}
         gbfr::Log::write(gbfr::LogLevel::info,"多模型预览已加载："+std::to_string(parts.size())+" 个模型，"+std::to_string(stats.vertex_count)+" 顶点，"+std::to_string(stats.triangle_count)+" 三角形，"+std::to_string(g_skeleton.bones.size())+" 骨骼，SOP "+std::to_string(sop_operations)+" 操作，0.mmat 可见材质 "+std::to_string(resolved_materials)+"/"+std::to_string(material_count));
         return true;
-    }catch(const std::exception& error){g_preview_mode=PreviewMode::none;g_loaded_model.reset();g_loaded_models.clear();g_model_preview_diagnostics.clear();if(g_preview)g_preview->clear();g_preview_error=std::string("模型预览失败：")+error.what();gbfr::Log::write(gbfr::LogLevel::error,g_preview_error);return false;}
+    }catch(const std::exception& error){g_preview_mode=PreviewMode::none;g_loaded_model.reset();g_loaded_models.clear();g_model_preview_diagnostics.clear();g_model_material_bindings.clear();g_selected_model_material=-1;if(g_preview)g_preview->clear();g_preview_error=std::string("模型预览失败：")+error.what();gbfr::Log::write(gbfr::LogLevel::error,g_preview_error);return false;}
 }
 
 bool load_model_preview(std::size_t index,bool force) {
@@ -1051,7 +1090,7 @@ void draw_preview_controls() {
 void return_to_start() {
     if(!g_imgui_ini.empty()) ImGui::SaveIniSettingsToDisk(g_imgui_ini.c_str());
     g_workspace.reset(); g_selected_asset.reset(); g_asset_selection.Clear(); g_skeleton.bones.clear(); g_clh_files.clear(); g_clp_files.clear();g_sop_inspector.clear();g_material_inspector.clear();
-    g_preview_mode=PreviewMode::none;g_preview_error.clear();g_loaded_model.reset();g_loaded_models.clear();g_model_preview_diagnostics.clear();g_loaded_texture.clear();g_loaded_texture_is_ui=false;g_loaded_material.clear();g_loaded_sop.clear();g_loaded_materials.clear();g_loaded_sops.clear();clear_motion_state();
+    g_preview_mode=PreviewMode::none;g_preview_error.clear();g_loaded_model.reset();g_loaded_models.clear();g_model_preview_diagnostics.clear();g_model_material_bindings.clear();g_selected_model_material=-1;g_loaded_texture.clear();g_loaded_texture_is_ui=false;g_loaded_material.clear();g_loaded_sop.clear();g_loaded_materials.clear();g_loaded_sops.clear();clear_motion_state();
     g_imgui_ini.clear(); ImGui::GetIO().IniFilename=nullptr; g_start_layout_built=false;
     g_texture_gallery.clear();
     if(g_preview) g_preview->clear();
@@ -1106,6 +1145,73 @@ void draw_start_screen() {
     }
     if(!g_start_status.empty()) { ImGui::Spacing(); ImGui::TextWrapped("%s",g_start_status.c_str()); }
     ImGui::End();
+}
+
+std::string joined_submeshes(const ModelMaterialBinding& binding) {
+    std::string result;
+    for(const auto& name:binding.submeshes){if(!result.empty())result+=", ";result+=name;}
+    return result;
+}
+
+void draw_model_material_statistics() {
+    if(g_model_material_bindings.empty())return;
+    std::size_t model_count{},referenced_count{};
+    std::filesystem::path previous;
+    for(const auto& binding:g_model_material_bindings){if(binding.minfo!=previous){++model_count;previous=binding.minfo;}if(binding.chunk_count)++referenced_count;}
+    const auto header="材质统计 ("+std::to_string(model_count)+" 模型 / "+std::to_string(g_model_material_bindings.size())+" 槽)###model_material_statistics";
+    if(!ImGui::CollapsingHeader(header.c_str(),ImGuiTreeNodeFlags_DefaultOpen))return;
+    ImGui::TextDisabled("当前 LOD 引用 %zu 槽；MaterialID 直接对应当前预览的 0.mmat 条目。",referenced_count);
+    const auto flags=ImGuiTableFlags_RowBg|ImGuiTableFlags_BordersInnerV|ImGuiTableFlags_Resizable|ImGuiTableFlags_ScrollX|ImGuiTableFlags_ScrollY|ImGuiTableFlags_SizingFixedFit;
+    if(ImGui::BeginTable("##model_material_statistics",7,flags,ImVec2(0,220.0f))){
+        ImGui::TableSetupScrollFreeze(0,1);
+        ImGui::TableSetupColumn("模型",ImGuiTableColumnFlags_WidthFixed,86.0f);
+        ImGui::TableSetupColumn("子网格 / Chunk",ImGuiTableColumnFlags_WidthFixed,150.0f);
+        ImGui::TableSetupColumn("MaterialID",ImGuiTableColumnFlags_WidthFixed,82.0f);
+        ImGui::TableSetupColumn("MMAT 文件",ImGuiTableColumnFlags_WidthFixed,230.0f);
+        ImGui::TableSetupColumn("MMAT 槽",ImGuiTableColumnFlags_WidthFixed,70.0f);
+        ImGui::TableSetupColumn("材质 / 主贴图",ImGuiTableColumnFlags_WidthFixed,230.0f);
+        ImGui::TableSetupColumn("Shader",ImGuiTableColumnFlags_WidthFixed,74.0f);
+        ImGui::TableHeadersRow();
+        for(std::size_t index=0;index<g_model_material_bindings.size();++index){
+            const auto& binding=g_model_material_bindings[index];
+            const auto model=utf8(binding.minfo.stem().wstring());
+            const auto row_label=model+"##model_material_"+std::to_string(index);
+            const auto all_submeshes=joined_submeshes(binding);
+            const auto submesh=binding.submeshes.empty()?std::string("未被当前 LOD 使用"):binding.submeshes.front()+(binding.submeshes.size()>1?" +"+std::to_string(binding.submeshes.size()-1):"");
+            auto relative=binding.mmat;
+            if(g_workspace){const auto candidate=binding.mmat.lexically_relative(g_workspace->root()/L"unpack");if(!candidate.empty()&&!candidate.native().starts_with(L".."))relative=candidate;}
+            const auto mmat_path=utf8(relative.wstring());
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            if(ImGui::Selectable(row_label.c_str(),g_selected_model_material==static_cast<int>(index),ImGuiSelectableFlags_SpanAllColumns))g_selected_model_material=static_cast<int>(index);
+            if(ImGui::BeginPopupContextItem()){
+                ImGui::TextUnformatted(utf8(binding.mmat.wstring()).c_str());ImGui::Separator();
+                if(ImGui::MenuItem("定位 MMAT JSON"))reveal_file(binding.mmat);
+                if(ImGui::MenuItem("打开 MMAT 所在目录"))open_directory(binding.mmat.parent_path());
+                ImGui::EndPopup();
+            }
+            ImGui::TableNextColumn();ImGui::TextUnformatted(submesh.c_str());if(ImGui::IsItemHovered()&&!all_submeshes.empty())ImGui::SetTooltip("%s\nChunk 数：%zu",all_submeshes.c_str(),binding.chunk_count);
+            ImGui::TableNextColumn();if(binding.has_minfo_slot)ImGui::Text("%zu",binding.material_id);else ImGui::TextDisabled("-");
+            ImGui::TableNextColumn();ImGui::TextUnformatted(mmat_path.c_str());if(ImGui::IsItemHovered())ImGui::SetTooltip("%s",utf8(binding.mmat.wstring()).c_str());
+            ImGui::TableNextColumn();if(binding.has_mmat_slot)ImGui::Text("%zu",binding.material_id);else ImGui::TextColored(ImVec4(1.0f,.38f,.32f,1.0f),"缺失");
+            ImGui::TableNextColumn();
+            if(binding.has_minfo_slot)ImGui::Text("0x%08X",binding.minfo_name_hash);else ImGui::TextDisabled("MINFO 无槽");
+            if(!binding.primary_texture.empty()){ImGui::TextDisabled("%s",binding.primary_texture.c_str());if(ImGui::IsItemHovered())ImGui::SetTooltip("MMAT material hash: 0x%08X",binding.mmat_name_hash);}
+            ImGui::TableNextColumn();if(binding.has_mmat_slot)ImGui::Text("%u/%u",binding.shader_type,binding.shader_sub_type);else ImGui::TextDisabled("-");
+        }
+        ImGui::EndTable();
+    }
+    if(g_selected_model_material>=0&&g_selected_model_material<static_cast<int>(g_model_material_bindings.size())){
+        const auto& selected=g_model_material_bindings[static_cast<std::size_t>(g_selected_model_material)];
+        ImGui::Text("%s | MaterialID %zu -> 0.mmat[%zu]",utf8(selected.minfo.stem().wstring()).c_str(),selected.material_id,selected.material_id);
+        ImGui::BeginDisabled(!selected.has_mmat_slot);
+        if(ImGui::Button("检查这个 MMAT 槽")){
+            try{g_material_inspector.set_asset(gbfr::load_mmat_json(selected.mmat),selected.mmat,selected.material_id);g_loaded_material=selected.mmat;g_preview_mode=PreviewMode::material;g_preview_error.clear();}
+            catch(const std::exception& error){g_preview_error=std::string("mmat 预览失败：")+error.what();gbfr::Log::write(gbfr::LogLevel::error,g_preview_error);}
+        }
+        ImGui::EndDisabled();ImGui::SameLine();if(ImGui::Button("定位 MMAT JSON"))reveal_file(selected.mmat);
+    }
+    ImGui::Separator();
 }
 
 void draw_extraction_console() {
@@ -1431,6 +1537,7 @@ void draw_editor_shell() {
     ImGui::End();
 
     ImGui::Begin("Skeleton & Cloth");
+    draw_model_material_statistics();
     if(g_skeleton.bones.empty()) ImGui::TextUnformatted("加载一个模型预览后显示骨架与 cloth。");
     else {
         const float left=std::max(220.0f,ImGui::GetContentRegionAvail().x*.34f);
