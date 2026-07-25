@@ -417,7 +417,7 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
     }
     if (asset_.entries.empty()) { ImGui::TextUnformatted("该 mmat 没有材质条目。"); return; }
 
-    ImGui::BeginChild("mmat_material_list", ImVec2(235, 0), ImGuiChildFlags_Borders | ImGuiChildFlags_ResizeX);
+    ImGui::BeginChild("mmat_material_list", ImVec2(280, 0), ImGuiChildFlags_Borders | ImGuiChildFlags_ResizeX);
     for (std::size_t index = 0; index < asset_.entries.size(); ++index) {
         const auto& material = asset_.entries[index];
         const auto label = std::to_string(index) + "  " + hex32(material.material_name_hash) + "##mmat" + std::to_string(index);
@@ -439,13 +439,18 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
         asset_.constant_buffers[buffer_index].words[word_index]=value;source_buffer[word_index]=value;dirty_=true;edit_status_.clear();
     };
     const bool player_character = is_player_character_path(path_);
+    const ImGuiTableFlags resizable_table_flags = ImGuiTableFlags_RowBg |
+        ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable |
+        ImGuiTableFlags_Reorderable | ImGuiTableFlags_Hideable |
+        ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_ScrollX;
+    const ImGuiTableFlags resizable_scrolling_table_flags = resizable_table_flags | ImGuiTableFlags_ScrollY;
 
     if (ImGui::BeginTabBar("mmat_tabs")) {
         if (ImGui::BeginTabItem("渲染状态")) {
-            if (ImGui::BeginTable("mmat_overview", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV)) {
-                ImGui::TableSetupColumn("字段", ImGuiTableColumnFlags_WidthFixed, 185);
-                ImGui::TableSetupColumn("值",ImGuiTableColumnFlags_WidthFixed,230);
-                ImGui::TableSetupColumn("当前意义");ImGui::TableHeadersRow();
+            if (ImGui::BeginTable("mmat_overview", 3, resizable_table_flags)) {
+                ImGui::TableSetupColumn("字段", ImGuiTableColumnFlags_WidthFixed, 210);
+                ImGui::TableSetupColumn("值",ImGuiTableColumnFlags_WidthFixed,260);
+                ImGui::TableSetupColumn("当前意义",ImGuiTableColumnFlags_WidthFixed,520);ImGui::TableHeadersRow();
                 const auto uint_row=[&](const char* label,const char* id,auto& value,const char* key,const char* meaning){
                     ImGui::TableNextRow();ImGui::TableNextColumn();ImGui::TextUnformatted(label);ImGui::TableNextColumn();ImGui::SetNextItemWidth(-FLT_MIN);ImGui::BeginDisabled(!editable);
                     using Value=std::remove_reference_t<decltype(value)>;const auto type=sizeof(Value)==1?ImGuiDataType_U8:sizeof(Value)==2?ImGuiDataType_U16:ImGuiDataType_U32;
@@ -496,14 +501,14 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
         }
         if (ImGui::BeginTabItem("Shader 参数")) {
             ImGui::TextDisabled("证据：A=RDEF/schema 命名；B=游戏运行时行为；C=全量样本推断；D=少量样本，待验证。");
-            if (ImGui::BeginTable("mmat_parameters", 6, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollY, ImVec2(0, 0))) {
+            if (ImGui::BeginTable("mmat_parameters", 6, resizable_scrolling_table_flags, ImVec2(0, 0))) {
                 ImGui::TableSetupScrollFreeze(0, 1);
-                ImGui::TableSetupColumn("Hash / 名称", ImGuiTableColumnFlags_WidthFixed, 235);
-                ImGui::TableSetupColumn("类型", ImGuiTableColumnFlags_WidthFixed, 65);
-                ImGui::TableSetupColumn("值 / 偏移", ImGuiTableColumnFlags_WidthFixed, 85);
-                ImGui::TableSetupColumn("浮点值", ImGuiTableColumnFlags_WidthFixed, 180);
-                ImGui::TableSetupColumn("意义");
-                ImGui::TableSetupColumn("证据", ImGuiTableColumnFlags_WidthFixed, 145);
+                ImGui::TableSetupColumn("Hash / 名称", ImGuiTableColumnFlags_WidthFixed, 300);
+                ImGui::TableSetupColumn("类型", ImGuiTableColumnFlags_WidthFixed, 80);
+                ImGui::TableSetupColumn("值 / 偏移", ImGuiTableColumnFlags_WidthFixed, 120);
+                ImGui::TableSetupColumn("浮点值", ImGuiTableColumnFlags_WidthFixed, 260);
+                ImGui::TableSetupColumn("意义", ImGuiTableColumnFlags_WidthFixed, 520);
+                ImGui::TableSetupColumn("证据", ImGuiTableColumnFlags_WidthFixed, 360);
                 ImGui::TableHeadersRow();
                 for (std::size_t parameter_index=0;parameter_index<material.shader_parameters.size();++parameter_index) {
                     auto& parameter=material.shader_parameters[parameter_index];
@@ -543,14 +548,14 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("贴图与 Granite")) {
-            if (ImGui::BeginTable("mmat_textures",6,ImGuiTableFlags_RowBg|ImGuiTableFlags_BordersInnerV|ImGuiTableFlags_ScrollY,ImVec2(0,std::max(180.0f,ImGui::GetContentRegionAvail().y*.62f)))) {
+            if (ImGui::BeginTable("mmat_textures",6,resizable_scrolling_table_flags,ImVec2(0,std::max(180.0f,ImGui::GetContentRegionAvail().y*.62f)))) {
                 ImGui::TableSetupScrollFreeze(0,1);
-                ImGui::TableSetupColumn("预览",ImGuiTableColumnFlags_WidthFixed,82);
-                ImGui::TableSetupColumn("Shader map",ImGuiTableColumnFlags_WidthFixed,190);
-                ImGui::TableSetupColumn("贴图名",ImGuiTableColumnFlags_WidthFixed,220);
-                ImGui::TableSetupColumn("意义",ImGuiTableColumnFlags_WidthFixed,120);
-                ImGui::TableSetupColumn("证据",ImGuiTableColumnFlags_WidthFixed,170);
-                ImGui::TableSetupColumn("已解包路径",ImGuiTableColumnFlags_WidthStretch);
+                ImGui::TableSetupColumn("预览",ImGuiTableColumnFlags_WidthFixed,90);
+                ImGui::TableSetupColumn("Shader map",ImGuiTableColumnFlags_WidthFixed,240);
+                ImGui::TableSetupColumn("贴图名",ImGuiTableColumnFlags_WidthFixed,300);
+                ImGui::TableSetupColumn("意义",ImGuiTableColumnFlags_WidthFixed,200);
+                ImGui::TableSetupColumn("证据",ImGuiTableColumnFlags_WidthFixed,280);
+                ImGui::TableSetupColumn("已解包路径",ImGuiTableColumnFlags_WidthFixed,420);
                 ImGui::TableHeadersRow();
                 for(std::size_t texture_index=0;texture_index<material.texture_maps.size();++texture_index){
                     auto& texture=material.texture_maps[texture_index];
@@ -595,8 +600,8 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
                 if(editable&&source_material->contains("granite_params")&&(*source_material)["granite_params"].is_object())source_granite=&(*source_material)["granite_params"];
                 const auto granite_u8=[&](const char* label,const char* id,std::uint8_t& value,const char* key){ImGui::TextUnformatted(label);ImGui::SameLine();ImGui::SetNextItemWidth(75);ImGui::BeginDisabled(source_granite==nullptr);if(ImGui::InputScalar(id,ImGuiDataType_U8,&value)){(*source_granite)[key]=value;dirty_=true;edit_status_.clear();}ImGui::EndDisabled();};
                 granite_u8("tile set","##granite_tile",granite.tile_set_number,"tile_set_number");ImGui::SameLine(0,16);granite_u8("unk4","##granite_unk4",granite.unknown4,"unk4");ImGui::SameLine(0,16);granite_u8("unk5","##granite_unk5",granite.unknown5,"unk5");
-                if(ImGui::BeginTable("##granite_fields",3,ImGuiTableFlags_RowBg|ImGuiTableFlags_BordersInnerV)){
-                    ImGui::TableSetupColumn("类型",ImGuiTableColumnFlags_WidthFixed,80);ImGui::TableSetupColumn("索引",ImGuiTableColumnFlags_WidthFixed,55);ImGui::TableSetupColumn("值");ImGui::TableHeadersRow();
+                if(ImGui::BeginTable("##granite_fields",3,resizable_table_flags)){
+                    ImGui::TableSetupColumn("类型",ImGuiTableColumnFlags_WidthFixed,90);ImGui::TableSetupColumn("索引",ImGuiTableColumnFlags_WidthFixed,65);ImGui::TableSetupColumn("值",ImGuiTableColumnFlags_WidthFixed,520);ImGui::TableHeadersRow();
                     for(std::size_t index=0;index<granite.page_files.size();++index){ImGui::PushID(static_cast<int>(index));ImGui::TableNextRow();ImGui::TableNextColumn();ImGui::TextUnformatted("page");ImGui::TableNextColumn();ImGui::Text("%zu",index);ImGui::TableNextColumn();ImGui::BeginDisabled(source_granite==nullptr);if(input_text_value("##granite_page",granite.page_files[index])){(*source_granite)["page_file"][index]=granite.page_files[index];dirty_=true;edit_status_.clear();}ImGui::EndDisabled();ImGui::PopID();}
                     for(std::size_t index=0;index<granite.layer_names.size();++index){ImGui::TableNextRow();ImGui::TableNextColumn();ImGui::TextUnformatted("layer");ImGui::TableNextColumn();ImGui::Text("%zu",index);ImGui::TableNextColumn();ImGui::Text("%s (%s)",granite.layer_names[index].empty()?"<unknown>":granite.layer_names[index].c_str(),index<granite.layer_hashes.size()?hex32(granite.layer_hashes[index]).c_str():"<missing>");}
                     ImGui::EndTable();
@@ -620,13 +625,13 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
                 ImGui::TextDisabled("字段名：A - DXBC RDEF；绑定：%s", layout->binding_evidence);
                 const auto reflected_height = std::clamp(ImGui::GetContentRegionAvail().y * .55f, 180.0f, 480.0f);
                 if (ImGui::BeginTable("mmat_reflected_param_buffer", 5,
-                    ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollY, ImVec2(0, reflected_height))) {
+                    resizable_scrolling_table_flags, ImVec2(0, reflected_height))) {
                     ImGui::TableSetupScrollFreeze(0, 1);
-                    ImGui::TableSetupColumn("字段");
-                    ImGui::TableSetupColumn("Offset", ImGuiTableColumnFlags_WidthFixed, 70);
-                    ImGui::TableSetupColumn("类型", ImGuiTableColumnFlags_WidthFixed, 70);
-                    ImGui::TableSetupColumn("值", ImGuiTableColumnFlags_WidthFixed, 260);
-                    ImGui::TableSetupColumn("用途（RDEF 名称直译）", ImGuiTableColumnFlags_WidthFixed, 210);
+                    ImGui::TableSetupColumn("字段", ImGuiTableColumnFlags_WidthFixed, 260);
+                    ImGui::TableSetupColumn("Offset", ImGuiTableColumnFlags_WidthFixed, 80);
+                    ImGui::TableSetupColumn("类型", ImGuiTableColumnFlags_WidthFixed, 100);
+                    ImGui::TableSetupColumn("值", ImGuiTableColumnFlags_WidthFixed, 380);
+                    ImGui::TableSetupColumn("用途（RDEF 名称直译）", ImGuiTableColumnFlags_WidthFixed, 360);
                     ImGui::TableHeadersRow();
                     for (const auto& field : layout->fields) {
                         ImGui::PushID(field.name);
@@ -666,13 +671,13 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
             ImGui::TextUnformatted("所有 buffer 原始位模式同时按 uint/hex/float 显示。材质引用：");
             ImGui::SameLine();
             for (std::size_t index = 0; index < material.constant_buffer_indices.size(); ++index) { if (index) ImGui::SameLine(0, 5); ImGui::Text("%u", material.constant_buffer_indices[index]); }
-            if (ImGui::BeginTable("mmat_buffers", 5, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollY, ImVec2(0, 0))) {
+            if (ImGui::BeginTable("mmat_buffers", 5, resizable_scrolling_table_flags, ImVec2(0, 0))) {
                 ImGui::TableSetupScrollFreeze(0, 1);
-                ImGui::TableSetupColumn("Buffer", ImGuiTableColumnFlags_WidthFixed, 65);
-                ImGui::TableSetupColumn("Name hash", ImGuiTableColumnFlags_WidthFixed, 110);
-                ImGui::TableSetupColumn("Word", ImGuiTableColumnFlags_WidthFixed, 65);
-                ImGui::TableSetupColumn("Raw", ImGuiTableColumnFlags_WidthFixed, 110);
-                ImGui::TableSetupColumn("Float reinterpret");
+                ImGui::TableSetupColumn("Buffer", ImGuiTableColumnFlags_WidthFixed, 80);
+                ImGui::TableSetupColumn("Name hash", ImGuiTableColumnFlags_WidthFixed, 150);
+                ImGui::TableSetupColumn("Word", ImGuiTableColumnFlags_WidthFixed, 75);
+                ImGui::TableSetupColumn("Raw", ImGuiTableColumnFlags_WidthFixed, 150);
+                ImGui::TableSetupColumn("Float reinterpret", ImGuiTableColumnFlags_WidthFixed, 200);
                 ImGui::TableHeadersRow();
                 for (std::size_t buffer_index = 0; buffer_index < asset_.constant_buffers.size(); ++buffer_index) {
                     auto& buffer = asset_.constant_buffers[buffer_index];
@@ -701,8 +706,8 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
             ImGui::EndDisabled();
             ImGui::SeparatorText("shader_param_float_data_pool");
             if(asset_.shader_parameter_float_pool.empty())ImGui::TextDisabled("空");
-            else if(ImGui::BeginTable("mmat_float_pool",2,ImGuiTableFlags_RowBg|ImGuiTableFlags_BordersInnerV)){
-                ImGui::TableSetupColumn("Index",ImGuiTableColumnFlags_WidthFixed,80);ImGui::TableSetupColumn("Float");ImGui::TableHeadersRow();
+            else if(ImGui::BeginTable("mmat_float_pool",2,resizable_table_flags)){
+                ImGui::TableSetupColumn("Index",ImGuiTableColumnFlags_WidthFixed,90);ImGui::TableSetupColumn("Float",ImGuiTableColumnFlags_WidthFixed,240);ImGui::TableHeadersRow();
                 for(std::size_t index=0;index<asset_.shader_parameter_float_pool.size();++index){ImGui::PushID(static_cast<int>(index));ImGui::TableNextRow();ImGui::TableNextColumn();ImGui::Text("%zu",index);ImGui::TableNextColumn();ImGui::SetNextItemWidth(-FLT_MIN);ImGui::BeginDisabled(!editable);if(ImGui::InputFloat("##float_pool",&asset_.shader_parameter_float_pool[index],0,0,"%.9g")){document_["shader_param_float_data_pool"][index]=asset_.shader_parameter_float_pool[index];for(auto& entry:asset_.entries)for(auto& parameter:entry.shader_parameters)if(index>=parameter.value_or_offset&&index<static_cast<std::size_t>(parameter.value_or_offset)+parameter.floating_values.size())parameter.floating_values[index-parameter.value_or_offset]=asset_.shader_parameter_float_pool[index];dirty_=true;edit_status_.clear();}ImGui::EndDisabled();ImGui::PopID();}
                 ImGui::EndTable();
             }
