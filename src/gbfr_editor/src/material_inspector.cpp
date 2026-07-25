@@ -91,7 +91,7 @@ const char* parameter_meaning(const gbfr::MaterialShaderParameter& parameter) {
     case 0x372C03F0u: return "tsubasa 第四阶段机关特化参数";
     case 0x3C966EE3u: return "冰材质自发光开关 0";
     case 0x49D8C1B9u: return "启用描边";
-    case 0x53F49792u: return "角色材质 pass key 位 0x4（社区推测与 Alpha 相关）";
+    case 0x53F49792u: return "开启角色 Albedo Alpha 丢弃模式（A=0 丢弃，中间值抖动裁切）";
     case 0x60F31A22u: return "使用 Albedo Alpha Clip";
     case 0x6C5CB9ACu: return "使用细节法线";
     case 0x7920C84Fu: return "使用抖动贴图";
@@ -163,7 +163,7 @@ const char* parameter_confidence(const gbfr::MaterialShaderParameter& parameter)
     case 0x9C83F56Fu:
         return "B：CPU 选择 + DXBC 自发光分支消费";
     case 0x53F49792u:
-        return "B/C：pass key + 社区推测";
+        return "B：EXE 选择 _5discard + DXBC discard";
     case 0xEB6F1AE7u:
         return "B：实例缓冲写入行为";
     case 0xAB261CFAu: case 0xC5BD3DEDu: case 0xC9762248u:
@@ -186,6 +186,7 @@ const char* reflected_parameter_name(std::uint32_t hash) {
     case 0x372C03F0u: return "g_tsubasa_Param0_4stGimmick";
     case 0x3C966EE3u: return "g_UseIceEmissive0";
     case 0x49D8C1B9u: return "g_EnableOutLine";
+    case 0x53F49792u: return "Cutout 丢弃模式";
     case 0x60F31A22u: return "g_IsUseAlbedoAlphaClip";
     case 0x6C5CB9ACu: return "g_IsUseDetailNormal";
     case 0x7920C84Fu: return "g_IsUseDitherMap";
@@ -471,7 +472,7 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
                 bool_row("bool10","##bool10",material.bool10,"bool10","角色完整样本通常为 true");
                 bool_row("bool12","##bool12",material.bool12,"bool12","角色样本中与 shadow_type=3 同现");
                 ImGui::TableNextRow();ImGui::TableNextColumn();ImGui::TextUnformatted("g_TwoSided");ImGui::TableNextColumn();if(find_parameter(material,two_sided_shader_parameter_id))ImGui::TextUnformatted(parameter_enabled(material,two_sided_shader_parameter_id)?"1":"0");else ImGui::TextDisabled("未设置");ImGui::TableNextColumn();ImGui::TextUnformatted("在 Shader 参数页编辑");
-                ImGui::TableNextRow();ImGui::TableNextColumn();ImGui::TextUnformatted("0x53F49792 pass key 0x4");ImGui::TableNextColumn();ImGui::TextUnformatted(parameter_enabled(material,enable_alpha_shader_parameter_id)?"1":"0 / 未设置");ImGui::TableNextColumn();ImGui::TextUnformatted("在 Shader 参数页编辑");
+                ImGui::TableNextRow();ImGui::TableNextColumn();ImGui::TextUnformatted("Cutout 丢弃模式 (0x53F49792)");ImGui::TableNextColumn();ImGui::TextUnformatted(parameter_enabled(material,enable_alpha_shader_parameter_id)?"开启":"关闭 / 未设置");ImGui::TableNextColumn();ImGui::TextUnformatted("开启时按 Albedo Alpha 丢弃像素；关闭时不进入丢弃管线");
                 ImGui::EndTable();
             }
             ImGui::Spacing();
@@ -481,16 +482,16 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
                 ImGui::PopStyleColor();
             };
             if (material.shadow_type == 2 && parameter_enabled(material, two_sided_shader_parameter_id))
-                draw_material_warning("当前同时启用了透明混合和 g_TwoSided，这套角色材质组合没有原版用例。若只是制作 A0 Cutout，请使用 ignore_alpha=false 和 Alpha Cutout=开启，并关闭 g_TwoSided。");
+                draw_material_warning("当前同时启用了透明混合和 g_TwoSided，这套角色材质组合没有原版用例。若只是制作 A0 Cutout，请使用 ignore_alpha=false 和 Cutout 丢弃模式=开启，并关闭 g_TwoSided。");
             if (player_character) {
                 const auto* alpha_key = find_parameter(material, enable_alpha_shader_parameter_id);
                 if(material.shader_type!=2){
                     if(!alpha_key)
-                        draw_material_warning("缺少角色 Alpha Cutout 参数。建议从同类型的原版材质槽复制 0x53F49792；需要 Albedo Alpha 裁切时设为 1，不需要时设为 0。");
+                        draw_material_warning("缺少角色 Cutout 丢弃模式参数。建议从同类型的原版材质槽复制 0x53F49792；需要丢弃透明像素时设为 1，不需要时设为 0。");
                     else if(material.ignore_alpha&&alpha_key->value_or_offset!=0)
-                        draw_material_warning("Cutout 设置互相冲突：Alpha Cutout 已开启，但 ignore_alpha 仍为 true。要裁掉 Albedo 的透明像素，请把 ignore_alpha 改为 false；不需要 Cutout 就关闭 Alpha Cutout。");
+                        draw_material_warning("Cutout 设置互相冲突：丢弃模式已开启，但 ignore_alpha 仍为 true。要裁掉 Albedo 的透明像素，请把 ignore_alpha 改为 false；不需要 Cutout 就关闭丢弃模式。");
                     else if(!material.ignore_alpha&&alpha_key->value_or_offset==0)
-                        draw_material_warning("Albedo Alpha 当前不会裁掉像素：ignore_alpha 已关闭，但 Alpha Cutout 仍为 0。要使用 A0 Cutout，请把 0x53F49792（Alpha Cutout）改为 1。");
+                        draw_material_warning("Albedo Alpha 当前不会裁掉像素：ignore_alpha 已关闭，但 Cutout 丢弃模式仍为 0。要使用 A0 Cutout，请把 0x53F49792 改为 1。");
                 }
                 if(material.shadow_type==3&&!material.bool12)
                     draw_material_warning("特殊阴影裁切配置不完整：shadow_type=3 时应开启 bool12。若只需要普通 A0 Cutout，请改用 shadow_type=1、bool12=false。");
@@ -502,7 +503,7 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
                     if(!directional_alpha)
                         draw_material_warning("缺少 Metal 方向裁切参数 0xA6EB1B34。普通 Cutout 材质应保留该参数并设为 0；仅 shadow_type=3、bool12=true 时设为 1。");
                     else if(!special_directional_cutout&&directional_alpha->value_or_offset!=0)
-                        draw_material_warning("普通 Cutout 多开了“方向裁切”(0xA6EB1B34)。它可能让透明边缘随模型方向变化；请将它关闭。普通 Cutout 只需要 ignore_alpha=false 和 Alpha Cutout=1。");
+                        draw_material_warning("普通 Cutout 多开了“方向裁切”(0xA6EB1B34)。它可能让透明边缘随模型方向变化；请将它关闭。普通 Cutout 只需要 ignore_alpha=false 和 Cutout 丢弃模式=1。");
                     else if(special_directional_cutout&&directional_alpha->value_or_offset==0)
                         draw_material_warning("特殊方向裁切没有完整开启：当前 shadow_type=3、bool12=true，但“方向裁切”(0xA6EB1B34)仍为 0。要保留这套特殊效果请将它开启，否则改回普通 Cutout 设置。");
                 }

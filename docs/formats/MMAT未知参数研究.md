@@ -41,7 +41,7 @@ Shader 目录实际存放裸 DXBC：1,162 个 `.pso`、265 个 `.vso`、170 个 
 
 专项样本还给出以下完整集合不变量：
 
-- 非 Eye 的 4,779 条角色材质均含 `0x53F49792`，其布尔值与 `ignore_alpha=false` 精确一致，错误数为 0。它仍只能命名为角色 pass key 位 `0x4`，不能仅凭相关性改名为透明开关。
+- 非 Eye 的 4,779 条角色材质均含 `0x53F49792`，其布尔值与 `ignore_alpha=false` 精确一致，错误数为 0。EXE 用它选择 pass key 位 `0x4` 对应的 `_5discard` 变体，DXBC 对 Albedo Alpha 执行抖动 discard，因此编辑器用户语义命名为 `Cutout 丢弃模式`。
 - 5,501 条材质中 `bool12=true` 与 `shadow_type=3` 精确一致；`bool9` 恒为 false，`bool10` 恒为 true。
 - `g_EnableDiscardMask` 在 3,221 条 Eye/Metal 材质中存在，但全部为 false。
 - A 级 `g_TwoSided` 在 `pl/fp/wp` 中一次都没有；它只属于当前样本中的 PlantShake/场景资产，不能用于解释角色背面的异常半透。
@@ -131,7 +131,7 @@ EXE `0x1446F2C15` 与 `0x1446F2CFA` 两次读取该参数。为真时会复制�
 | 0 | 1 | 14 |
 | 1 | 1 | 7 |
 
-EXE 对 `0x53F49792` 有 16 个直接读取点。Eye、Face、Hair、Metal、Skin 等角色构建路径都会先检查其类型和值，再与三项材质/pass 布尔状态做 OR；结果为真时给管线选择 key 增加 `0x4`，随后据 key 选择 shader/resource 组合。它不写入 alpha 数值，也不等同于 `ignore_alpha`、`shadow_type` 或 RDEF 已命名的 `g_IsUseAlbedoAlphaClip`。因此当前 B 级行为是“角色材质 pass key 位 `0x4`”；社区的 `EnableAlpha` 只作为 C 级视觉含义线索保留。
+EXE 对 `0x53F49792` 有 16 个直接读取点。Eye、Face、Hair、Metal、Skin 等角色构建路径都会先检查其类型和值，再与三项材质/pass 布尔状态做 OR；结果为真时给管线选择 key 增加 `0x4`，随后选择名中带 `_5discard` 的 shader/resource 组合。该 DXBC 采样 `g_AlbedoMap.a`，Alpha 为 0 时稳定丢弃，中间 Alpha 通过抖动实现覆盖率裁切。Metal `5/7` 的普通变体只采样 Albedo RGB 并输出 Alpha=1；`_5discard` 变体才采样 Albedo Alpha 做丢弃，保留像素仍输出 Alpha=1。因此该位不开启半透明混合，也不写入 alpha 数值；它不等同于 `ignore_alpha`、`shadow_type` 或 RDEF 已命名的 `g_IsUseAlbedoAlphaClip`。底层行为仍记录为“角色材质 pass key 位 `0x4`”，编辑器则以直接用途显示为 `Cutout 丢弃模式`。
 
 `0x8B8038FC` 在 Face、Hair、Metal、Skin 的两组构建路径中共有 8 个读取点。描述表路径 `0x1446E7C1E..0x1446E7CCA`、`0x1446E9B7E..0x1446E9C30`、`0x1446ED197..0x1446ED25E`、`0x1446EEA98..0x1446EEB44` 都在值类型为 U8 且值非零时选中 `0x146138780` 的 24 字节管线状态记录 13；另一组表块对应记录 29，也就是 13 + 16。最终传给管线注册器的 VS/PS 哈希不随该参数改变，因此它不是另一份 `ps_character*` Shader 文件选择器。
 
