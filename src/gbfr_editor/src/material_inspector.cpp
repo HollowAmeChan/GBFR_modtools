@@ -475,27 +475,41 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
                 ImGui::EndTable();
             }
             ImGui::Spacing();
+            const auto draw_material_warning=[](const char* message){
+                ImGui::PushStyleColor(ImGuiCol_Text,ImVec4(1.0f,.72f,.26f,1.0f));
+                ImGui::TextWrapped("%s",message);
+                ImGui::PopStyleColor();
+            };
             if (material.shadow_type == 2 && parameter_enabled(material, two_sided_shader_parameter_id))
-                ImGui::TextColored(ImVec4(1.0f, .68f, .25f, 1.0f), "注意：社区资料尚未确认透明与双面的完整组合；不要仅凭预览器结果改写字段。");
-            if (material.ignore_alpha && parameter_enabled(material, enable_alpha_shader_parameter_id))
-                ImGui::TextColored(ImVec4(1.0f, .68f, .25f, 1.0f), "Alpha 参数已启用但 ignore_alpha=true，请与原版同槽材质逐字段比较。");
+                draw_material_warning("当前同时启用了透明混合和 g_TwoSided，这套角色材质组合没有原版用例。若只是制作 A0 Cutout，请使用 ignore_alpha=false 和 Alpha Cutout=开启，并关闭 g_TwoSided。");
             if (player_character) {
                 const auto* alpha_key = find_parameter(material, enable_alpha_shader_parameter_id);
-                const bool alpha_contract_mismatch = material.shader_type != 2 &&
-                    (!alpha_key || (alpha_key->value_or_offset != 0) == material.ignore_alpha);
-                if (alpha_contract_mismatch)
-                    ImGui::TextColored(ImVec4(1.0f, .68f, .25f, 1.0f), "角色基线偏差：0x53F49792 应与 ignore_alpha=false 同值。");
-                if (material.bool12 != (material.shadow_type == 3))
-                    ImGui::TextColored(ImVec4(1.0f, .68f, .25f, 1.0f), "角色基线偏差：bool12 应与 shadow_type=3 同现。");
+                if(material.shader_type!=2){
+                    if(!alpha_key)
+                        draw_material_warning("缺少角色 Alpha Cutout 参数。建议从同类型的原版材质槽复制 0x53F49792；需要 Albedo Alpha 裁切时设为 1，不需要时设为 0。");
+                    else if(material.ignore_alpha&&alpha_key->value_or_offset!=0)
+                        draw_material_warning("Cutout 设置互相冲突：Alpha Cutout 已开启，但 ignore_alpha 仍为 true。要裁掉 Albedo 的透明像素，请把 ignore_alpha 改为 false；不需要 Cutout 就关闭 Alpha Cutout。");
+                    else if(!material.ignore_alpha&&alpha_key->value_or_offset==0)
+                        draw_material_warning("Albedo Alpha 当前不会裁掉像素：ignore_alpha 已关闭，但 Alpha Cutout 仍为 0。要使用 A0 Cutout，请把 0x53F49792（Alpha Cutout）改为 1。");
+                }
+                if(material.shadow_type==3&&!material.bool12)
+                    draw_material_warning("特殊阴影裁切配置不完整：shadow_type=3 时应开启 bool12。若只需要普通 A0 Cutout，请改用 shadow_type=1、bool12=false。");
+                else if(material.shadow_type!=3&&material.bool12)
+                    draw_material_warning("bool12 在当前阴影模式下是多余的。普通材质请关闭 bool12；只有使用 shadow_type=3 的特殊方向裁切时才应开启。");
                 if (material.shader_type == 5) {
                     const auto* directional_alpha = find_parameter(material, 0xA6EB1B34u);
-                    if (!directional_alpha || (directional_alpha->value_or_offset != 0) != (material.shadow_type == 3 && material.bool12))
-                        ImGui::TextColored(ImVec4(1.0f, .68f, .25f, 1.0f), "角色 Metal 基线偏差：0xA6EB1B34 应与 shadow_type=3 / bool12=true 同现。");
+                    const bool special_directional_cutout=material.shadow_type==3&&material.bool12;
+                    if(!directional_alpha)
+                        draw_material_warning("缺少 Metal 方向裁切参数 0xA6EB1B34。普通 Cutout 材质应保留该参数并设为 0；仅 shadow_type=3、bool12=true 时设为 1。");
+                    else if(!special_directional_cutout&&directional_alpha->value_or_offset!=0)
+                        draw_material_warning("普通 Cutout 多开了“方向裁切”(0xA6EB1B34)。它可能让透明边缘随模型方向变化；请将它关闭。普通 Cutout 只需要 ignore_alpha=false 和 Alpha Cutout=1。");
+                    else if(special_directional_cutout&&directional_alpha->value_or_offset==0)
+                        draw_material_warning("特殊方向裁切没有完整开启：当前 shadow_type=3、bool12=true，但“方向裁切”(0xA6EB1B34)仍为 0。要保留这套特殊效果请将它开启，否则改回普通 Cutout 设置。");
                 }
                 if (material.bool9 || !material.bool10)
-                    ImGui::TextColored(ImVec4(1.0f, .68f, .25f, 1.0f), "角色基线偏差：完整 pl/fp/wp 样本中 bool9=false、bool10=true。");
-                if (find_parameter(material, two_sided_shader_parameter_id))
-                    ImGui::TextColored(ImVec4(1.0f, .68f, .25f, 1.0f), "角色基线偏差：完整 pl/fp/wp 样本中未出现 g_TwoSided；不要将其当作通用角色双面开关。");
+                    draw_material_warning("角色基础开关被改动：原版角色材质使用 bool9=false、bool10=true。除非正在复刻一个已验证的原版材质槽，否则建议恢复这两个值。");
+                if (material.shadow_type != 2 && parameter_enabled(material, two_sided_shader_parameter_id))
+                    draw_material_warning("角色 Shader 没有已确认的 g_TwoSided 用法，这个参数通常不能解决角色背面不显示。建议关闭它，并在模型网格中制作需要显示的背面。");
             }
             ImGui::EndTabItem();
         }
