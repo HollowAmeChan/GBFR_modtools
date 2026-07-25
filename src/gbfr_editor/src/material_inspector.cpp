@@ -12,9 +12,11 @@
 #include <array>
 #include <bit>
 #include <cstdio>
+#include <fstream>
 #include <span>
 #include <string>
 #include <string_view>
+#include <type_traits>
 
 namespace {
 std::string hex32(std::uint32_t value) {
@@ -122,6 +124,23 @@ const char* parameter_meaning(const gbfr::MaterialShaderParameter& parameter) {
     case 0xEB6F1AE7u: return "Foliage 实例世界变换首分量开关";
     default: return "尚未探明";
     }
+}
+
+bool parameter_is_boolean(std::uint32_t hash) {
+    switch(hash){
+    case 0x24C1ABA9u:case 0x3C966EE3u:case 0x49D8C1B9u:case 0x53F49792u:
+    case 0x60F31A22u:case 0x6C5CB9ACu:case 0x7920C84Fu:case 0x8E6B4C53u:
+    case 0x920821E1u:case 0x9F1DA064u:case 0xB460A0F0u:case 0xCA06A6B6u:
+    case 0xD94F2821u:case 0xE208C4C4u:return true;
+    default:return false;
+    }
+}
+
+bool input_text_value(const char* id,std::string& value) {
+    std::array<char,512> buffer{};std::snprintf(buffer.data(),buffer.size(),"%s",value.c_str());
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    if(!ImGui::InputText(id,buffer.data(),buffer.size()))return false;
+    value=buffer.data();return true;
 }
 
 const char* parameter_confidence(const gbfr::MaterialShaderParameter& parameter) {
@@ -266,12 +285,6 @@ const char* character_param_buffer_meaning(std::string_view name) {
     return "-";
 }
 
-void label_value(const char* label, const char* value) {
-    ImGui::TableNextRow();
-    ImGui::TableNextColumn(); ImGui::TextUnformatted(label);
-    ImGui::TableNextColumn(); ImGui::TextUnformatted(value);
-}
-
 std::string utf8(const std::filesystem::path& path) {
     const auto value=path.generic_u8string();
     return {reinterpret_cast<const char*>(value.data()),value.size()};
@@ -313,22 +326,90 @@ void texture_context_menu(const char* id,const std::filesystem::path& dds) {
 
 namespace gbfr::editor {
 void MaterialInspector::set_asset(MaterialAsset asset, std::filesystem::path path, std::size_t selected_material) {
+    if(path_==path&&!path.empty()&&dirty_){
+        selected_material_=asset_.entries.empty()?0:static_cast<int>(std::min(selected_material,asset_.entries.size()-1));
+        return;
+    }
+    if(dirty_&&!save_document())return;
     asset_ = std::move(asset);
     path_ = std::move(path);
     unpack_root_=find_unpack_root(path_);
     selected_material_ = asset_.entries.empty() ? 0 : static_cast<int>(std::min(selected_material, asset_.entries.size() - 1));
+    dirty_=false;
+    edit_status_.clear();
+    load_document();
 }
 
 void MaterialInspector::clear() {
+    if(dirty_&&!save_document())return;
     asset_ = {};
+    document_ = {};
     path_.clear();
     unpack_root_.clear();
     selected_material_ = 0;
+    dirty_=false;
+    file_changed_=false;
+    edit_status_.clear();
+}
+
+bool MaterialInspector::load_document() {
+    try{
+        std::ifstream input(path_);if(!input)throw std::runtime_error("无法打开 mmat JSON");
+        input>>document_;
+        return true;
+    }catch(const std::exception& error){document_={};edit_status_=std::string("读取编辑文档失败：")+error.what();return false;}
+}
+
+bool MaterialInspector::save_document() {
+    if(!dirty_)return true;
+    try{
+        if(path_.empty()||document_.empty())throw std::runtime_error("没有可保存的 mmat JSON");
+        auto temporary=path_;temporary+=L".edit.tmp";
+        {std::ofstream output(temporary,std::ios::trunc);if(!output)throw std::runtime_error("无法创建临时文件");output<<document_.dump(2)<<'\n';if(!output)throw std::runtime_error("写入临时文件失败");}
+        {nlohmann::json validation;std::ifstream input(temporary);if(!input)throw std::runtime_error("无法验证临时文件");input>>validation;}
+        auto validated_asset=load_mmat_json(temporary);
+        if(!MoveFileExW(temporary.c_str(),path_.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)){
+            const auto error=GetLastError();std::filesystem::remove(temporary);throw std::runtime_error("替换 mmat JSON 失败（Win32 "+std::to_string(error)+"）");
+        }
+        asset_=std::move(validated_asset);selected_material_=asset_.entries.empty()?0:std::clamp(selected_material_,0,static_cast<int>(asset_.entries.size()-1));
+        dirty_=false;file_changed_=true;edit_status_="已保存到 unpack："+utf8(path_.filename());return true;
+    }catch(const std::exception& error){edit_status_=std::string("保存失败：")+error.what();return false;}
+}
+
+bool MaterialInspector::discard_changes() {
+    try{
+        asset_=load_mmat_json(path_);if(!load_document())return false;
+        selected_material_=asset_.entries.empty()?0:std::clamp(selected_material_,0,static_cast<int>(asset_.entries.size()-1));
+        dirty_=false;edit_status_="已放弃未保存修改";return true;
+    }catch(const std::exception& error){edit_status_=std::string("重新加载失败：")+error.what();return false;}
+}
+
+bool MaterialInspector::consume_file_changed() noexcept {
+    const bool result=file_changed_;file_changed_=false;return result;
+}
+
+bool MaterialInspector::save_changes() {
+    return save_document();
+}
+
+void MaterialInspector::reload_if_open(const std::filesystem::path& path) {
+    if(path_!=path)return;
+    dirty_=false;
+    discard_changes();
 }
 
 void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_gallery) {
     ImGui::Text("%s | materials %zu | constant buffers %zu | float pool %zu",
                 path_.filename().string().c_str(), asset_.entries.size(), asset_.constant_buffers.size(), asset_.shader_parameter_float_pool.size());
+    ImGui::SameLine(0,14);
+    if(dirty_)ImGui::TextColored(ImVec4(1.0f,.72f,.18f,1.0f),"未保存");else ImGui::TextColored(ImVec4(.35f,.85f,.48f,1.0f),"已保存");
+    ImGui::SameLine(0,14);
+    ImGui::BeginDisabled(!dirty_||asset_.legacy_schema||document_.empty());
+    if(ImGui::Button("保存到 unpack"))save_document();
+    ImGui::SameLine();if(ImGui::Button("放弃修改"))discard_changes();
+    ImGui::EndDisabled();
+    if(dirty_&&ImGui::GetIO().KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_S)&&ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))save_document();
+    if(!edit_status_.empty()){ImGui::SameLine(0,14);ImGui::TextDisabled("%s",edit_status_.c_str());}
     if (asset_.legacy_schema) {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, .42f, .30f, 1.0f));
         ImGui::TextWrapped("旧 A1/A2/A4 JSON：该格式会丢失 Endless Ragnarok 常量缓冲和材质状态，已禁止构建。请在快捷操作中从 source 重新解码。");
@@ -348,26 +429,44 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
     ImGui::SameLine();
     ImGui::BeginChild("mmat_material_detail", ImVec2(0, 0));
     const auto selected = static_cast<std::size_t>(std::clamp(selected_material_, 0, static_cast<int>(asset_.entries.size() - 1)));
-    const auto& material = asset_.entries[selected];
+    auto& material = asset_.entries[selected];
+    nlohmann::json* source_material=nullptr;
+    if(!asset_.legacy_schema&&document_.contains("materials")&&document_["materials"].is_array()&&selected<document_["materials"].size()&&document_["materials"][selected].is_object())source_material=&document_["materials"][selected];
+    const bool editable=source_material!=nullptr;
+    const auto set_buffer_word=[&](std::size_t buffer_index,std::size_t word_index,std::uint32_t value){
+        if(buffer_index>=asset_.constant_buffers.size()||word_index>=asset_.constant_buffers[buffer_index].words.size()||!document_.contains("constant_buffers")||!document_["constant_buffers"].is_array()||buffer_index>=document_["constant_buffers"].size())return;
+        auto& source_buffer=document_["constant_buffers"][buffer_index]["buffer"];if(!source_buffer.is_array()||word_index>=source_buffer.size())return;
+        asset_.constant_buffers[buffer_index].words[word_index]=value;source_buffer[word_index]=value;dirty_=true;edit_status_.clear();
+    };
     const bool player_character = is_player_character_path(path_);
 
     if (ImGui::BeginTabBar("mmat_tabs")) {
         if (ImGui::BeginTabItem("渲染状态")) {
-            if (ImGui::BeginTable("mmat_overview", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV)) {
+            if (ImGui::BeginTable("mmat_overview", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV)) {
                 ImGui::TableSetupColumn("字段", ImGuiTableColumnFlags_WidthFixed, 185);
-                ImGui::TableSetupColumn("值 / 当前意义");
-                label_value("material hash", hex32(material.material_name_hash).c_str());
-                const auto shader = std::to_string(material.shader_type) + " - " + shader_type_name(material.shader_type) + "（社区资料）";
-                label_value("shader_type", shader.c_str());
-                const auto subtype = std::to_string(material.shader_sub_type) + " - " + shader_sub_type_name(material.shader_sub_type) + "（社区资料）";
-                label_value("shader_sub_type", subtype.c_str());
-                const auto shadow = std::to_string(material.shadow_type) + " - " + shadow_type_name(material.shadow_type);
-                label_value("shadow_type", shadow.c_str());
-                label_value("ignore_alpha", material.ignore_alpha ? "true" : "false");
-                label_value("g_TwoSided", find_parameter(material, two_sided_shader_parameter_id) ?
-                    (parameter_enabled(material, two_sided_shader_parameter_id) ? "1" : "0") : "未设置");
-                label_value("0x53F49792 pass key 0x4", parameter_enabled(material, enable_alpha_shader_parameter_id) ? "1（社区推测与 Alpha 相关）" : "0 / 未设置");
-                label_value("bool9 / bool10 / bool12", (std::to_string(material.bool9) + " / " + std::to_string(material.bool10) + " / " + std::to_string(material.bool12) + "（角色样本中 bool12=shadow_type 3）").c_str());
+                ImGui::TableSetupColumn("值",ImGuiTableColumnFlags_WidthFixed,230);
+                ImGui::TableSetupColumn("当前意义");ImGui::TableHeadersRow();
+                const auto uint_row=[&](const char* label,const char* id,auto& value,const char* key,const char* meaning){
+                    ImGui::TableNextRow();ImGui::TableNextColumn();ImGui::TextUnformatted(label);ImGui::TableNextColumn();ImGui::SetNextItemWidth(-FLT_MIN);ImGui::BeginDisabled(!editable);
+                    using Value=std::remove_reference_t<decltype(value)>;const auto type=sizeof(Value)==1?ImGuiDataType_U8:sizeof(Value)==2?ImGuiDataType_U16:ImGuiDataType_U32;
+                    if(ImGui::InputScalar(id,type,&value,nullptr,nullptr,nullptr)){(*source_material)[key]=value;dirty_=true;edit_status_.clear();}ImGui::EndDisabled();ImGui::TableNextColumn();ImGui::TextWrapped("%s",meaning);
+                };
+                const auto bool_row=[&](const char* label,const char* id,bool& value,const char* key,const char* meaning){
+                    ImGui::TableNextRow();ImGui::TableNextColumn();ImGui::TextUnformatted(label);ImGui::TableNextColumn();ImGui::BeginDisabled(!editable);
+                    if(ImGui::Checkbox(id,&value)){(*source_material)[key]=value;dirty_=true;edit_status_.clear();}ImGui::EndDisabled();ImGui::TableNextColumn();ImGui::TextWrapped("%s",meaning);
+                };
+                ImGui::TableNextRow();ImGui::TableNextColumn();ImGui::TextUnformatted("material hash");ImGui::TableNextColumn();ImGui::SetNextItemWidth(-FLT_MIN);ImGui::BeginDisabled(!editable);
+                if(ImGui::InputScalar("##material_hash",ImGuiDataType_U32,&material.material_name_hash,nullptr,nullptr,"%08X",ImGuiInputTextFlags_CharsHexadecimal)){(*source_material)["unique_material_name_hash_maybe"]=material.material_name_hash;dirty_=true;edit_status_.clear();}ImGui::EndDisabled();ImGui::TableNextColumn();ImGui::TextUnformatted(hex32(material.material_name_hash).c_str());
+                uint_row("shader_type","##shader_type",material.shader_type,"shader_type",shader_type_name(material.shader_type));
+                uint_row("shader_sub_type","##shader_sub_type",material.shader_sub_type,"shader_sub_type",shader_sub_type_name(material.shader_sub_type));
+                ImGui::TableNextRow();ImGui::TableNextColumn();ImGui::TextUnformatted("shadow_type");ImGui::TableNextColumn();ImGui::SetNextItemWidth(-FLT_MIN);ImGui::BeginDisabled(!editable);
+                if(ImGui::BeginCombo("##shadow_type",shadow_type_name(material.shadow_type))){const char* names[]={"NoShadow","ShadowEnable_Unk1","ShadowEnable_AlphaBlend","ShadowEnable_NoAlphaBlend"};for(std::uint8_t value=0;value<4;++value)if(ImGui::Selectable(names[value],material.shadow_type==value)){material.shadow_type=value;(*source_material)["shadow_type"]=names[value];dirty_=true;edit_status_.clear();}ImGui::EndCombo();}ImGui::EndDisabled();ImGui::TableNextColumn();ImGui::TextWrapped("%s",shadow_type_name(material.shadow_type));
+                bool_row("ignore_alpha","##ignore_alpha",material.ignore_alpha,"ignore_alpha","忽略材质 Alpha");
+                bool_row("bool9","##bool9",material.bool9,"bool9","角色完整样本通常为 false");
+                bool_row("bool10","##bool10",material.bool10,"bool10","角色完整样本通常为 true");
+                bool_row("bool12","##bool12",material.bool12,"bool12","角色样本中与 shadow_type=3 同现");
+                ImGui::TableNextRow();ImGui::TableNextColumn();ImGui::TextUnformatted("g_TwoSided");ImGui::TableNextColumn();if(find_parameter(material,two_sided_shader_parameter_id))ImGui::TextUnformatted(parameter_enabled(material,two_sided_shader_parameter_id)?"1":"0");else ImGui::TextDisabled("未设置");ImGui::TableNextColumn();ImGui::TextUnformatted("在 Shader 参数页编辑");
+                ImGui::TableNextRow();ImGui::TableNextColumn();ImGui::TextUnformatted("0x53F49792 pass key 0x4");ImGui::TableNextColumn();ImGui::TextUnformatted(parameter_enabled(material,enable_alpha_shader_parameter_id)?"1":"0 / 未设置");ImGui::TableNextColumn();ImGui::TextUnformatted("在 Shader 参数页编辑");
                 ImGui::EndTable();
             }
             ImGui::Spacing();
@@ -406,18 +505,38 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
                 ImGui::TableSetupColumn("意义");
                 ImGui::TableSetupColumn("证据", ImGuiTableColumnFlags_WidthFixed, 145);
                 ImGui::TableHeadersRow();
-                for (const auto& parameter : material.shader_parameters) {
+                for (std::size_t parameter_index=0;parameter_index<material.shader_parameters.size();++parameter_index) {
+                    auto& parameter=material.shader_parameters[parameter_index];
+                    nlohmann::json* source_parameter=nullptr;
+                    if(editable&&source_material->contains("shader_params")&&(*source_material)["shader_params"].is_array()&&parameter_index<(*source_material)["shader_params"].size())source_parameter=&(*source_material)["shader_params"][parameter_index];
+                    ImGui::PushID(static_cast<int>(parameter_index));
                     ImGui::TableNextRow();
                     const auto* reflected_name = reflected_parameter_name(parameter.hash);
                     const auto* display_name = reflected_name ? reflected_name : (parameter.name.empty() ? "<unknown>" : parameter.name.c_str());
                     ImGui::TableNextColumn(); ImGui::Text("%s\n%s", display_name, hex32(parameter.hash).c_str());
                     ImGui::TableNextColumn(); ImGui::TextUnformatted(material_value_type_name(parameter.type));
-                    ImGui::TableNextColumn(); ImGui::Text("%u", parameter.value_or_offset);
+                    ImGui::TableNextColumn();ImGui::SetNextItemWidth(-FLT_MIN);ImGui::BeginDisabled(source_parameter==nullptr);
+                    if(parameter.type==MaterialValueType::u8&&parameter_is_boolean(parameter.hash)){
+                        bool value=parameter.value_or_offset!=0;if(ImGui::Checkbox("##parameter_bool",&value)){parameter.value_or_offset=value?1u:0u;(*source_parameter)["value_or_offset"]=parameter.value_or_offset;dirty_=true;edit_status_.clear();}
+                    }else if(parameter.type==MaterialValueType::u8||parameter.type==MaterialValueType::u16||parameter.type==MaterialValueType::unknown){
+                        if(ImGui::InputScalar("##parameter_integer",ImGuiDataType_U16,&parameter.value_or_offset)){if(parameter.type==MaterialValueType::u8)parameter.value_or_offset=std::min<std::uint16_t>(parameter.value_or_offset,255u);(*source_parameter)["value_or_offset"]=parameter.value_or_offset;dirty_=true;edit_status_.clear();}
+                    }else ImGui::Text("offset %u",parameter.value_or_offset);
+                    ImGui::EndDisabled();
                     ImGui::TableNextColumn();
                     if (parameter.floating_values.empty()) ImGui::TextDisabled("-");
-                    else for (std::size_t index = 0; index < parameter.floating_values.size(); ++index) { if (index) ImGui::SameLine(0, 4); ImGui::Text("%.7g", parameter.floating_values[index]); }
+                    else for (std::size_t component = 0; component < parameter.floating_values.size(); ++component) {
+                        if(component)ImGui::SameLine(0,4);ImGui::SetNextItemWidth(std::max(64.0f,170.0f/static_cast<float>(parameter.floating_values.size())));
+                        ImGui::BeginDisabled(!editable);const auto id="##parameter_float_"+std::to_string(component);
+                        if(ImGui::InputFloat(id.c_str(),&parameter.floating_values[component],0,0,"%.7g")){
+                            const auto pool_index=static_cast<std::size_t>(parameter.value_or_offset)+component;
+                            if(pool_index<asset_.shader_parameter_float_pool.size()&&document_.contains("shader_param_float_data_pool")&&document_["shader_param_float_data_pool"].is_array()&&pool_index<document_["shader_param_float_data_pool"].size()){
+                                asset_.shader_parameter_float_pool[pool_index]=parameter.floating_values[component];document_["shader_param_float_data_pool"][pool_index]=parameter.floating_values[component];dirty_=true;edit_status_.clear();
+                            }
+                        }ImGui::EndDisabled();
+                    }
                     ImGui::TableNextColumn(); ImGui::TextUnformatted(parameter_meaning(parameter));
                     ImGui::TableNextColumn(); ImGui::TextUnformatted(parameter_confidence(parameter));
+                    ImGui::PopID();
                 }
                 ImGui::EndTable();
             }
@@ -434,7 +553,9 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
                 ImGui::TableSetupColumn("已解包路径",ImGuiTableColumnFlags_WidthStretch);
                 ImGui::TableHeadersRow();
                 for(std::size_t texture_index=0;texture_index<material.texture_maps.size();++texture_index){
-                    const auto& texture=material.texture_maps[texture_index];
+                    auto& texture=material.texture_maps[texture_index];
+                    nlohmann::json* source_texture=nullptr;
+                    if(editable&&source_material->contains("texture_maps")&&(*source_material)["texture_maps"].is_array()&&texture_index<(*source_material)["texture_maps"].size())source_texture=&(*source_material)["texture_maps"][texture_index];
                     const auto dds=resolve_texture_dds(unpack_root_,texture.texture_name,material.granite.has_value());
                     ImGui::PushID(static_cast<int>(texture_index));
                     ImGui::TableNextRow(ImGuiTableRowFlags_None,74.0f);
@@ -455,7 +576,9 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
                     texture_context_menu("##texture_context_preview",dds);
                     const auto* inferred_name=inferred_texture_name(texture.hash);
                     ImGui::TableNextColumn();ImGui::TextWrapped("%s%s\n%s",inferred_name?inferred_name:(texture.name.empty()?"<unknown>":texture.name.c_str()),inferred_name?"（推断）":"",hex32(texture.hash).c_str());texture_context_menu("##texture_context_map",dds);
-                    ImGui::TableNextColumn();ImGui::TextUnformatted(texture.texture_name.c_str());texture_context_menu("##texture_context_name",dds);
+                    ImGui::TableNextColumn();ImGui::BeginDisabled(source_texture==nullptr);
+                    if(input_text_value("##texture_name",texture.texture_name)){(*source_texture)["texture_name"]=texture.texture_name;dirty_=true;edit_status_.clear();}
+                    ImGui::EndDisabled();texture_context_menu("##texture_context_name",dds);
                     ImGui::TableNextColumn(); ImGui::TextUnformatted(texture_meaning(texture));texture_context_menu("##texture_context_meaning",dds);
                     ImGui::TableNextColumn(); ImGui::TextWrapped("%s",texture_confidence(texture));texture_context_menu("##texture_context_confidence",dds);
                     ImGui::TableNextColumn();
@@ -468,19 +591,22 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
             ImGui::SeparatorText("Granite streaming");
             if (!material.granite) ImGui::TextUnformatted("未设置 granite_params：游戏将按普通 texture 路径加载。");
             else {
-                ImGui::Text("tile set %u | unk4 %u | unk5 %u", material.granite->tile_set_number, material.granite->unknown4, material.granite->unknown5);
-                for (std::size_t index = 0; index < material.granite->page_files.size(); ++index)
-                    ImGui::BulletText("page[%zu] %s", index, material.granite->page_files[index].c_str());
-                for (std::size_t index = 0; index < material.granite->layer_names.size(); ++index)
-                    ImGui::BulletText("layer[%zu] -> %s (%s)", index,
-                        material.granite->layer_names[index].empty() ? "<unknown>" : material.granite->layer_names[index].c_str(),
-                        index < material.granite->layer_hashes.size() ? hex32(material.granite->layer_hashes[index]).c_str() : "<missing>");
+                auto& granite=*material.granite;nlohmann::json* source_granite=nullptr;
+                if(editable&&source_material->contains("granite_params")&&(*source_material)["granite_params"].is_object())source_granite=&(*source_material)["granite_params"];
+                const auto granite_u8=[&](const char* label,const char* id,std::uint8_t& value,const char* key){ImGui::TextUnformatted(label);ImGui::SameLine();ImGui::SetNextItemWidth(75);ImGui::BeginDisabled(source_granite==nullptr);if(ImGui::InputScalar(id,ImGuiDataType_U8,&value)){(*source_granite)[key]=value;dirty_=true;edit_status_.clear();}ImGui::EndDisabled();};
+                granite_u8("tile set","##granite_tile",granite.tile_set_number,"tile_set_number");ImGui::SameLine(0,16);granite_u8("unk4","##granite_unk4",granite.unknown4,"unk4");ImGui::SameLine(0,16);granite_u8("unk5","##granite_unk5",granite.unknown5,"unk5");
+                if(ImGui::BeginTable("##granite_fields",3,ImGuiTableFlags_RowBg|ImGuiTableFlags_BordersInnerV)){
+                    ImGui::TableSetupColumn("类型",ImGuiTableColumnFlags_WidthFixed,80);ImGui::TableSetupColumn("索引",ImGuiTableColumnFlags_WidthFixed,55);ImGui::TableSetupColumn("值");ImGui::TableHeadersRow();
+                    for(std::size_t index=0;index<granite.page_files.size();++index){ImGui::PushID(static_cast<int>(index));ImGui::TableNextRow();ImGui::TableNextColumn();ImGui::TextUnformatted("page");ImGui::TableNextColumn();ImGui::Text("%zu",index);ImGui::TableNextColumn();ImGui::BeginDisabled(source_granite==nullptr);if(input_text_value("##granite_page",granite.page_files[index])){(*source_granite)["page_file"][index]=granite.page_files[index];dirty_=true;edit_status_.clear();}ImGui::EndDisabled();ImGui::PopID();}
+                    for(std::size_t index=0;index<granite.layer_names.size();++index){ImGui::TableNextRow();ImGui::TableNextColumn();ImGui::TextUnformatted("layer");ImGui::TableNextColumn();ImGui::Text("%zu",index);ImGui::TableNextColumn();ImGui::Text("%s (%s)",granite.layer_names[index].empty()?"<unknown>":granite.layer_names[index].c_str(),index<granite.layer_hashes.size()?hex32(granite.layer_hashes[index]).c_str():"<missing>");}
+                    ImGui::EndTable();
+                }
             }
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("常量缓冲")) {
             const auto* layout = gbfr::editor::mmat_catalog::find(material.shader_type);
-            const gbfr::MaterialConstantBuffer* param_buffer = nullptr;
+            gbfr::MaterialConstantBuffer* param_buffer = nullptr;
             std::size_t param_buffer_index = 0;
             if (layout && !material.constant_buffer_indices.empty()) {
                 param_buffer_index = material.constant_buffer_indices.front();
@@ -503,6 +629,7 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
                     ImGui::TableSetupColumn("用途（RDEF 名称直译）", ImGuiTableColumnFlags_WidthFixed, 210);
                     ImGui::TableHeadersRow();
                     for (const auto& field : layout->fields) {
+                        ImGui::PushID(field.name);
                         const auto first_word = static_cast<std::size_t>(field.offset / sizeof(std::uint32_t));
                         const auto components = static_cast<std::size_t>(field.size / sizeof(std::uint32_t));
                         ImGui::TableNextRow();
@@ -516,24 +643,19 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
                         else ImGui::TextUnformatted(components == 1 ? "float" : "float vector");
                         ImGui::TableNextColumn();
                         if (first_word + components > param_buffer->words.size()) ImGui::TextDisabled("越界");
-                        else if (field.type == FieldType::boolean)
-                            ImGui::Text("%s (raw %u)", param_buffer->words[first_word] ? "true" : "false", param_buffer->words[first_word]);
-                        else if (field.type == FieldType::signed_integer)
-                            for (std::size_t component = 0; component < components; ++component) {
-                                if (component) ImGui::SameLine(0, 5);
-                                ImGui::Text("%d", static_cast<std::int32_t>(param_buffer->words[first_word + component]));
-                            }
-                        else if (field.type == FieldType::unsigned_integer)
-                            for (std::size_t component = 0; component < components; ++component) {
-                                if (component) ImGui::SameLine(0, 5);
-                                ImGui::Text("%u", param_buffer->words[first_word + component]);
-                            }
-                        else for (std::size_t component = 0; component < components; ++component) {
-                            if (component) ImGui::SameLine(0, 5);
-                            ImGui::Text("%.7g", std::bit_cast<float>(param_buffer->words[first_word + component]));
+                        else if (field.type == FieldType::boolean){
+                            bool value=param_buffer->words[first_word]!=0;ImGui::BeginDisabled(!editable);if(ImGui::Checkbox("##field_bool",&value))set_buffer_word(param_buffer_index,first_word,value?1u:0u);ImGui::EndDisabled();
+                        }else for(std::size_t component=0;component<components;++component){
+                            if(component)ImGui::SameLine(0,4);ImGui::SetNextItemWidth(std::max(58.0f,245.0f/static_cast<float>(components)));ImGui::BeginDisabled(!editable);
+                            const auto id="##field_"+std::to_string(component);
+                            if(field.type==FieldType::signed_integer){auto value=static_cast<std::int32_t>(param_buffer->words[first_word+component]);if(ImGui::InputScalar(id.c_str(),ImGuiDataType_S32,&value))set_buffer_word(param_buffer_index,first_word+component,static_cast<std::uint32_t>(value));}
+                            else if(field.type==FieldType::unsigned_integer){auto value=param_buffer->words[first_word+component];if(ImGui::InputScalar(id.c_str(),ImGuiDataType_U32,&value))set_buffer_word(param_buffer_index,first_word+component,value);}
+                            else{auto value=std::bit_cast<float>(param_buffer->words[first_word+component]);if(ImGui::InputFloat(id.c_str(),&value,0,0,"%.7g"))set_buffer_word(param_buffer_index,first_word+component,std::bit_cast<std::uint32_t>(value));}
+                            ImGui::EndDisabled();
                         }
                         ImGui::TableNextColumn();
                         ImGui::TextWrapped("%s", material.shader_type >= 2 && material.shader_type <= 6 ? character_param_buffer_meaning(field.name) : "-");
+                        ImGui::PopID();
                     }
                     ImGui::EndTable();
                 }
@@ -553,14 +675,16 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
                 ImGui::TableSetupColumn("Float reinterpret");
                 ImGui::TableHeadersRow();
                 for (std::size_t buffer_index = 0; buffer_index < asset_.constant_buffers.size(); ++buffer_index) {
-                    const auto& buffer = asset_.constant_buffers[buffer_index];
+                    auto& buffer = asset_.constant_buffers[buffer_index];
                     for (std::size_t word_index = 0; word_index < buffer.words.size(); ++word_index) {
+                        ImGui::PushID(static_cast<int>(buffer_index*10000+word_index));
                         ImGui::TableNextRow(); ImGui::TableNextColumn(); ImGui::Text("%zu%s", buffer_index,
                             std::find(material.constant_buffer_indices.begin(), material.constant_buffer_indices.end(), buffer_index) != material.constant_buffer_indices.end() ? " *" : "");
-                        ImGui::TableNextColumn(); ImGui::TextUnformatted(hex32(buffer.name_hash).c_str());
+                        ImGui::TableNextColumn();if(word_index==0){ImGui::SetNextItemWidth(-FLT_MIN);ImGui::BeginDisabled(!editable);if(ImGui::InputScalar("##buffer_hash",ImGuiDataType_U32,&buffer.name_hash,nullptr,nullptr,"%08X",ImGuiInputTextFlags_CharsHexadecimal)){document_["constant_buffers"][buffer_index]["unk_unique_param_name_hash"]=buffer.name_hash;dirty_=true;edit_status_.clear();}ImGui::EndDisabled();}else ImGui::TextDisabled("\"");
                         ImGui::TableNextColumn(); ImGui::Text("%zu", word_index);
-                        ImGui::TableNextColumn(); ImGui::TextUnformatted(hex32(buffer.words[word_index]).c_str());
-                        ImGui::TableNextColumn(); ImGui::Text("%.9g", std::bit_cast<float>(buffer.words[word_index]));
+                        ImGui::TableNextColumn();ImGui::SetNextItemWidth(-FLT_MIN);auto raw=buffer.words[word_index];ImGui::BeginDisabled(!editable);if(ImGui::InputScalar("##buffer_raw",ImGuiDataType_U32,&raw,nullptr,nullptr,"%08X",ImGuiInputTextFlags_CharsHexadecimal))set_buffer_word(buffer_index,word_index,raw);ImGui::EndDisabled();
+                        ImGui::TableNextColumn();ImGui::SetNextItemWidth(-FLT_MIN);auto floating=std::bit_cast<float>(buffer.words[word_index]);ImGui::BeginDisabled(!editable);if(ImGui::InputFloat("##buffer_float",&floating,0,0,"%.9g"))set_buffer_word(buffer_index,word_index,std::bit_cast<std::uint32_t>(floating));ImGui::EndDisabled();
+                        ImGui::PopID();
                     }
                 }
                 ImGui::EndTable();
@@ -569,15 +693,20 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
         }
         if (ImGui::BeginTabItem("文件信息")) {
             ImGui::Text("magic %u%s", asset_.magic, asset_.magic == 20230727u ? " (valid)" : " (unexpected)");
-            ImGui::Text("root unk2 %u | bool3 %s | bool4 %s | bool5 %s", asset_.unknown2, asset_.bool3 ? "true" : "false", asset_.bool4 ? "true" : "false", asset_.bool5 ? "true" : "false");
+            ImGui::BeginDisabled(!editable);
+            ImGui::SetNextItemWidth(90);if(ImGui::InputScalar("root unk2",ImGuiDataType_U8,&asset_.unknown2)){document_["unk2"]=asset_.unknown2;dirty_=true;edit_status_.clear();}
+            ImGui::SameLine();if(ImGui::Checkbox("bool3",&asset_.bool3)){document_["bool3"]=asset_.bool3;dirty_=true;edit_status_.clear();}
+            ImGui::SameLine();if(ImGui::Checkbox("bool4",&asset_.bool4)){document_["bool4"]=asset_.bool4;dirty_=true;edit_status_.clear();}
+            ImGui::SameLine();if(ImGui::Checkbox("bool5",&asset_.bool5)){document_["bool5"]=asset_.bool5;dirty_=true;edit_status_.clear();}
+            ImGui::EndDisabled();
             ImGui::SeparatorText("shader_param_float_data_pool");
             if(asset_.shader_parameter_float_pool.empty())ImGui::TextDisabled("空");
             else if(ImGui::BeginTable("mmat_float_pool",2,ImGuiTableFlags_RowBg|ImGuiTableFlags_BordersInnerV)){
                 ImGui::TableSetupColumn("Index",ImGuiTableColumnFlags_WidthFixed,80);ImGui::TableSetupColumn("Float");ImGui::TableHeadersRow();
-                for(std::size_t index=0;index<asset_.shader_parameter_float_pool.size();++index){ImGui::TableNextRow();ImGui::TableNextColumn();ImGui::Text("%zu",index);ImGui::TableNextColumn();ImGui::Text("%.9g",asset_.shader_parameter_float_pool[index]);}
+                for(std::size_t index=0;index<asset_.shader_parameter_float_pool.size();++index){ImGui::PushID(static_cast<int>(index));ImGui::TableNextRow();ImGui::TableNextColumn();ImGui::Text("%zu",index);ImGui::TableNextColumn();ImGui::SetNextItemWidth(-FLT_MIN);ImGui::BeginDisabled(!editable);if(ImGui::InputFloat("##float_pool",&asset_.shader_parameter_float_pool[index],0,0,"%.9g")){document_["shader_param_float_data_pool"][index]=asset_.shader_parameter_float_pool[index];for(auto& entry:asset_.entries)for(auto& parameter:entry.shader_parameters)if(index>=parameter.value_or_offset&&index<static_cast<std::size_t>(parameter.value_or_offset)+parameter.floating_values.size())parameter.floating_values[index-parameter.value_or_offset]=asset_.shader_parameter_float_pool[index];dirty_=true;edit_status_.clear();}ImGui::EndDisabled();ImGui::PopID();}
                 ImGui::EndTable();
             }
-            ImGui::TextWrapped("当前阶段为无损检查与安全封回。未知常量缓冲只显示原始位模式，不提供会破坏数据的猜测性编辑。");
+            ImGui::TextWrapped("原始常量缓冲编辑按 32 位位模式写回；修改未知字段前请保留原版对照。保存不会删除尚未解析的 JSON 字段。");
             ImGui::EndTabItem();
         }
         ImGui::EndTabBar();

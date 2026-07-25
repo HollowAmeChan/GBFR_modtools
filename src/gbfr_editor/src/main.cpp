@@ -434,8 +434,11 @@ bool load_model_preview(std::size_t index,bool force=false);
 void run_selected_asset_action(bool restore) {
     if (!g_workspace || !g_selected_asset) return;
     try {
+        const auto kind=g_workspace->assets()[*g_selected_asset].kind;
+        if(!restore&&kind==gbfr::AssetKind::material&&!g_material_inspector.save_changes())throw std::runtime_error("mmat 有未保存且无法写入的编辑，已取消构建");
         if (restore) g_workspace->restore_asset(*g_selected_asset);
         else g_workspace->build_asset(*g_selected_asset);
+        if(restore&&kind==gbfr::AssetKind::material)g_material_inspector.reload_if_open(g_workspace->assets()[*g_selected_asset].input);
         if(restore)g_texture_gallery.clear();
         if(restore && g_workspace->assets()[*g_selected_asset].kind==gbfr::AssetKind::model) load_model_preview(*g_selected_asset,true);
         gbfr::Log::write(gbfr::LogLevel::info, restore ? "资源已从 source 恢复到 unpack" : "资源已从 unpack 封回 build");
@@ -458,6 +461,7 @@ std::vector<std::size_t> selected_asset_indices() {
 
 void run_asset_actions(const std::vector<std::size_t>& indices, bool restore) {
     if (!g_workspace || indices.empty()) return;
+    if(!restore&&!g_material_inspector.save_changes()){gbfr::Log::write(gbfr::LogLevel::error,"mmat 有未保存且无法写入的编辑，已取消批量构建");return;}
     std::size_t succeeded{},skipped{};
     for (const auto index : indices) {
         const auto kind=g_workspace->assets()[index].kind;
@@ -467,6 +471,7 @@ void run_asset_actions(const std::vector<std::size_t>& indices, bool restore) {
         try {
             if (restore) g_workspace->restore_asset(index);
             else g_workspace->build_asset(index);
+            if(restore&&kind==gbfr::AssetKind::material)g_material_inspector.reload_if_open(asset.input);
             ++succeeded;
         } catch (const std::exception& error) {
             gbfr::Log::write(gbfr::LogLevel::error, "资源操作失败：" + std::string(error.what()));
@@ -482,11 +487,13 @@ void run_asset_actions(const std::vector<std::size_t>& indices, bool restore) {
 
 void remove_selected_material_a4(const std::vector<std::size_t>& indices) {
     if (!g_workspace) return;
+    if(!g_material_inspector.save_changes()){gbfr::Log::write(gbfr::LogLevel::error,"mmat 有未保存且无法写入的编辑，已取消清除 Granite 引用");return;}
     std::size_t files{}, removed{};
     for (const auto index : indices) {
         if (index >= g_workspace->assets().size() || g_workspace->assets()[index].kind != gbfr::AssetKind::material) continue;
         try {
             const auto count = g_workspace->remove_material_granite(index);
+            g_material_inspector.reload_if_open(g_workspace->assets()[index].input);
             if (count) { ++files; removed += count; }
         } catch (const std::exception& error) {
             gbfr::Log::write(gbfr::LogLevel::error, "Granite 流式引用清除失败：" + std::string(error.what()));
@@ -1389,6 +1396,7 @@ void draw_editor_shell() {
         ImGui::Image(reinterpret_cast<ImTextureID>(g_preview->texture_image()),image_size,uv_min,uv_max);
     }else if(g_preview_mode==PreviewMode::material){
         g_material_inspector.draw(*g_preview,g_texture_gallery);
+        if(g_material_inspector.consume_file_changed()&&g_workspace)g_workspace->refresh();
     }else if(!g_preview_error.empty()){
         ImGui::PushStyleColor(ImGuiCol_Text,ImVec4(1.0f,.38f,.32f,1.0f));
         ImGui::TextWrapped("%s",g_preview_error.c_str());
