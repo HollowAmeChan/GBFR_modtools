@@ -203,6 +203,19 @@ private:
     fs::path path_;
 };
 
+void restore_cloth_xml(const fs::path& source, const fs::path& input,
+                       const std::string& baseline_sha256) {
+    TemporaryDirectory temporary(L"gbfr_cloth_restore_");
+    const auto decoded = temporary.path() / input.filename();
+    run_process(locate_repo_file(L"_lib/tools/GBFRDataTools/GBFRDataTools.exe"),
+                {L"bxm-to-xml", L"-i", source.wstring(), L"-o", decoded.wstring()});
+    if (!fs::is_regular_file(decoded) || !fs::file_size(decoded))
+        throw std::runtime_error("GBFRDataTools did not restore the cloth XML");
+    if (!baseline_sha256.empty() && gbfr::sha256_file(decoded) != baseline_sha256)
+        throw std::runtime_error("Restored cloth XML does not match workspace baseline");
+    copy_atomic(decoded, input);
+}
+
 void validate_dds(const fs::path& path) {
     const auto bytes = read_bytes(path);
     if (bytes.size() < 4 || bytes[0] != 'D' || bytes[1] != 'D' || bytes[2] != 'S' || bytes[3] != ' ')
@@ -551,6 +564,13 @@ void Workspace::restore_asset(std::size_t index) {
     if (asset.kind == AssetKind::material) {
         if (!fs::is_regular_file(asset.source) || sha256_file(asset.source) != asset.source_sha256) throw std::runtime_error("mmat source baseline is missing or changed");
         decode_material(asset.source, asset.input);
+        refresh();
+        return;
+    }
+    if (asset.kind == AssetKind::cloth) {
+        if (!fs::is_regular_file(asset.source) || sha256_file(asset.source) != asset.source_sha256)
+            throw std::runtime_error("Cloth source baseline is missing or changed");
+        restore_cloth_xml(asset.source, asset.input, asset.baseline_sha256);
         refresh();
         return;
     }

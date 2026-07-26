@@ -307,6 +307,48 @@ int main() {
         if (pl1400.assets().size() != expected_assets) return 6;
         for(std::size_t i=1;i<pl1400.assets().size();++i)if(gbfr::natural_less_case_insensitive(pl1400.assets()[i].input.filename().native(),pl1400.assets()[i-1].input.filename().native()))return 32;
         if(!gbfr::natural_less_case_insensitive(L"2.mmat.json",L"10.mmat.json")||gbfr::natural_less_case_insensitive(L"10.mmat.json",L"2.mmat.json"))return 45;
+        {
+            const auto cloth_restore_root=test_temp/L"cloth_restore_workspace";
+            fs::create_directories(cloth_restore_root/L"source");
+            fs::create_directories(cloth_restore_root/L"unpack");
+            nlohmann::json cloth_manifest={{"Version",1},{"CharacterId","cloth_restore"},{"ClothFiles",nlohmann::json::array()}};
+            const std::array<std::string,4> categories{"clp","clh","sequence","reset"};
+            std::array<std::string,4> baseline_hashes;
+            for(std::size_t category_index=0;category_index<categories.size();++category_index){
+                const auto& category=categories[category_index];
+                const auto found=std::find_if(pl1400.assets().begin(),pl1400.assets().end(),[&](const auto& asset){return asset.kind==gbfr::AssetKind::cloth&&asset.subtype==category&&fs::is_regular_file(asset.source)&&fs::is_regular_file(asset.input);});
+                if(found==pl1400.assets().end())return 108;
+                const auto source=cloth_restore_root/L"source"/fs::path(category+".bxm");
+                const auto input=cloth_restore_root/L"unpack"/fs::path(category+".bxm.xml");
+                fs::copy_file(found->source,source,fs::copy_options::overwrite_existing);
+                fs::copy_file(found->input,input,fs::copy_options::overwrite_existing);
+                baseline_hashes[category_index]=gbfr::sha256_file(input);
+                cloth_manifest["ClothFiles"].push_back({
+                    {"Source",("source/"+category+".bxm")},
+                    {"SourceSha256",gbfr::sha256_file(source)},
+                    {"Xml",("unpack/"+category+".bxm.xml")},
+                    {"Output",("build/"+category+".bxm")},
+                    {"BaselineSha256",baseline_hashes[category_index]},
+                    {"Category",category}
+                });
+            }
+            {std::ofstream manifest(cloth_restore_root/L"workspace.json");manifest<<cloth_manifest.dump(2);}
+            auto cloth_restore=gbfr::Workspace::load(cloth_restore_root/L"workspace.json");
+            if(cloth_restore.assets().size()!=categories.size())return 109;
+            for(std::size_t asset_index=0;asset_index<cloth_restore.assets().size();++asset_index){
+                if(asset_index==0)fs::remove(cloth_restore.assets()[asset_index].input);
+                else std::ofstream(cloth_restore.assets()[asset_index].input,std::ios::trunc)<<"edited";
+            }
+            cloth_restore.refresh();
+            if(cloth_restore.changed_count()!=categories.size()-1||cloth_restore.missing_count()!=1)return 110;
+            for(std::size_t asset_index=0;asset_index<cloth_restore.assets().size();++asset_index)cloth_restore.restore_asset(asset_index);
+            for(const auto& asset:cloth_restore.assets()){
+                const auto category=std::find(categories.begin(),categories.end(),asset.subtype);
+                if(category==categories.end()||gbfr::sha256_file(asset.input)!=baseline_hashes[static_cast<std::size_t>(std::distance(categories.begin(),category))])return 111;
+            }
+            if(cloth_restore.changed_count()!=0)return 112;
+            fs::remove_all(cloth_restore_root);
+        }
         const auto model_root = integration.parent_path() / L"unpack/data/model/pl/pl1400";
         const auto minfo = gbfr::load_minfo(model_root / L"pl1400.minfo");
         const auto skeleton = gbfr::load_skeleton(model_root / L"pl1400.skeleton");

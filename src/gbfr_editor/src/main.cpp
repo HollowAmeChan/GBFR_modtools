@@ -431,6 +431,15 @@ void poll_workspace_extraction() {
 
 bool load_model_preview(std::size_t index,bool force=false);
 
+void reload_cloth_preview() {
+    if(!g_workspace||!g_loaded_model)return;
+    const auto& assets=g_workspace->assets();
+    const auto found=std::find_if(assets.begin(),assets.end(),[&](const auto& asset){
+        return asset.kind==gbfr::AssetKind::model&&asset.input==g_loaded_model->minfo;
+    });
+    if(found!=assets.end())load_model_preview(static_cast<std::size_t>(std::distance(assets.begin(),found)),true);
+}
+
 void run_selected_asset_action(bool restore) {
     if (!g_workspace || !g_selected_asset) return;
     try {
@@ -441,6 +450,7 @@ void run_selected_asset_action(bool restore) {
         if(restore&&kind==gbfr::AssetKind::material)g_material_inspector.reload_if_open(g_workspace->assets()[*g_selected_asset].input);
         if(restore)g_texture_gallery.clear();
         if(restore && g_workspace->assets()[*g_selected_asset].kind==gbfr::AssetKind::model) load_model_preview(*g_selected_asset,true);
+        if(restore && kind==gbfr::AssetKind::cloth) reload_cloth_preview();
         gbfr::Log::write(gbfr::LogLevel::info, restore ? "资源已从 source 恢复到 unpack" : "资源已从 unpack 封回 build");
     } catch (const std::exception& error) {
         gbfr::Log::write(gbfr::LogLevel::error, error.what());
@@ -462,16 +472,17 @@ std::vector<std::size_t> selected_asset_indices() {
 void run_asset_actions(const std::vector<std::size_t>& indices, bool restore) {
     if (!g_workspace || indices.empty()) return;
     if(!restore&&!g_material_inspector.save_changes()){gbfr::Log::write(gbfr::LogLevel::error,"mmat 有未保存且无法写入的编辑，已取消批量构建");return;}
-    std::size_t succeeded{},skipped{};
+    std::size_t succeeded{},skipped{};bool restored_cloth{};
     for (const auto index : indices) {
         const auto kind=g_workspace->assets()[index].kind;
         const auto& asset = g_workspace->assets()[index];
-        const bool supported=restore?(kind!=gbfr::AssetKind::cloth&&(kind!=gbfr::AssetKind::new_texture||!asset.granite_hash.empty())):(kind!=gbfr::AssetKind::cloth);
+        const bool supported=restore?(kind!=gbfr::AssetKind::new_texture||!asset.granite_hash.empty()):(kind!=gbfr::AssetKind::cloth);
         if(!supported){++skipped;continue;}
         try {
             if (restore) g_workspace->restore_asset(index);
             else g_workspace->build_asset(index);
             if(restore&&kind==gbfr::AssetKind::material)g_material_inspector.reload_if_open(asset.input);
+            if(restore&&kind==gbfr::AssetKind::cloth)restored_cloth=true;
             ++succeeded;
         } catch (const std::exception& error) {
             gbfr::Log::write(gbfr::LogLevel::error, "资源操作失败：" + std::string(error.what()));
@@ -479,6 +490,7 @@ void run_asset_actions(const std::vector<std::size_t>& indices, bool restore) {
     }
     g_workspace->refresh();
     if (restore) g_texture_gallery.clear();
+    if (restored_cloth) reload_cloth_preview();
     if (restore && g_selected_asset &&
         std::find(indices.begin(), indices.end(), *g_selected_asset) != indices.end() &&
         g_workspace->assets()[*g_selected_asset].kind == gbfr::AssetKind::model) load_model_preview(*g_selected_asset, true);
@@ -1416,14 +1428,16 @@ void draw_editor_shell() {
     }
     const auto inspector_indices=selected_asset_indices();
     if(g_workspace&&g_asset_selection.Size>1){
-        std::size_t available_count{},materials{},a4_files{};
-        for(const auto index:inspector_indices){const auto& item=g_workspace->assets()[index];if(item.available)++available_count;if(item.kind==gbfr::AssetKind::material){++materials;try{if(g_workspace->material_granite_count(index))++a4_files;}catch(...){}}}
+        std::size_t available_count{},restorable_count{},materials{},a4_files{};
+        for(const auto index:inspector_indices){const auto& item=g_workspace->assets()[index];if(item.available)++available_count;if(item.available||(item.kind==gbfr::AssetKind::cloth&&!item.source.empty()&&std::filesystem::is_regular_file(item.source)))++restorable_count;if(item.kind==gbfr::AssetKind::material){++materials;try{if(g_workspace->material_granite_count(index))++a4_files;}catch(...){}}}
         ImGui::Text("多选 / %zu 个资源",inspector_indices.size());
         ImGui::Text("可用 %zu  |  mmat %zu",available_count,materials);
         ImGui::SeparatorText("批量操作");
         ImGui::BeginDisabled(available_count==0);
         if(ImGui::Button("构建选中项"))run_asset_actions(inspector_indices,false);
+        ImGui::EndDisabled();
         ImGui::SameLine();
+        ImGui::BeginDisabled(restorable_count==0);
         if(ImGui::Button("恢复选中项"))run_asset_actions(inspector_indices,true);
         ImGui::EndDisabled();
         ImGui::BeginDisabled(a4_files==0);
@@ -1471,9 +1485,12 @@ void draw_editor_shell() {
             ImGui::Text("已选 %zu 个资源", batch_indices.size());
             ImGui::Separator();
             const auto available_count = std::count_if(batch_indices.begin(), batch_indices.end(), [&](const auto index){return g_workspace->assets()[index].available;});
+            const auto restorable_count = std::count_if(batch_indices.begin(), batch_indices.end(), [&](const auto index){const auto& item=g_workspace->assets()[index];return item.available||(item.kind==gbfr::AssetKind::cloth&&!item.source.empty()&&std::filesystem::is_regular_file(item.source));});
             ImGui::BeginDisabled(available_count == 0);
             if (ImGui::Button("构建选中项")) run_asset_actions(batch_indices, false);
+            ImGui::EndDisabled();
             ImGui::SameLine();
+            ImGui::BeginDisabled(restorable_count == 0);
             if (ImGui::Button("从 source 恢复选中")) run_asset_actions(batch_indices, true);
             ImGui::EndDisabled();
             std::size_t material_count{}, a4_files{};
@@ -1499,7 +1516,8 @@ void draw_editor_shell() {
         ImGui::TextColored(built?ImVec4(.35f,.8f,.5f,1):asset.available?ImVec4(.35f,.8f,.5f,1):ImVec4(.95f,.35f,.35f,1),
                            "%s",built?"build 已构建":asset.available?"unpack 可用":"unpack 输入缺失");
         ImGui::Separator();
-        ImGui::BeginDisabled(!asset.available);
+        const bool action_available=asset.available||(asset.kind==gbfr::AssetKind::cloth&&!asset.source.empty()&&std::filesystem::is_regular_file(asset.source));
+        ImGui::BeginDisabled(!action_available);
         if(asset.kind==gbfr::AssetKind::model){
             ImGui::TextWrapped("模型通常由 minfo、skeleton 和多个 mmesh 组成；要完整封回，请在列表中多选相关模型文件后执行构建选中项。\n");
             if(ImGui::Button("重新加载模型预览"))load_model_preview(index,true);
@@ -1535,6 +1553,9 @@ void draw_editor_shell() {
             if(ImGui::Button("编码 mmat 到 build"))run_selected_asset_action(false);
             ImGui::EndDisabled();
             if(ImGui::Button("从 source 重新解码 JSON")){run_selected_asset_action(true);preview_asset(index);}
+        }else if(asset.kind==gbfr::AssetKind::cloth){
+            ImGui::TextWrapped("从登记的 source BXM 重新解码当前 %s XML。恢复前会校验 source 与 XML 基线，不会写入 build。",asset.subtype.c_str());
+            if(ImGui::Button("从 source 重新解码 Cloth XML"))run_selected_asset_action(true);
         }else{
             ImGui::TextUnformatted("该资源目前只支持查看和编辑中间态。");
         }
