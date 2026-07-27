@@ -476,7 +476,7 @@ void run_asset_actions(const std::vector<std::size_t>& indices, bool restore) {
     for (const auto index : indices) {
         const auto kind=g_workspace->assets()[index].kind;
         const auto& asset = g_workspace->assets()[index];
-        const bool supported=restore?(kind!=gbfr::AssetKind::new_texture||!asset.granite_hash.empty()):(kind!=gbfr::AssetKind::cloth);
+        const bool supported=!restore||kind!=gbfr::AssetKind::new_texture||!asset.granite_hash.empty();
         if(!supported){++skipped;continue;}
         try {
             if (restore) g_workspace->restore_asset(index);
@@ -1554,7 +1554,8 @@ void draw_editor_shell() {
             ImGui::EndDisabled();
             if(ImGui::Button("从 source 重新解码 JSON")){run_selected_asset_action(true);preview_asset(index);}
         }else if(asset.kind==gbfr::AssetKind::cloth){
-            ImGui::TextWrapped("从登记的 source BXM 重新解码当前 %s XML。恢复前会校验 source 与 XML 基线，不会写入 build。",asset.subtype.c_str());
+            ImGui::TextWrapped("将当前 %s XML 编码到 build，并回读校验全部 XML 内容。恢复操作会校验登记的 source BXM 与 XML 基线。",asset.subtype.c_str());
+            if(ImGui::Button("编码 Cloth BXM 到 build"))run_selected_asset_action(false);
             if(ImGui::Button("从 source 重新解码 Cloth XML"))run_selected_asset_action(true);
         }else{
             ImGui::TextUnformatted("该资源目前只支持查看和编辑中间态。");

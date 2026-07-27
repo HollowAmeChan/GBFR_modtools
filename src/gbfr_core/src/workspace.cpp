@@ -1,6 +1,7 @@
 #include <gbfr/core/workspace.hpp>
 
 #include <nlohmann/json.hpp>
+#include <pugixml.hpp>
 #include <windows.h>
 #include <bcrypt.h>
 
@@ -9,6 +10,7 @@
 #include <cwctype>
 #include <fstream>
 #include <iomanip>
+#include <iterator>
 #include <sstream>
 #include <stdexcept>
 #include <cstdint>
@@ -214,6 +216,59 @@ void restore_cloth_xml(const fs::path& source, const fs::path& input,
     if (!baseline_sha256.empty() && gbfr::sha256_file(decoded) != baseline_sha256)
         throw std::runtime_error("Restored cloth XML does not match workspace baseline");
     copy_atomic(decoded, input);
+}
+
+bool semantic_xml_node(const pugi::xml_node& left, const pugi::xml_node& right) {
+    if (left.type() != right.type() || std::string_view(left.name()) != right.name() ||
+        std::string_view(left.value()) != right.value()) return false;
+    if (std::distance(left.attributes_begin(), left.attributes_end()) !=
+        std::distance(right.attributes_begin(), right.attributes_end())) return false;
+    for (const auto attribute : left.attributes()) {
+        const auto other = right.attribute(attribute.name());
+        if (!other || std::string_view(attribute.value()) != other.value()) return false;
+    }
+    auto semantic_child = [](pugi::xml_node node) {
+        while (node && node.type() != pugi::node_element && node.type() != pugi::node_pcdata &&
+               node.type() != pugi::node_cdata) node = node.next_sibling();
+        return node;
+    };
+    auto left_child = semantic_child(left.first_child());
+    auto right_child = semantic_child(right.first_child());
+    while (left_child && right_child) {
+        if (!semantic_xml_node(left_child, right_child)) return false;
+        left_child = semantic_child(left_child.next_sibling());
+        right_child = semantic_child(right_child.next_sibling());
+    }
+    return !left_child && !right_child;
+}
+
+void encode_cloth(const fs::path& input, const fs::path& output) {
+    pugi::xml_document input_document;
+    const auto input_result = input_document.load_file(input.c_str(), pugi::parse_default, pugi::encoding_utf8);
+    if (!input_result || !input_document.document_element())
+        throw std::runtime_error(std::string("Cloth XML parse error: ") + input_result.description());
+
+    TemporaryDirectory temporary(L"gbfr_cloth_build_");
+    const auto encoded = temporary.path() / output.filename();
+    auto decoded = temporary.path() / output.filename();
+    decoded += L".xml";
+    const auto tool = locate_repo_file(L"_lib/tools/GBFRDataTools/GBFRDataTools.exe");
+    run_process(tool, {L"xml-to-bxm", L"-i", input.wstring(), L"-o", encoded.wstring()});
+
+    const auto bytes = read_bytes(encoded);
+    const bool valid_magic = bytes.size() >= 16 &&
+        ((bytes[0] == 'B' && bytes[1] == 'X' && bytes[2] == 'M' && bytes[3] == 0) ||
+         (bytes[0] == 'X' && bytes[1] == 'M' && bytes[2] == 'L' && bytes[3] == 0));
+    if (!valid_magic) throw std::runtime_error("GBFRDataTools did not generate a valid cloth BXM");
+
+    run_process(tool, {L"bxm-to-xml", L"-i", encoded.wstring(), L"-o", decoded.wstring()});
+    pugi::xml_document decoded_document;
+    const auto decoded_result = decoded_document.load_file(decoded.c_str(), pugi::parse_default, pugi::encoding_utf8);
+    if (!decoded_result || !decoded_document.document_element())
+        throw std::runtime_error("Generated cloth BXM could not be decoded as XML");
+    if (!semantic_xml_node(input_document.document_element(), decoded_document.document_element()))
+        throw std::runtime_error("Generated cloth BXM did not preserve the input XML");
+    copy_atomic(encoded, output);
 }
 
 void validate_dds(const fs::path& path) {
@@ -521,6 +576,7 @@ void Workspace::build_asset(std::size_t index) {
     if (!fs::is_regular_file(asset.input)) throw std::runtime_error("Selected input is missing");
     if (asset.kind == AssetKind::new_texture || asset.kind == AssetKind::granite_texture) { build_new_texture(asset.input, asset.output, asset.texture_id); return; }
     if (asset.kind == AssetKind::material) { encode_material(asset.input, asset.output); return; }
+    if (asset.kind == AssetKind::cloth) { encode_cloth(asset.input, asset.output); return; }
     if (asset.wtb_slots.empty() || asset.source.empty()) throw std::runtime_error("Selected asset has no packable WTB source");
     if (!fs::is_regular_file(asset.source) || sha256_file(asset.source) != asset.source_sha256) throw std::runtime_error("WTB source baseline is missing or changed");
     write_wtb_from_slots(asset.source, asset.output, asset.wtb_slots);
