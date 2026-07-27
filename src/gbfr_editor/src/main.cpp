@@ -916,12 +916,19 @@ void update_collision_debug() {
         if(!solver_group_visible(file_index))continue;const auto& file=g_clp_files[file_index];
         std::unordered_map<int,gbfr::Vec3> positions;
         for(const auto& node:file.data.nodes)if(const auto point=bone_point(node.bone))positions.emplace(node.bone,*point);
+        std::unordered_map<int,int> down_by_bone;
+        for(const auto& node:file.data.nodes)down_by_bone.emplace(node.bone,node.down);
         const auto append_edge=[&](std::vector<gbfr::Vec3>& lines,const gbfr::ClothNode& node,int target){
             if(target<0||target==4095)return;const auto from=positions.find(node.bone),to=positions.find(target);if(from==positions.end()||to==positions.end())return;
             if(!g_all_bones&&g_selected_bone_index>=0&&(g_selected_bone<0||(node.bone!=g_selected_bone&&target!=g_selected_bone)))return;
             lines.push_back(from->second);lines.push_back(to->second);
         };
-        for(const auto& node:file.data.nodes){append_edge(longitudinal_lines,node,node.down);append_edge(lateral_lines,node,node.side);if(node.poly!=node.side)append_edge(polygon_lines,node,node.poly);}
+        for(const auto& node:file.data.nodes){
+            append_edge(longitudinal_lines,node,node.down);
+            const auto parent=down_by_bone.find(node.up);
+            if(node.up!=4095&&(parent==down_by_bone.end()||parent->second!=node.bone))append_edge(longitudinal_lines,node,node.up);
+            append_edge(lateral_lines,node,node.side);if(node.poly!=node.side)append_edge(polygon_lines,node,node.poly);
+        }
     }
     g_preview->set_collision_lines(collision_lines);
     g_preview->set_cloth_lines(longitudinal_lines,lateral_lines,polygon_lines);
