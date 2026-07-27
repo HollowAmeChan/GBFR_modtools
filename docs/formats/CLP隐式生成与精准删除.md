@@ -95,6 +95,8 @@ Blender Operator 应支持 Undo。工作区已有从 source 恢复单个 CLP 的
 
 同日对游戏实际加载的 8 个 CLP BXM 和最终 `pl1400.skeleton` 再次联合审计：654 个节点的有效 `noUp` 全部匹配真实 skeleton 父级，没有跨组重复节点，也没有组外 `noUp/noDown/noSide/noPoly/noFix` 引用。唯一的求解对象污染是 CLP3 第 4 行（内部索引 3）的 `_900`：它是人体 `Root`，原版任何 CLP 都未使用该骨；该行五个连接字段虽全为 `4095`，仍带有 `rotLimit=0.122173`、`friction=0.9` 和 `weight_=2.0`，会把整个人物根骨送进物理解算。此类“真实对象但语义上不应参与 cloth”的节点不会被悬空引用清理命中，必须用列表行减号精确删除。
 
+模型导出确认界面必须在创建临时导出副本之前扫描全部 CLP 节点的 `bone/up/down/side/poly/fix` 实时引用。只要引用实际指向的当前 Blender `Bone.name` 严格匹配 `_[0-9a-fA-F]{3}`，就按 CLP 组在红色警告框中列出。该检查只提示、不自动删除或阻止导出；新增骨此时仍使用用户命名，稍后才在临时副本中分配 `_xxx/_cxx/_axx/_dxx`，因此不会被误报。
+
 清理不能使用别名、跨组 raw ID 或 humanoid 名称表猜测节点身份。当前导出骨架已经由用户在工具阶段完成正式命名，因此中间状态只认 `bone_ref` 直接指向的当前 Armature `Bone` 对象：
 
 1. `bone_ref` 为空或对象不存在时，删除整条 `CLOTH_WK`；即使 raw `no` 恰好撞到 `_900` 等现存 humanoid 编号，也不得借编号“复活”。
