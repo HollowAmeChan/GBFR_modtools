@@ -50,12 +50,13 @@ public:
     void set_cloth_lines(const std::vector<Vec3>& longitudinal,
                          const std::vector<Vec3>& lateral,
                          const std::vector<Vec3>& polygon);
+    void set_cloth_node_lines(const std::vector<Vec3>& points);
     bool transform_bone_point(std::size_t bone_index, Vec3 local, Vec3& output) const;
     void resize(unsigned width, unsigned height);
     void render(const OrbitCamera& camera, bool show_mesh, PreviewShadingMode shading,
                 bool show_skeleton, bool show_collisions, bool show_alpha_overlays = true,
                 bool show_cloth_links = true, bool show_ground = true,
-                bool cull_backfaces = false);
+                bool cull_backfaces = false, bool show_cloth_nodes = true);
     void frame(OrbitCamera& camera) const;
     bool project(Vec3 world, const OrbitCamera& camera, Vec2& screen) const;
     ID3D11ShaderResourceView* image() const noexcept { return color_srv_.Get(); }
@@ -95,7 +96,7 @@ private:
     ID3D11DeviceContext* context_{};
     unsigned width_{1}, height_{1}, texture_width_{}, texture_height_{}, index_count_{}, line_vertex_count_{};
     unsigned bone_point_vertex_count_{}, collision_vertex_count_{}, cloth_longitudinal_vertex_count_{};
-    unsigned cloth_lateral_vertex_count_{}, cloth_polygon_vertex_count_{};
+    unsigned cloth_lateral_vertex_count_{}, cloth_polygon_vertex_count_{}, cloth_node_vertex_count_{};
     unsigned ground_vertex_count_{};
     Vec3 bounds_min_{}, bounds_max_{};
     Microsoft::WRL::ComPtr<ID3D11Texture2D> color_, depth_;
@@ -104,7 +105,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> texture_preview_srv_;
     Microsoft::WRL::ComPtr<ID3D11DepthStencilView> depth_dsv_;
     Microsoft::WRL::ComPtr<ID3D11Buffer> vertices_, indices_, lines_, bone_points_, constants_, bones_;
-    Microsoft::WRL::ComPtr<ID3D11Buffer> collision_lines_, cloth_longitudinal_lines_, cloth_lateral_lines_, cloth_polygon_lines_, ground_lines_;
+    Microsoft::WRL::ComPtr<ID3D11Buffer> collision_lines_, cloth_longitudinal_lines_, cloth_lateral_lines_, cloth_polygon_lines_, cloth_node_lines_, ground_lines_;
     Microsoft::WRL::ComPtr<ID3D11VertexShader> vertex_shader_;
     Microsoft::WRL::ComPtr<ID3D11VertexShader> debug_vertex_shader_;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> pixel_shader_;

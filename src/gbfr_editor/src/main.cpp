@@ -108,6 +108,7 @@ gbfr::PreviewShadingMode g_preview_shading = gbfr::PreviewShadingMode::lit;
 bool g_show_skeleton = true;
 bool g_show_collisions = true;
 bool g_show_cloth_links = true;
+bool g_show_cloth_nodes = true;
 bool g_show_alpha_overlays = true;
 bool g_show_ground = true;
 bool g_cull_backfaces = false;
@@ -887,7 +888,7 @@ std::string cloth_collision_id_list(const gbfr::ClothSequenceEvent& event) {
 
 void update_collision_debug() {
     if(!g_preview)return;
-    std::vector<gbfr::Vec3> collision_lines,longitudinal_lines,lateral_lines,polygon_lines;
+    std::vector<gbfr::Vec3> collision_lines,longitudinal_lines,lateral_lines,polygon_lines,node_lines;
     const int collision_mask=active_collision_mask();
     for(std::size_t file_index=0;file_index<g_clh_files.size();++file_index){
         const auto& file=g_clh_files[file_index];if(file.group_id<0||file.group_id>=31||!(collision_mask&(1<<file.group_id)))continue;
@@ -924,6 +925,11 @@ void update_collision_debug() {
             lines.push_back(from->second);lines.push_back(to->second);
         };
         for(const auto& node:file.data.nodes){
+            if(node.thickness>0.0f){
+                const auto point=positions.find(node.bone);
+                const bool visible=g_all_bones||g_selected_bone_index<0||(g_selected_bone>=0&&node.bone==g_selected_bone);
+                if(point!=positions.end()&&visible)append_sphere(node_lines,point->second,node.thickness);
+            }
             append_edge(longitudinal_lines,node,node.down);
             const auto parent=down_by_bone.find(node.up);
             if(node.up!=4095&&(parent==down_by_bone.end()||parent->second!=node.bone))append_edge(longitudinal_lines,node,node.up);
@@ -932,6 +938,7 @@ void update_collision_debug() {
     }
     g_preview->set_collision_lines(collision_lines);
     g_preview->set_cloth_lines(longitudinal_lines,lateral_lines,polygon_lines);
+    g_preview->set_cloth_node_lines(node_lines);
 }
 
 void save_selected_collision() {
@@ -1079,6 +1086,7 @@ void draw_preview_controls() {
         ImGui::Checkbox("背面剔除",&g_cull_backfaces);ImGui::SameLine();
         if(ImGui::Checkbox("碰撞体", &g_show_collisions)&&g_show_collisions)update_collision_debug(); ImGui::SameLine();
         if(ImGui::Checkbox("Cloth 连接", &g_show_cloth_links)&&g_show_cloth_links)update_collision_debug(); ImGui::SameLine();
+        ImGui::Checkbox("动骨碰撞",&g_show_cloth_nodes);ImGui::SameLine();
         ImGui::Checkbox("透明覆盖",&g_show_alpha_overlays);ImGui::SameLine();
         if (g_preview && g_preview->has_model() && ImGui::Button("取景")) g_preview->frame(g_camera);
         if(g_loaded_models.size()>1){
@@ -1379,7 +1387,7 @@ void draw_editor_shell() {
     ImVec2 available = ImGui::GetContentRegionAvail();
     if (g_preview&&g_preview_mode==PreviewMode::model&&available.x > 1 && available.y > 1) {
         g_preview->resize(static_cast<unsigned>(available.x), static_cast<unsigned>(available.y));
-        g_preview->render(g_camera, g_show_mesh, g_preview_shading, g_show_skeleton, g_show_collisions, g_show_alpha_overlays, g_show_cloth_links, g_show_ground, g_cull_backfaces);
+        g_preview->render(g_camera, g_show_mesh, g_preview_shading, g_show_skeleton, g_show_collisions, g_show_alpha_overlays, g_show_cloth_links, g_show_ground, g_cull_backfaces, g_show_cloth_nodes);
         const ImVec2 image_origin=ImGui::GetCursorScreenPos();
         ImGui::Image(reinterpret_cast<ImTextureID>(g_preview->image()), available);
         if (ImGui::IsItemHovered()) {

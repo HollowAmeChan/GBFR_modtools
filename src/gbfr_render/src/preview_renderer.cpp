@@ -170,9 +170,9 @@ bool PreviewRenderer::load_texture_thumbnail(const fs::path& dds,TexturePreviewR
 
 void PreviewRenderer::clear() {
     index_count_=0; line_vertex_count_=0; bone_point_vertex_count_=0; collision_vertex_count_=0;ground_vertex_count_=0;
-    cloth_longitudinal_vertex_count_=0;cloth_lateral_vertex_count_=0;cloth_polygon_vertex_count_=0;
+    cloth_longitudinal_vertex_count_=0;cloth_lateral_vertex_count_=0;cloth_polygon_vertex_count_=0;cloth_node_vertex_count_=0;
     vertices_.Reset(); indices_.Reset(); lines_.Reset(); bone_points_.Reset(); collision_lines_.Reset();ground_lines_.Reset();
-    cloth_longitudinal_lines_.Reset();cloth_lateral_lines_.Reset();cloth_polygon_lines_.Reset();
+    cloth_longitudinal_lines_.Reset();cloth_lateral_lines_.Reset();cloth_polygon_lines_.Reset();cloth_node_lines_.Reset();
     draw_ranges_.clear(); materials_.clear();
     skeleton_={};sop_={};animated_bone_positions_.clear();animated_bone_world_.clear();visible_bones_.clear();anchor_links_.clear();visible_bone_count_=0;applied_sop_operation_count_=0;pose_hash_=0;
     texture_preview_srv_.Reset();texture_width_=0;texture_height_=0;
@@ -195,6 +195,13 @@ void PreviewRenderer::set_cloth_lines(const std::vector<Vec3>& longitudinal,cons
     upload(longitudinal,cloth_longitudinal_lines_,cloth_longitudinal_vertex_count_);
     upload(lateral,cloth_lateral_lines_,cloth_lateral_vertex_count_);
     upload(polygon,cloth_polygon_lines_,cloth_polygon_vertex_count_);
+}
+
+void PreviewRenderer::set_cloth_node_lines(const std::vector<Vec3>& points) {
+    std::vector<DebugVertex> lines;lines.reserve(points.size());
+    for(const auto& point:points)lines.push_back({{point.x,point.y,point.z}});
+    cloth_node_lines_.Reset();cloth_node_vertex_count_=static_cast<unsigned>(lines.size());
+    if(!lines.empty())create_buffer(device_,lines,D3D11_BIND_VERTEX_BUFFER,cloth_node_lines_);
 }
 
 bool PreviewRenderer::transform_bone_point(std::size_t bone_index,Vec3 local,Vec3& output) const {
@@ -254,7 +261,7 @@ bool PreviewRenderer::project(Vec3 world,const OrbitCamera& camera,Vec2& screen)
     const float cp=std::cos(camera.pitch),sp=std::sin(camera.pitch),cy=std::cos(camera.yaw),sy=std::sin(camera.yaw);const XMVECTOR target=XMVectorSet(camera.target.x,camera.target.y,camera.target.z,1);const XMVECTOR eye=target+XMVectorSet(camera.distance*cp*sy,camera.distance*sp,camera.distance*cp*cy,0);const auto view=XMMatrixLookAtRH(eye,target,XMVectorSet(0,1,0,0));const auto projection=XMMatrixPerspectiveFovRH(XM_PIDIV4,static_cast<float>(width_)/height_,std::max(.001f,camera.distance*.001f),std::max(100.f,camera.distance*20));const auto point=XMVector3Project(XMVectorSet(world.x,world.y,world.z,1),0,0,static_cast<float>(width_),static_cast<float>(height_),0,1,projection,view,XMMatrixIdentity());XMFLOAT3 p{};XMStoreFloat3(&p,point);screen={p.x,p.y};return p.z>=0&&p.z<=1;
 }
 
-void PreviewRenderer::render(const OrbitCamera& camera,bool show_mesh,PreviewShadingMode shading,bool show_skeleton,bool show_collisions,bool show_alpha_overlays,bool show_cloth_links,bool show_ground,bool cull_backfaces) {
+void PreviewRenderer::render(const OrbitCamera& camera,bool show_mesh,PreviewShadingMode shading,bool show_skeleton,bool show_collisions,bool show_alpha_overlays,bool show_cloth_links,bool show_ground,bool cull_backfaces,bool show_cloth_nodes) {
     const float clear[4]={0.12f,0.13f,0.145f,1};context_->OMSetRenderTargets(1,color_rtv_.GetAddressOf(),depth_dsv_.Get());context_->ClearRenderTargetView(color_rtv_.Get(),clear);context_->ClearDepthStencilView(depth_dsv_.Get(),D3D11_CLEAR_DEPTH|D3D11_CLEAR_STENCIL,1,0);
     D3D11_VIEWPORT viewport{0,0,static_cast<float>(width_),static_cast<float>(height_),0,1};context_->RSSetViewports(1,&viewport);
     const float cp=std::cos(camera.pitch),sp=std::sin(camera.pitch),cy=std::cos(camera.yaw),sy=std::sin(camera.yaw);XMVECTOR target=XMVectorSet(camera.target.x,camera.target.y,camera.target.z,1);XMVECTOR eye=target+XMVectorSet(camera.distance*cp*sy,camera.distance*sp,camera.distance*cp*cy,0);
@@ -304,6 +311,7 @@ void PreviewRenderer::render(const OrbitCamera& camera,bool show_mesh,PreviewSha
     draw_cloth_lines(cloth_longitudinal_lines_.Get(),cloth_longitudinal_vertex_count_,{.3f,1.f,.22f,1});
     draw_cloth_lines(cloth_lateral_lines_.Get(),cloth_lateral_vertex_count_,{1.f,.25f,.8f,1});
     draw_cloth_lines(cloth_polygon_lines_.Get(),cloth_polygon_vertex_count_,{1.f,.72f,.1f,1});
+    if(show_cloth_nodes&&cloth_node_vertex_count_){constants.color={.65f,.28f,1.f,1};constants.textured=0;upload_constants();context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST);context_->IASetVertexBuffers(0,1,cloth_node_lines_.GetAddressOf(),&stride,&offset);context_->Draw(cloth_node_vertex_count_,0);}
     context_->OMSetDepthStencilState(nullptr,0);
     ID3D11ShaderResourceView* none[4]={};context_->PSSetShaderResources(0,4,none);
 }

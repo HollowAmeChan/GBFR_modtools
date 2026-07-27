@@ -386,6 +386,7 @@ int main() {
         preview.resize(320,320);preview.frame(camera);
         preview.set_collision_lines({{0.0f,0.0f,0.0f},{0.0f,1.0f,0.0f}});
         preview.set_cloth_lines({{0.0f,0.0f,0.0f},{0.0f,.5f,0.0f}},{{0.0f,.5f,0.0f},{.5f,.5f,0.0f}},{{.5f,.5f,0.0f},{.5f,0.0f,0.0f}});
+        preview.set_cloth_node_lines({{-.05f,.45f,0.0f},{.05f,.45f,0.0f},{0.0f,.4f,0.0f},{0.0f,.5f,0.0f}});
         for(const auto mode:{gbfr::PreviewShadingMode::unlit,gbfr::PreviewShadingMode::lit,gbfr::PreviewShadingMode::wireframe})preview.render(camera,true,mode,true,true);
         preview.render(camera,true,gbfr::PreviewShadingMode::lit,true,false);
         context->Flush();
