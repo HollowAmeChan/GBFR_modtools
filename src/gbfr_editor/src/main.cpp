@@ -45,7 +45,7 @@ std::string g_imgui_ini;
 std::optional<std::size_t> g_selected_asset;
 ImGuiSelectionBasicStorage g_asset_selection;
 std::vector<std::size_t> g_pending_a4_assets;
-enum class AssetFunction { all, model, texture, ui_image, material, cloth };
+enum class AssetFunction { all, model, texture, ui_image, material, animation, cloth };
 enum class PreviewMode { none, model, texture, material };
 struct ModelPreviewKey {
     std::filesystem::path minfo;
@@ -560,9 +560,12 @@ void discover_motions(const ModelPreviewKey& key) {
     if(model_id.size()<2)return;
     const auto prefix=model_id.substr(0,2);
     if(prefix!=L"pl"&&prefix!=L"fp")return;
-    const auto directory=g_workspace->root()/L"source/data"/prefix/model_id;
-    if(!std::filesystem::is_directory(directory))return;
-    for(const auto& entry:std::filesystem::directory_iterator(directory))if(entry.is_regular_file()&&entry.path().extension()==L".mot")g_motion_files.push_back(entry.path());
+    const auto model_id_utf8=utf8(model_id);
+    for(const auto& asset:g_workspace->assets())if(asset.kind==gbfr::AssetKind::animation&&asset.subtype==model_id_utf8&&asset.available)g_motion_files.push_back(asset.input);
+    if(g_motion_files.empty()){
+        const auto directory=g_workspace->root()/L"source/data"/prefix/model_id;
+        if(std::filesystem::is_directory(directory))for(const auto& entry:std::filesystem::directory_iterator(directory))if(entry.is_regular_file()&&entry.path().extension()==L".mot")g_motion_files.push_back(entry.path());
+    }
     std::sort(g_motion_files.begin(),g_motion_files.end(),[](const auto& a,const auto& b){return gbfr::natural_less_case_insensitive(a.filename().native(),b.filename().native());});
 }
 
@@ -766,6 +769,12 @@ void preview_asset(std::size_t index) {
         }catch(const std::exception& error){g_preview_mode=PreviewMode::none;g_preview_error=std::string("mmat 预览失败：")+error.what();gbfr::Log::write(gbfr::LogLevel::error,g_preview_error);}
         return;
     }
+    if(asset.kind==gbfr::AssetKind::animation){
+        if(!g_loaded_model||g_loaded_model->minfo.stem()!=wide(asset.subtype)){g_preview_mode=PreviewMode::none;return;}
+        const auto found=std::find(g_motion_files.begin(),g_motion_files.end(),asset.input);
+        if(found!=g_motion_files.end())select_motion(static_cast<int>(std::distance(g_motion_files.begin(),found)));
+        return;
+    }
     if(asset.kind==gbfr::AssetKind::texture||asset.kind==gbfr::AssetKind::ui_image||asset.kind==gbfr::AssetKind::new_texture||asset.kind==gbfr::AssetKind::granite_texture){
         if(!asset.available||asset.input.extension()!=L".dds"){g_preview_mode=PreviewMode::none;return;}
         g_loaded_texture_is_ui = asset.kind == gbfr::AssetKind::ui_image;
@@ -793,6 +802,7 @@ bool asset_matches_function(const gbfr::WorkspaceAsset& asset,AssetFunction func
     case AssetFunction::texture:return asset.kind==gbfr::AssetKind::texture||asset.kind==gbfr::AssetKind::new_texture||asset.kind==gbfr::AssetKind::granite_texture;
     case AssetFunction::ui_image:return asset.kind==gbfr::AssetKind::ui_image;
     case AssetFunction::material:return asset.kind==gbfr::AssetKind::material;
+    case AssetFunction::animation:return asset.kind==gbfr::AssetKind::animation;
     case AssetFunction::cloth:return asset.kind==gbfr::AssetKind::cloth;
     }
     return false;
@@ -1296,7 +1306,7 @@ void draw_editor_shell() {
                 g_workspace->assets().size(), g_workspace->missing_count());
         const struct {AssetFunction function;const char* label;} filters[]={
             {AssetFunction::all,"全部"},{AssetFunction::model,"模型"},{AssetFunction::texture,"贴图"},{AssetFunction::ui_image,"UI-image"},
-            {AssetFunction::material,"mmat"},{AssetFunction::cloth,"cloth"}};
+            {AssetFunction::material,"mmat"},{AssetFunction::animation,"动画"},{AssetFunction::cloth,"cloth"}};
         for(std::size_t i=0;i<std::size(filters);++i){
             const auto count=std::count_if(g_workspace->assets().begin(),g_workspace->assets().end(),[&](const auto& asset){return asset_matches_function(asset,filters[i].function);});
             const auto label=std::string(filters[i].label)+" ("+std::to_string(count)+")##asset_function_"+std::to_string(i);
@@ -1444,7 +1454,7 @@ void draw_editor_shell() {
     const auto inspector_indices=selected_asset_indices();
     if(g_workspace&&g_asset_selection.Size>1){
         std::size_t available_count{},restorable_count{},materials{},a4_files{};
-        for(const auto index:inspector_indices){const auto& item=g_workspace->assets()[index];if(item.available)++available_count;if(item.available||(item.kind==gbfr::AssetKind::cloth&&!item.source.empty()&&std::filesystem::is_regular_file(item.source)))++restorable_count;if(item.kind==gbfr::AssetKind::material){++materials;try{if(g_workspace->material_granite_count(index))++a4_files;}catch(...){}}}
+        for(const auto index:inspector_indices){const auto& item=g_workspace->assets()[index];if(item.available)++available_count;if(item.available||((item.kind==gbfr::AssetKind::cloth||item.kind==gbfr::AssetKind::animation)&&!item.source.empty()&&std::filesystem::is_regular_file(item.source)))++restorable_count;if(item.kind==gbfr::AssetKind::material){++materials;try{if(g_workspace->material_granite_count(index))++a4_files;}catch(...){}}}
         ImGui::Text("多选 / %zu 个资源",inspector_indices.size());
         ImGui::Text("可用 %zu  |  mmat %zu",available_count,materials);
         ImGui::SeparatorText("批量操作");
@@ -1500,7 +1510,7 @@ void draw_editor_shell() {
             ImGui::Text("已选 %zu 个资源", batch_indices.size());
             ImGui::Separator();
             const auto available_count = std::count_if(batch_indices.begin(), batch_indices.end(), [&](const auto index){return g_workspace->assets()[index].available;});
-            const auto restorable_count = std::count_if(batch_indices.begin(), batch_indices.end(), [&](const auto index){const auto& item=g_workspace->assets()[index];return item.available||(item.kind==gbfr::AssetKind::cloth&&!item.source.empty()&&std::filesystem::is_regular_file(item.source));});
+            const auto restorable_count = std::count_if(batch_indices.begin(), batch_indices.end(), [&](const auto index){const auto& item=g_workspace->assets()[index];return item.available||((item.kind==gbfr::AssetKind::cloth||item.kind==gbfr::AssetKind::animation)&&!item.source.empty()&&std::filesystem::is_regular_file(item.source));});
             ImGui::BeginDisabled(available_count == 0);
             if (ImGui::Button("构建选中项")) run_asset_actions(batch_indices, false);
             ImGui::EndDisabled();
@@ -1531,7 +1541,8 @@ void draw_editor_shell() {
         ImGui::TextColored(built?ImVec4(.35f,.8f,.5f,1):asset.available?ImVec4(.35f,.8f,.5f,1):ImVec4(.95f,.35f,.35f,1),
                            "%s",built?"build 已构建":asset.available?"unpack 可用":"unpack 输入缺失");
         ImGui::Separator();
-        const bool action_available=asset.available||(asset.kind==gbfr::AssetKind::cloth&&!asset.source.empty()&&std::filesystem::is_regular_file(asset.source));
+        const bool restorable_native=asset.kind==gbfr::AssetKind::cloth||asset.kind==gbfr::AssetKind::animation;
+        const bool action_available=asset.available||(restorable_native&&!asset.source.empty()&&std::filesystem::is_regular_file(asset.source));
         ImGui::BeginDisabled(!action_available);
         if(asset.kind==gbfr::AssetKind::model){
             ImGui::TextWrapped("模型通常由 minfo、skeleton 和多个 mmesh 组成；要完整封回，请在列表中多选相关模型文件后执行构建选中项。\n");
@@ -1568,6 +1579,11 @@ void draw_editor_shell() {
             if(ImGui::Button("编码 mmat 到 build"))run_selected_asset_action(false);
             ImGui::EndDisabled();
             if(ImGui::Button("从 source 重新解码 JSON")){run_selected_asset_action(true);preview_asset(index);}
+        }else if(asset.kind==gbfr::AssetKind::animation){
+            ImGui::TextWrapped("当前 MOT 属于 %s；加载同模型预览后可直接播放 unpack 编辑结果。",asset.subtype.c_str());
+            if(ImGui::Button("预览 unpack MOT"))preview_asset(index);
+            if(ImGui::Button("复制 MOT 到 build"))run_selected_asset_action(false);
+            if(ImGui::Button("从 source 恢复 MOT"))run_selected_asset_action(true);
         }else if(asset.kind==gbfr::AssetKind::cloth){
             ImGui::TextWrapped("将当前 %s XML 编码到 build，并回读校验全部 XML 内容。恢复操作会校验登记的 source BXM 与 XML 基线。",asset.subtype.c_str());
             if(ImGui::Button("编码 Cloth BXM 到 build"))run_selected_asset_action(false);

@@ -33,12 +33,10 @@ void copy_atomic(const fs::path& source, const fs::path& destination) {
     std::error_code ec;
     fs::copy_file(source, temporary, fs::copy_options::overwrite_existing, ec);
     if (ec) throw std::runtime_error("Copy failed: " + ec.message());
-    fs::remove(destination, ec);
-    ec.clear();
-    fs::rename(temporary, destination, ec);
-    if (ec) {
+    if (!MoveFileExW(temporary.c_str(), destination.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        const auto error = GetLastError();
         fs::remove(temporary);
-        throw std::runtime_error("Atomic replace failed: " + ec.message());
+        throw std::runtime_error("Atomic replace failed (Win32 " + std::to_string(error) + ")");
     }
 }
 
@@ -495,6 +493,8 @@ Workspace Workspace::load(const fs::path& selected) {
     load_wtb_records("UIImages", AssetKind::ui_image, "UI-image");
     for (const auto& record : document.value("Materials", json::array()))
         append(AssetKind::material, "mmat", required_string(record, "Json"), required_string(record, "Source"), required_string(record, "Output"), required_string(record, "BaselineSha256"), record.value("SourceSha256", ""));
+    for (const auto& record : document.value("AnimationFiles", json::array()))
+        append(AssetKind::animation, record.value("ModelId", "mot"), required_string(record, "Input"), required_string(record, "Source"), required_string(record, "Output"), required_string(record, "BaselineSha256"), required_string(record, "SourceSha256"));
     for (const auto& record : document.value("ClothFiles", json::array()))
         append(AssetKind::cloth, record.value("Category", "cloth"), required_string(record, "Xml"), required_string(record, "Source"), required_string(record, "Output"), required_string(record, "BaselineSha256"), record.value("SourceSha256", ""));
     for (const auto& record : document.value("ModelFiles", json::array()))
@@ -574,6 +574,11 @@ void Workspace::build_asset(std::size_t index) {
     if (assets_[index].kind == AssetKind::model) { build_model(index); return; }
     auto& asset = assets_[index];
     if (!fs::is_regular_file(asset.input)) throw std::runtime_error("Selected input is missing");
+    if (asset.kind == AssetKind::animation) {
+        if (!fs::is_regular_file(asset.source) || sha256_file(asset.source) != asset.source_sha256) throw std::runtime_error("MOT source baseline is missing or changed");
+        copy_atomic(asset.input, asset.output);
+        return;
+    }
     if (asset.kind == AssetKind::new_texture || asset.kind == AssetKind::granite_texture) { build_new_texture(asset.input, asset.output, asset.texture_id); return; }
     if (asset.kind == AssetKind::material) { encode_material(asset.input, asset.output); return; }
     if (asset.kind == AssetKind::cloth) { encode_cloth(asset.input, asset.output); return; }
@@ -607,6 +612,13 @@ void Workspace::restore_asset(std::size_t index) {
     if (assets_[index].kind == AssetKind::model) { restore_model(index); return; }
     if (assets_[index].kind == AssetKind::granite_texture) { restore_granite_texture(index); return; }
     auto& asset = assets_[index];
+    if (asset.kind == AssetKind::animation) {
+        if (!fs::is_regular_file(asset.source) || sha256_file(asset.source) != asset.source_sha256) throw std::runtime_error("MOT source baseline is missing or changed");
+        copy_atomic(asset.source, asset.input);
+        if (sha256_file(asset.input) != asset.baseline_sha256) throw std::runtime_error("Restored MOT does not match workspace baseline");
+        refresh();
+        return;
+    }
     if (asset.kind == AssetKind::new_texture) {
         if (asset.granite_hash.empty() || asset.granite_gts.empty())
             throw std::runtime_error("A new texture has no Granite source baseline to restore");
@@ -678,6 +690,7 @@ const char* asset_kind_name(AssetKind kind) noexcept {
     case AssetKind::texture: return "贴图槽";
     case AssetKind::ui_image: return "UI-image";
     case AssetKind::material: return "mmat";
+    case AssetKind::animation: return "MOT";
     case AssetKind::cloth: return "cloth";
     case AssetKind::model: return "模型";
     case AssetKind::new_texture: return "解码贴图";

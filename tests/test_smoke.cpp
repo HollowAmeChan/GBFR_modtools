@@ -165,6 +165,33 @@ int main() {
     if (workspace.changed_count() != 0) return 5;
     fs::remove_all(root);
 
+    const fs::path animation_root = test_temp / L"animation_workspace";
+    fs::create_directories(animation_root / L"source/data/fp/fp9999");
+    fs::create_directories(animation_root / L"unpack/data/fp/fp9999");
+    const auto source_mot = animation_root / L"source/data/fp/fp9999/fp9999_0001.mot";
+    const auto unpack_mot = animation_root / L"unpack/data/fp/fp9999/fp9999_0001.mot";
+    std::ofstream(source_mot, std::ios::binary) << "baseline mot";
+    std::ofstream(unpack_mot, std::ios::binary) << "baseline mot";
+    const auto mot_hash = gbfr::sha256_file(source_mot);
+    {
+        std::ofstream json(animation_root / L"workspace.json");
+        json << "{\"Version\":1,\"CharacterId\":\"pl9999\",\"AnimationFiles\":[{"
+                "\"ModelId\":\"fp9999\",\"FileType\":\"mot\","
+                "\"Source\":\"source/data/fp/fp9999/fp9999_0001.mot\",\"SourceSha256\":\"" << mot_hash << "\","
+                "\"Input\":\"unpack/data/fp/fp9999/fp9999_0001.mot\",\"Output\":\"build/data/fp/fp9999/fp9999_0001.mot\","
+                "\"BaselineSha256\":\"" << mot_hash << "\"}]}";
+    }
+    auto animation_workspace = gbfr::Workspace::load(animation_root / L"workspace.json");
+    if (animation_workspace.assets().size() != 1 || animation_workspace.assets()[0].kind != gbfr::AssetKind::animation || animation_workspace.assets()[0].subtype != "fp9999") return 113;
+    std::ofstream(unpack_mot, std::ios::binary | std::ios::trunc) << "edited mot";
+    animation_workspace.refresh();
+    if (animation_workspace.changed_count() != 1) return 114;
+    animation_workspace.build_asset(0);
+    if (gbfr::sha256_file(animation_root / L"build/data/fp/fp9999/fp9999_0001.mot") != gbfr::sha256_file(unpack_mot)) return 115;
+    animation_workspace.restore_asset(0);
+    if (gbfr::sha256_file(unpack_mot) != mot_hash || animation_workspace.changed_count() != 0) return 116;
+    fs::remove_all(animation_root);
+
     const fs::path wtb_root = test_temp / L"wtb_workspace";
     fs::create_directories(wtb_root / L"source");
     fs::create_directories(wtb_root / L"unpack");
@@ -295,6 +322,7 @@ int main() {
         const auto expected_assets=document.value("Textures",nlohmann::json::array()).size()+
             document.value("UIImages",nlohmann::json::array()).size()+
             document.value("Materials",nlohmann::json::array()).size()+
+            document.value("AnimationFiles",nlohmann::json::array()).size()+
             document.value("ClothFiles",nlohmann::json::array()).size()+
             document.value("ModelFiles",nlohmann::json::array()).size()+
             document.value("NewTextures",nlohmann::json::array()).size()+[&]{

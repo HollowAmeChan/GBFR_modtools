@@ -10,7 +10,7 @@
 namespace gbfr {
 bool natural_less_case_insensitive(std::wstring_view left, std::wstring_view right);
 
-enum class AssetKind { texture, ui_image, material, cloth, model, new_texture, granite_texture };
+enum class AssetKind { texture, ui_image, material, animation, cloth, model, new_texture, granite_texture };
 
 struct WorkspaceAsset {
     AssetKind kind{};

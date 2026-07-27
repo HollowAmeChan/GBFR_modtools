@@ -86,7 +86,8 @@ int main() {
     for (std::size_t index = 0; index < workspace.assets().size(); ++index) {
         workspace.build_asset(index);
         const auto& asset = workspace.assets()[index];
-        if (asset.kind != gbfr::AssetKind::cloth || !is_bxm(asset.output)) return 2;
+        if (asset.kind != gbfr::AssetKind::cloth) return 2;
+        if (!is_bxm(asset.output)) return 5;
     }
 
     const auto clp = std::find_if(workspace.assets().begin(), workspace.assets().end(),

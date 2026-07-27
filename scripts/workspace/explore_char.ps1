@@ -303,6 +303,7 @@ function Initialize-WorkspaceArtifacts {
     $textures = [System.Collections.Generic.List[PSCustomObject]]::new()
     $uiImages = [System.Collections.Generic.List[PSCustomObject]]::new()
     $materials = [System.Collections.Generic.List[PSCustomObject]]::new()
+    $animationFiles = [System.Collections.Generic.List[PSCustomObject]]::new()
     $clothFiles = [System.Collections.Generic.List[PSCustomObject]]::new()
     $modelFiles = [System.Collections.Generic.List[PSCustomObject]]::new()
     $errors = [System.Collections.Generic.List[string]]::new()
@@ -336,6 +337,27 @@ function Initialize-WorkspaceArtifacts {
                 })
             } catch {
                 $errors.Add("model: $relativeDataPath -- $($_.Exception.Message)")
+            }
+        } elseif ($extension -ieq ".mot") {
+            try {
+                $ownerMatch = [regex]::Match($relativeParent, '^(pl|fp|wp)/([^/]+)$')
+                if (-not $ownerMatch.Success) { continue }
+                $inputRelative = ConvertTo-WorkspacePath (Join-Path "unpack\data" $relativeDataPath)
+                $inputPath = Resolve-WorkspaceFile $outDir $inputRelative
+                $inputDir = [IO.Path]::GetDirectoryName($inputPath)
+                New-Item -ItemType Directory -Force -Path $inputDir | Out-Null
+                [IO.File]::Copy($sourceCopy, $inputPath, $true)
+                $animationFiles.Add([PSCustomObject]@{
+                    ModelId = $ownerMatch.Groups[2].Value
+                    Source = $sourceRelative
+                    SourceSha256 = Get-WorkspaceSha256 $sourceCopy
+                    Input = $inputRelative
+                    Output = ConvertTo-WorkspacePath (Join-Path "build\data" $relativeDataPath)
+                    BaselineSha256 = Get-WorkspaceSha256 $inputPath
+                    FileType = "mot"
+                })
+            } catch {
+                $errors.Add("mot: $relativeDataPath -- $($_.Exception.Message)")
             }
         } elseif ($extension -ieq ".texture" -or ($extension -ieq ".wtb" -and $relativeDataPath -match '^ui[\\/]')) {
             try {
@@ -454,6 +476,7 @@ function Initialize-WorkspaceArtifacts {
         Textures = @($textures)
         UIImages = @($uiImages)
         Materials = @($materials)
+        AnimationFiles = @($animationFiles)
         ClothFiles = @($clothFiles)
         ModelFiles = @($modelFiles)
         SkeletonConstraints = @($sopReports)
@@ -466,6 +489,7 @@ function Initialize-WorkspaceArtifacts {
         TextureCount = $textures.Count
         UIImageCount = $uiImages.Count
         MaterialCount = $materials.Count
+        AnimationCount = $animationFiles.Count
         ClothCount = $clothFiles.Count
         ModelCount = $modelFiles.Count
         ErrorCount = $errors.Count
@@ -1158,6 +1182,18 @@ if (Test-Path $texRoot) {
     L "> $($S.tex_not_found): ``$texRoot``"
 }
 
+# MOT is a first-class editable asset for the selected model. A pl workspace
+# also owns the matching fp facial clips used by the companion head model.
+$motionModelIds = @($charId)
+if ($prefix -eq "pl") { $motionModelIds += "fp$numId" }
+foreach ($motionModelId in $motionModelIds) {
+    $motionPrefix = [regex]::Match($motionModelId, '^[a-z]+').Value
+    $motionDirectory = Join-Path $gameRoot "data\$motionPrefix\$motionModelId"
+    if (Test-Path -LiteralPath $motionDirectory) {
+        Add-SourceFiles @(Get-ChildItem -LiteralPath $motionDirectory -Filter "*.mot" -File)
+    }
+}
+
 $copyResult = Copy-DiscoveredSources
 $artifactResult = Initialize-WorkspaceArtifacts
 $graniteResult = Expand-GraniteTextures
@@ -1197,6 +1233,7 @@ L "| **$($S.decoded_textures)** | $($artifactResult.TextureCount) |"
 L "| **UI-image WTB** | $($artifactResult.UIImageCount) |"
 L "| **$($S.decoded_granite)** | $($graniteResult.FileCount) |"
 L "| **$($S.decoded_materials)** | $($artifactResult.MaterialCount) |"
+L "| **MOT** | $($artifactResult.AnimationCount) |"
 L "| **$($S.decoded_cloth)** | $($artifactResult.ClothCount) |"
 L "| **$($S.workspace_model_files)** | $($artifactResult.ModelCount) |"
 L "| **$($S.sop_constraint_files)** | $($sopReports.Count) |"
@@ -1275,7 +1312,7 @@ Write-Host "  $sourceRoot" -ForegroundColor Green
 if ($copyResult.Failed.Count -gt 0) {
     Write-Host "$($S.copy_failed): $($copyResult.Failed.Count)" -ForegroundColor Yellow
 }
-Write-Host "$($S.decode_done): texture $($artifactResult.TextureCount), UI-image $($artifactResult.UIImageCount), mmat $($artifactResult.MaterialCount), cloth $($artifactResult.ClothCount), model $($artifactResult.ModelCount)" -ForegroundColor Green
+Write-Host "$($S.decode_done): texture $($artifactResult.TextureCount), UI-image $($artifactResult.UIImageCount), mmat $($artifactResult.MaterialCount), MOT $($artifactResult.AnimationCount), cloth $($artifactResult.ClothCount), model $($artifactResult.ModelCount)" -ForegroundColor Green
 Write-Host "  $unpackRoot" -ForegroundColor Green
 Write-Host "$($S.granite_done): $($graniteResult.FileCount) DDS, $($graniteResult.MissingCount) $($S.granite_missing)" -ForegroundColor Green
 if ($artifactResult.ErrorCount -gt 0) {
