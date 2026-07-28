@@ -45,7 +45,7 @@ unk2 / bool3 / bool4 / bool5
 
 面部材质的 MMAT 槽是 `g_5A2C820C`（界面按 C 级证据显示 `g_OutlineTexture`）。Face 描边顶点 Shader 中对应资源的 RDEF 名为 `g_AnimeMask`：它使用 UV0 采样 DDS 红通道，并把采样值直接乘进描边外扩距离。因此红通道黑色 `0` 会取消该区域描边，白色 `1` 保留描边，灰色提供连续衰减；眼眶和嘴周应在红通道画黑。Alpha 不参与这条已确认的外扩路径。
 
-现有材质若已经有 `g_5A2C820C` 行，只需把该行引用改为自定义贴图名，不要再添加重复槽。若该行缺失，可在“添加贴图引用”中选择“描边遮罩”。把 DDS 放到 `unpack/data/texture/2k` 或 `4k` 后刷新工作区，再分别构建 mmat 和该“手动 DDS”资源；最终 Mod 中需要同时存在修改后的 `.mmat` 和生成的 `.texture`。
+现有材质若已经有 `g_5A2C820C` 行，只需把该行引用改为自定义贴图名，不要再添加重复槽。若该行缺失，可在“添加贴图引用”中选择“描边遮罩”。自定义描边 DDS 必须放到普通贴图目录 `unpack/data/texture/2k` 或 `unpack/data/texture/4k`，不要放进 `unpack/data/granite`；这是新增普通 WTB `.texture`，不是 Granite streaming 贴图。文件名可用 `<贴图名>.dds` 或 `<贴图名>_0.dds`，mmat 引用只填写 `<贴图名>`，不带目录和后缀。刷新工作区后分别构建 mmat 和该“手动 DDS”资源，最终输出为 `build/data/texture/<分辨率>/<贴图名>.texture`；最终 Mod 中必须同时存在修改后的 `.mmat` 和生成的 `.texture`。
 
 Shader 参数页会按 A/B/C/D 显示证据来源：A 为 DXBC RDEF 或正式 schema 命名，B 为游戏 EXE 的运行时行为，C 为完整游戏样本推断，D 为少量样本相关。已经恢复的 RDEF 名称优先于旧 schema 中的 `g_XXXXXXXX` 显示，但 B/C/D 级解释不会改写原哈希。完整统计、反汇编位置和当前未知参数结论见 [MMAT 未知参数与 Shader 研究](MMAT未知参数研究.md)。
 
