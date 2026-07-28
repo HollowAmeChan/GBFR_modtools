@@ -666,9 +666,6 @@ void Workspace::build_asset(std::size_t index) {
     if (asset.kind == AssetKind::cloth) { encode_cloth(asset.input, asset.output); return; }
     if (asset.wtb_slots.empty() || asset.source.empty()) throw std::runtime_error("Selected asset has no packable WTB source");
     if (!fs::is_regular_file(asset.source) || sha256_file(asset.source) != asset.source_sha256) throw std::runtime_error("WTB source baseline is missing or changed");
-    const bool inputs_changed = std::any_of(asset.monitored_inputs.begin(), asset.monitored_inputs.end(),
-        [](const auto& input) { return !fs::is_regular_file(input.first) || sha256_file(input.first) != input.second; });
-    if (!inputs_changed) { copy_atomic(asset.source, asset.output); return; }
     build_wtb_from_edit_slots(asset.source, asset.output, asset.wtb_slots, asset.wtb_top_left_editing);
 }
 

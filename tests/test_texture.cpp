@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <iterator>
 #include <vector>
 
@@ -82,7 +83,8 @@ bool verify_existing_wtb_orientation(const fs::path& canonical_dds,const fs::pat
     auto workspace=gbfr::Workspace::load(root/L"workspace.json");
     if(workspace.assets().size()!=1||!workspace.assets()[0].wtb_top_left_editing)return false;
     workspace.build_asset(0);
-    if(gbfr::sha256_file(root/L"build/test.texture")!=source_hash)return false;
+    if(gbfr::sha256_file(root/L"build/test.texture")==source_hash)return false;
+    if(!rgba_pixels_equal(first_wtb_payload(root/L"build/test.texture"),canonical,true))return false;
     auto edited=canonical;edited[dds_data_offset(edited)]=static_cast<unsigned char>(edited[dds_data_offset(edited)]+1);
     {std::ofstream output(input,std::ios::binary|std::ios::trunc);output.write(reinterpret_cast<const char*>(edited.data()),static_cast<std::streamsize>(edited.size()));}
     workspace.build_asset(0);
@@ -118,6 +120,19 @@ bool build_and_reload(const fs::path& source,const fs::path& root,gbfr::PreviewR
     {std::ofstream payload(extracted,std::ios::binary);payload.write(reinterpret_cast<const char*>(bytes.data()+offset),size);}
     return preview.load_texture_preview(extracted)&&preview.texture_image();
 }
+
+bool build_workspace_textures(const fs::path& manifest) {
+    auto workspace=gbfr::Workspace::load(manifest);
+    std::size_t built=0;
+    for(std::size_t index=0;index<workspace.assets().size();++index){
+        const auto& asset=workspace.assets()[index];
+        if(asset.kind!=gbfr::AssetKind::texture)continue;
+        workspace.build_asset(index);
+        ++built;
+    }
+    std::cout<<"built_workspace_textures="<<built<<'\n';
+    return built>0;
+}
 }
 
 int main(int argc,char** argv) {
@@ -146,6 +161,7 @@ int main(int argc,char** argv) {
         const auto width=preview.texture_width(),height=preview.texture_height();
         if(!build_and_reload(source,root/L"actual_workspace",preview)||preview.texture_width()!=width||preview.texture_height()!=height)return 6;
     }
+    if(argc>2&&!build_workspace_textures(fs::absolute(fs::path(argv[2]))))return 8;
     fs::remove_all(root);
     return 0;
 }
