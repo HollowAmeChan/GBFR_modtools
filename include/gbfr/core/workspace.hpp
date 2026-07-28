@@ -25,6 +25,7 @@ struct WorkspaceAsset {
     std::uint32_t texture_id{};
     std::vector<std::pair<std::filesystem::path, std::string>> monitored_inputs;
     std::vector<std::pair<unsigned, std::filesystem::path>> wtb_slots;
+    bool wtb_top_left_editing{};
     std::string granite_hash;
     std::filesystem::path granite_gts;
 };

@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-namespace gbfr { class PreviewRenderer; }
+namespace gbfr { class PreviewRenderer; class Workspace; }
 
 namespace gbfr::editor {
 class TextureGallery;
@@ -18,7 +18,8 @@ class MaterialInspector {
 public:
     void set_asset(MaterialAsset asset, std::filesystem::path path, std::size_t selected_material = 0);
     void clear();
-    void draw(PreviewRenderer& renderer, TextureGallery& texture_gallery);
+    void draw(PreviewRenderer& renderer, TextureGallery& texture_gallery,
+              const Workspace& workspace);
     bool consume_file_changed() noexcept;
     bool save_changes();
     void reload_if_open(const std::filesystem::path& path);

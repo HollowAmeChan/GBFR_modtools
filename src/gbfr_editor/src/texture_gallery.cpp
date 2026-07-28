@@ -56,6 +56,16 @@ const TexturePreviewResource* TextureGallery::thumbnail(PreviewRenderer& rendere
     return entry&&!entry->failed&&entry->texture.image?&entry->texture:nullptr;
 }
 
+bool TextureGallery::needs_vertical_flip(const Workspace& workspace,const fs::path& path) {
+    const auto normalized=path.lexically_normal();
+    for(const auto& asset:workspace.assets()){
+        bool matches=asset.input.lexically_normal()==normalized;
+        if(!matches)matches=std::any_of(asset.wtb_slots.begin(),asset.wtb_slots.end(),[&](const auto& slot){return slot.second.lexically_normal()==normalized;});
+        if(matches)return asset.kind==AssetKind::texture&&!asset.wtb_top_left_editing;
+    }
+    return false;
+}
+
 void TextureGallery::draw(const Workspace& workspace,PreviewRenderer& renderer,std::optional<std::size_t> selected_asset,const SelectCallback& on_select) {
     ImGui::Begin("贴图库");
 
@@ -119,7 +129,8 @@ void TextureGallery::draw(const Workspace& workspace,PreviewRenderer& renderer,s
                         const ImVec2 image_size{width*scale,height*scale};
                         ImGui::SetCursorPosX(ImGui::GetCursorPosX()+(thumbnail_size_-image_size.x)*0.5f+4.0f);
                         ImGui::SetCursorPosY(ImGui::GetCursorPosY()+(thumbnail_size_-image_size.y)*0.5f);
-                        ImGui::Image(reinterpret_cast<ImTextureID>(cached->texture.image.Get()),image_size,ImVec2(0,0),ImVec2(1,1));
+                        const bool flip=needs_vertical_flip(workspace,item.path);
+                        ImGui::Image(reinterpret_cast<ImTextureID>(cached->texture.image.Get()),image_size,flip?ImVec2(0,1):ImVec2(0,0),flip?ImVec2(1,0):ImVec2(1,1));
                         activate=ImGui::IsItemClicked();
                     }else{
                         ImGui::Dummy(ImVec2(thumbnail_size_,thumbnail_size_));

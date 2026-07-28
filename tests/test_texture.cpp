@@ -14,12 +14,82 @@
 namespace fs = std::filesystem;
 
 namespace {
+void write_u32(std::vector<unsigned char>& bytes,std::size_t offset,std::uint32_t value) {
+    for(unsigned shift=0;shift<32;shift+=8)bytes[offset+shift/8]=static_cast<unsigned char>((value>>shift)&0xff);
+}
+
 std::uint32_t read_u32(const std::vector<unsigned char>& bytes,std::size_t offset) {
     if(offset+4>bytes.size())return 0;
     return static_cast<std::uint32_t>(bytes[offset])|
         (static_cast<std::uint32_t>(bytes[offset+1])<<8)|
         (static_cast<std::uint32_t>(bytes[offset+2])<<16)|
         (static_cast<std::uint32_t>(bytes[offset+3])<<24);
+}
+
+std::vector<unsigned char> read_file(const fs::path& path) {
+    std::ifstream stream(path,std::ios::binary);
+    return {std::istreambuf_iterator<char>(stream),{}};
+}
+
+std::size_t dds_data_offset(const std::vector<unsigned char>& bytes) {
+    return bytes.size()>=148&&bytes[84]=='D'&&bytes[85]=='X'&&bytes[86]=='1'&&bytes[87]=='0'?148:128;
+}
+
+bool rgba_pixels_equal(const std::vector<unsigned char>& left,const std::vector<unsigned char>& right,bool flip_right) {
+    if(left.size()<128||right.size()<128)return false;
+    const auto width=read_u32(left,16),height=read_u32(left,12);
+    if(!width||!height||width!=read_u32(right,16)||height!=read_u32(right,12))return false;
+    const auto left_offset=dds_data_offset(left),right_offset=dds_data_offset(right);
+    if(left_offset+static_cast<std::size_t>(width)*height*4>left.size()||right_offset+static_cast<std::size_t>(width)*height*4>right.size())return false;
+    for(std::uint32_t y=0;y<height;++y)for(std::uint32_t x=0;x<width;++x)for(std::uint32_t channel=0;channel<4;++channel){
+        const auto left_index=left_offset+(static_cast<std::size_t>(y)*width+x)*4+channel;
+        const auto right_y=flip_right?height-1-y:y;
+        const auto right_index=right_offset+(static_cast<std::size_t>(right_y)*width+x)*4+channel;
+        if(left[left_index]!=right[right_index])return false;
+    }
+    return true;
+}
+
+std::vector<unsigned char> first_wtb_payload(const fs::path& path) {
+    const auto bytes=read_file(path);
+    if(bytes.size()<32||bytes[0]!='W'||bytes[1]!='T'||bytes[2]!='B'||bytes[3]!=0)return {};
+    const auto offsets=read_u32(bytes,12),sizes=read_u32(bytes,16);
+    const auto offset=read_u32(bytes,offsets),size=read_u32(bytes,sizes);
+    if(size<128||static_cast<std::size_t>(offset)+size>bytes.size())return {};
+    return {bytes.begin()+offset,bytes.begin()+offset+size};
+}
+
+bool verify_existing_wtb_orientation(const fs::path& canonical_dds,const fs::path& root) {
+    fs::create_directories(root/L"source");fs::create_directories(root/L"unpack");
+    const auto canonical=read_file(canonical_dds);
+    auto raw=canonical;
+    const auto width=read_u32(raw,16),height=read_u32(raw,12);
+    const auto offset=dds_data_offset(raw);
+    for(std::uint32_t y=0;y<height/2;++y)for(std::uint32_t x=0;x<width*4;++x)
+        std::swap(raw[offset+static_cast<std::size_t>(y)*width*4+x],raw[offset+static_cast<std::size_t>(height-1-y)*width*4+x]);
+
+    std::vector<unsigned char> wtb(0x1000,0);wtb[0]='W';wtb[1]='T';wtb[2]='B';
+    write_u32(wtb,4,3);write_u32(wtb,8,1);write_u32(wtb,12,0x20);write_u32(wtb,16,0x40);write_u32(wtb,20,0x60);write_u32(wtb,24,0x80);
+    write_u32(wtb,0x20,0x1000);write_u32(wtb,0x40,static_cast<std::uint32_t>(raw.size()));wtb.insert(wtb.end(),raw.begin(),raw.end());
+    const auto source=root/L"source/test.texture",input=root/L"unpack/test_0.dds";
+    {std::ofstream output(source,std::ios::binary);output.write(reinterpret_cast<const char*>(wtb.data()),static_cast<std::streamsize>(wtb.size()));}
+    fs::copy_file(canonical_dds,input,fs::copy_options::overwrite_existing);
+    const auto source_hash=gbfr::sha256_file(source),input_hash=gbfr::sha256_file(input);
+    {std::ofstream manifest(root/L"workspace.json");manifest<<"{\"Version\":1,\"CharacterId\":\"wtb_orientation\",\"Textures\":[{"
+        "\"Source\":\"source/test.texture\",\"SourceSha256\":\""<<source_hash<<"\",\"Output\":\"build/test.texture\","
+        "\"DdsVerticalOrientation\":\"TopLeft\",\"Slots\":[{\"Index\":0,\"Path\":\"unpack/test_0.dds\",\"BaselineSha256\":\""<<input_hash<<"\"}]}]}";}
+
+    auto workspace=gbfr::Workspace::load(root/L"workspace.json");
+    if(workspace.assets().size()!=1||!workspace.assets()[0].wtb_top_left_editing)return false;
+    workspace.build_asset(0);
+    if(gbfr::sha256_file(root/L"build/test.texture")!=source_hash)return false;
+    auto edited=canonical;edited[dds_data_offset(edited)]=static_cast<unsigned char>(edited[dds_data_offset(edited)]+1);
+    {std::ofstream output(input,std::ios::binary|std::ios::trunc);output.write(reinterpret_cast<const char*>(edited.data()),static_cast<std::streamsize>(edited.size()));}
+    workspace.build_asset(0);
+    if(!rgba_pixels_equal(first_wtb_payload(root/L"build/test.texture"),edited,true))return false;
+    {std::ofstream damaged(input,std::ios::binary|std::ios::trunc);damaged<<"damaged";}
+    workspace.restore_asset(0);
+    return rgba_pixels_equal(read_file(input),canonical,false);
 }
 
 bool build_and_reload(const fs::path& source,const fs::path& root,gbfr::PreviewRenderer& preview) {
@@ -54,11 +124,10 @@ int main(int argc,char** argv) {
     const auto root=fs::temp_directory_path()/L"gbfr_texture_test";
     fs::remove_all(root);fs::create_directories(root);
     std::vector<unsigned char> bytes(128+4*4*4,0);
-    const auto put_u32=[&](std::size_t offset,std::uint32_t value){for(unsigned shift=0;shift<32;shift+=8)bytes[offset+shift/8]=static_cast<unsigned char>((value>>shift)&0xff);};
     bytes[0]='D';bytes[1]='D';bytes[2]='S';bytes[3]=' ';
-    put_u32(4,124);put_u32(8,0x0000100f);put_u32(12,4);put_u32(16,4);put_u32(20,16);put_u32(28,1);
-    put_u32(76,32);put_u32(80,0x41);put_u32(88,32);put_u32(92,0x000000ff);put_u32(96,0x0000ff00);put_u32(100,0x00ff0000);put_u32(104,0xff000000);put_u32(108,0x1000);
-    for(std::size_t offset=128;offset<bytes.size();offset+=4){bytes[offset]=255;bytes[offset+3]=255;}
+    write_u32(bytes,4,124);write_u32(bytes,8,0x0000100f);write_u32(bytes,12,4);write_u32(bytes,16,4);write_u32(bytes,20,16);write_u32(bytes,28,1);
+    write_u32(bytes,76,32);write_u32(bytes,80,0x41);write_u32(bytes,88,32);write_u32(bytes,92,0x000000ff);write_u32(bytes,96,0x0000ff00);write_u32(bytes,100,0x00ff0000);write_u32(bytes,104,0xff000000);write_u32(bytes,108,0x1000);
+    for(std::uint32_t y=0;y<4;++y)for(std::uint32_t x=0;x<4;++x){const auto offset=128+(y*4+x)*4;bytes[offset]=static_cast<unsigned char>(32+y*48);bytes[offset+1]=static_cast<unsigned char>(16+x*32);bytes[offset+3]=255;}
     const auto path=root/L"manual_rgba.dds";
     {std::ofstream output(path,std::ios::binary);output.write(reinterpret_cast<const char*>(bytes.data()),static_cast<std::streamsize>(bytes.size()));}
 
@@ -70,6 +139,7 @@ int main(int argc,char** argv) {
     if(!preview.load_texture_preview(path)||!preview.texture_image()||preview.texture_width()!=4||preview.texture_height()!=4||
        preview.texture_info().mip_count!=1||preview.texture_info().format!="R8G8B8A8_UNORM"||preview.texture_info().compression!="未压缩 RGBA8")return 3;
     if(!build_and_reload(path,root/L"synthetic_workspace",preview)||preview.texture_width()!=4||preview.texture_height()!=4)return 4;
+    if(!verify_existing_wtb_orientation(path,root/L"wtb_orientation_workspace"))return 7;
     if(argc>1){
         const auto source=fs::absolute(fs::path(argv[1]));
         if(!preview.load_texture_preview(source))return 5;

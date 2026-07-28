@@ -73,6 +73,24 @@ function Expand-WtbTexture([string]$TexturePath, [string]$OutputDirectory) {
     return $results
 }
 
+function Convert-DdsVerticalFlip([string]$TexconvPath, [string]$DdsPath) {
+    $temporary = Join-Path ([IO.Path]::GetTempPath()) ("gbfr_dds_flip_" + [Guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Force -Path $temporary | Out-Null
+    try {
+        $messages = @(& $TexconvPath -nologo -y -vflip -o $temporary -- $DdsPath 2>&1)
+        if ($LASTEXITCODE -ne 0) {
+            throw "texconv vertical flip failed ($LASTEXITCODE): $DdsPath`n$($messages -join [Environment]::NewLine)"
+        }
+        $converted = Join-Path $temporary ([IO.Path]::GetFileName($DdsPath))
+        if (-not (Test-Path -LiteralPath $converted -PathType Leaf)) {
+            throw "texconv did not create the vertically flipped DDS: $DdsPath"
+        }
+        [IO.File]::Copy($converted, $DdsPath, $true)
+    } finally {
+        Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Convert-MmatToJson(
     [string]$FlatcPath,
     [string]$SchemaPath,

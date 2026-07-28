@@ -157,7 +157,7 @@ Mod目录/
 
 以下情况在完整 Mod 流程中需要同时修改材质或贴图；当前仓库只负责保留和预览这些中间态，反向编码能力见本节末尾：
 
-- 修改贴图内容：编辑 `unpack/data/texture/.../*.dds`，最终输出需要编码为对应 `.texture`。
+- 修改贴图内容：编辑 `unpack/data/texture/.../*.dds`，最终输出需要编码为对应 `.texture`。新工作区会把官方普通 WTB 的倒向 payload 转成与 Granite、Paint.NET、Blender 和 Substance Designer 一致的顶左编辑方向，封回时自动翻回；缺少方向标记的旧工作区保持旧行为，应重新生成工作区后再按统一方向编辑。
 - 将 Granite 贴图改为普通贴图：最终输出需要把 `unpack/data/granite/.../*.dds` 编码为普通 `.texture`，并删除 mmat 条目中的 `granite_params`（旧 schema 称 `A4`）。“新贴图”构建会在封装前自动垂直翻转 DDS 的全部 mip，不要预先手动翻转源 DDS。
 - 修改贴图引用或 Granite 映射：编辑对应的 `*.mmat.json`。
 - 新增、删除或重新排序材质槽：必须同时确认 `.minfo` 的 `chunks[].material_id`、`materials[]` 与 `vars/*.mmat` 是否仍然对应。

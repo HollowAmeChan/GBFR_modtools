@@ -364,11 +364,15 @@ function Initialize-WorkspaceArtifacts {
                 $relativeDir = [IO.Path]::GetDirectoryName($relativeDataPath)
                 $unpackDir = Join-Path (Join-Path $unpackRoot "data") $relativeDir
                 $slots = @(Expand-WtbTexture $sourceCopy $unpackDir)
+                $topLeftEditing = $extension -ieq ".texture"
+                if ($topLeftEditing) {
+                    foreach ($slot in $slots) { Convert-DdsVerticalFlip $texconvExe $slot.Path }
+                }
                 $slotRecords = @($slots | ForEach-Object {
                     [PSCustomObject]@{
                         Index = $_.Index
                         Path = ConvertTo-WorkspacePath ($_.Path.Substring($outDir.Length + 1))
-                        BaselineSha256 = $_.Sha256
+                        BaselineSha256 = Get-WorkspaceSha256 $_.Path
                     }
                 })
                 $record = [PSCustomObject]@{
@@ -376,6 +380,9 @@ function Initialize-WorkspaceArtifacts {
                     Output = ConvertTo-WorkspacePath (Join-Path "build\data" $relativeDataPath)
                     SourceSha256 = Get-WorkspaceSha256 $sourceCopy
                     Slots = $slotRecords
+                }
+                if ($topLeftEditing) {
+                    $record | Add-Member -NotePropertyName DdsVerticalOrientation -NotePropertyValue "TopLeft"
                 }
                 if ($extension -ieq ".wtb") {
                     $category = switch -Regex ($relativeDataPath.Replace('\','/')) {

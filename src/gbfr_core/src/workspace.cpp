@@ -275,6 +275,46 @@ void validate_dds(const fs::path& path) {
         throw std::runtime_error("Input is not a DDS file: " + path.string());
 }
 
+void build_wtb_from_edit_slots(const fs::path& source, const fs::path& output,
+                               const std::vector<std::pair<unsigned, fs::path>>& slots,
+                               bool top_left_editing) {
+    if (!top_left_editing) { write_wtb_from_slots(source, output, slots); return; }
+    TemporaryDirectory temporary(L"gbfr_wtb_build_");
+    std::vector<std::pair<unsigned, fs::path>> converted;
+    converted.reserve(slots.size());
+    for (std::size_t i = 0; i < slots.size(); ++i) {
+        const auto directory = temporary.path() / std::to_wstring(i);
+        fs::create_directories(directory);
+        run_process(locate_repo_file(L"_lib/tools/texconv.exe"),
+                    {L"-nologo", L"-y", L"-vflip", L"-o", directory.wstring(), L"--", slots[i].second.wstring()});
+        const auto dds = directory / slots[i].second.filename();
+        validate_dds(dds);
+        converted.emplace_back(slots[i].first, dds);
+    }
+    write_wtb_from_slots(source, output, converted);
+}
+
+void restore_wtb_slots_for_edit(const fs::path& source,
+                                const std::vector<std::pair<unsigned, fs::path>>& slots,
+                                bool top_left_editing) {
+    if (!top_left_editing) { restore_wtb_slots(source, slots); return; }
+    TemporaryDirectory temporary(L"gbfr_wtb_restore_");
+    std::vector<std::pair<unsigned, fs::path>> raw_slots;
+    raw_slots.reserve(slots.size());
+    for (std::size_t i = 0; i < slots.size(); ++i)
+        raw_slots.emplace_back(slots[i].first, temporary.path() / L"raw" / std::to_wstring(i) / slots[i].second.filename());
+    restore_wtb_slots(source, raw_slots);
+    for (std::size_t i = 0; i < slots.size(); ++i) {
+        const auto directory = temporary.path() / L"flipped" / std::to_wstring(i);
+        fs::create_directories(directory);
+        run_process(locate_repo_file(L"_lib/tools/texconv.exe"),
+                    {L"-nologo", L"-y", L"-vflip", L"-o", directory.wstring(), L"--", raw_slots[i].second.wstring()});
+        const auto dds = directory / raw_slots[i].second.filename();
+        validate_dds(dds);
+        copy_atomic(dds, slots[i].second);
+    }
+}
+
 void validate_generated_wtb(const fs::path& path) {
     const auto bytes = read_bytes(path);
     if (bytes.size() < 32 || bytes[0] != 'W' || bytes[1] != 'T' || bytes[2] != 'B' || bytes[3] != 0)
@@ -483,6 +523,8 @@ Workspace Workspace::load(const fs::path& selected) {
         const auto slots=record.value("Slots",json::array()); if(slots.empty()) continue;
         const auto& first=slots.front(); append(kind,record.value("Category", std::string(default_subtype)) + " / " + std::to_string(slots.size()) + " 槽",required_string(first,"Path"),required_string(record,"Source"),required_string(record,"Output"),required_string(first,"BaselineSha256"),record.value("SourceSha256",""));
         auto& asset=result.assets_.back();
+        asset.wtb_top_left_editing = kind == AssetKind::texture &&
+            record.value("DdsVerticalOrientation", std::string{}) == "TopLeft";
         for(std::size_t slot_index=0;slot_index<slots.size();++slot_index) {
             const auto& slot=slots[slot_index];
             asset.wtb_slots.emplace_back(slot.value("Index",0u),result.resolve(required_string(slot,"Path")));
@@ -622,7 +664,10 @@ void Workspace::build_asset(std::size_t index) {
     if (asset.kind == AssetKind::cloth) { encode_cloth(asset.input, asset.output); return; }
     if (asset.wtb_slots.empty() || asset.source.empty()) throw std::runtime_error("Selected asset has no packable WTB source");
     if (!fs::is_regular_file(asset.source) || sha256_file(asset.source) != asset.source_sha256) throw std::runtime_error("WTB source baseline is missing or changed");
-    write_wtb_from_slots(asset.source, asset.output, asset.wtb_slots);
+    const bool inputs_changed = std::any_of(asset.monitored_inputs.begin(), asset.monitored_inputs.end(),
+        [](const auto& input) { return !fs::is_regular_file(input.first) || sha256_file(input.first) != input.second; });
+    if (!inputs_changed) { copy_atomic(asset.source, asset.output); return; }
+    build_wtb_from_edit_slots(asset.source, asset.output, asset.wtb_slots, asset.wtb_top_left_editing);
 }
 
 void Workspace::restore_granite_texture(std::size_t index) {
@@ -682,7 +727,7 @@ void Workspace::restore_asset(std::size_t index) {
     }
     if (asset.wtb_slots.empty() || asset.source.empty()) throw std::runtime_error("Selected asset has no restorable WTB source");
     if (!fs::is_regular_file(asset.source) || sha256_file(asset.source) != asset.source_sha256) throw std::runtime_error("WTB source baseline is missing or changed");
-    restore_wtb_slots(asset.source, asset.wtb_slots);
+    restore_wtb_slots_for_edit(asset.source, asset.wtb_slots, asset.wtb_top_left_editing);
     refresh();
 }
 

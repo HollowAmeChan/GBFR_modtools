@@ -434,7 +434,7 @@ void MaterialInspector::refresh_texture_names() {
     texture_names_=workspace_texture_names(unpack_root_);
 }
 
-void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_gallery) {
+void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_gallery,const Workspace& workspace) {
     ImGui::Text("%s | materials %zu | constant buffers %zu | float pool %zu",
                 path_.filename().string().c_str(), asset_.entries.size(), asset_.constant_buffers.size(), asset_.shader_parameter_float_pool.size());
     ImGui::SameLine(0,14);
@@ -623,7 +623,8 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
                         const float scale=std::min(64.0f/std::max(1.0f,width),64.0f/std::max(1.0f,height));
                         const ImVec2 size{width*scale,height*scale};
                         const float x=ImGui::GetCursorPosX();ImGui::SetCursorPosX(x+(68.0f-size.x)*.5f);
-                        ImGui::Image(reinterpret_cast<ImTextureID>(thumbnail->image.Get()),size,ImVec2(0,1),ImVec2(1,0));
+                        const bool flip=TextureGallery::needs_vertical_flip(workspace,dds);
+                        ImGui::Image(reinterpret_cast<ImTextureID>(thumbnail->image.Get()),size,flip?ImVec2(0,1):ImVec2(0,0),flip?ImVec2(1,0):ImVec2(1,1));
                     }else{
                         ImGui::Dummy(ImVec2(68,64));
                         const auto min=ImGui::GetItemRectMin(),max=ImGui::GetItemRectMax();
