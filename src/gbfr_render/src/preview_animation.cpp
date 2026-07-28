@@ -122,14 +122,16 @@ bool PreviewRenderer::set_anchor_links(const std::vector<std::pair<std::size_t,s
 }
 
 bool PreviewRenderer::apply_animation(const AnimationClip* clip,float frame) {
-    if(!index_count_||skeleton_.bones.empty()||!vertices_||!bones_)return false;
+    last_error_.clear();
+    const auto fail=[&](std::string message){last_error_=std::move(message);return false;};
+    if(!index_count_||skeleton_.bones.empty()||!vertices_||!bones_)return fail("模型姿态缺少索引、骨架或 GPU 缓冲");
     const auto bone_count=skeleton_.bones.size();
     std::vector<Vec3> positions(bone_count),scales(bone_count);
     std::vector<XMFLOAT3> rotations(bone_count);
     std::unordered_map<int,std::vector<std::size_t>> bone_indices;bone_indices.reserve(bone_count);
     std::vector<std::size_t> object_roots;
     std::vector<std::size_t> components(bone_count);
-    for(std::size_t i=0;i<bone_count;++i){const auto& bone=skeleton_.bones[i];positions[i]=bone.position;scales[i]=bone.scale;rotations[i]=quaternion_to_euler(bone.rotation);const int id=bone_name_id(bone.name);if(id>=0)bone_indices[id].push_back(i);if(bone.parent==0xffff){components[i]=i;if(bone.name=="_900")object_roots.push_back(i);}else{if(bone.parent>=i)return false;components[i]=components[bone.parent];}}
+    for(std::size_t i=0;i<bone_count;++i){const auto& bone=skeleton_.bones[i];positions[i]=bone.position;scales[i]=bone.scale;rotations[i]=quaternion_to_euler(bone.rotation);const int id=bone_name_id(bone.name);if(id>=0)bone_indices[id].push_back(i);if(bone.parent==0xffff){components[i]=i;if(bone.name=="_900")object_roots.push_back(i);}else{if(bone.parent>=i)return fail("骨架父骨顺序无效："+bone.name);components[i]=components[bone.parent];}}
     std::vector<bool> anchor_driven_bones(bone_count,false);
     for(const auto& [target,follower]:anchor_links_){
         if(target>=bone_count||follower>=bone_count)continue;
@@ -187,7 +189,7 @@ bool PreviewRenderer::apply_animation(const AnimationClip* clip,float frame) {
         const auto rest_local=local_matrix(bone.position,bone.scale,XMVectorSet(bone.rotation.x,bone.rotation.y,bone.rotation.z,bone.rotation.w));
         const auto posed_local=clip?local_matrix(positions[i],scales[i],XMLoadFloat4(&local_rotations[i])):rest_local;
         if(bone.parent==0xffff){rest_world[i]=rest_local;posed_world[i]=posed_local;}
-        else {if(bone.parent>=i)return false;rest_world[i]=rest_local*rest_world[bone.parent];posed_world[i]=posed_local*posed_world[bone.parent];}
+        else {if(bone.parent>=i)return fail("骨架世界姿态父骨顺序无效："+bone.name);rest_world[i]=rest_local*rest_world[bone.parent];posed_world[i]=posed_local*posed_world[bone.parent];}
     }
     for(const auto& [target,follower]:anchor_links_){
         if(target>=bone_count||follower>=bone_count)continue;
@@ -219,7 +221,7 @@ bool PreviewRenderer::apply_animation(const AnimationClip* clip,float frame) {
     }
 
     D3D11_MAPPED_SUBRESOURCE mapped{};
-    if(FAILED(context_->Map(bones_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped)))return false;
+    if(FAILED(context_->Map(bones_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped)))return fail("GPU 骨骼常量缓冲更新失败");
     std::memcpy(mapped.pData,&gpu_bones,sizeof(gpu_bones));context_->Unmap(bones_.Get(),0);
 
     std::vector<DebugVertex> lines;lines.reserve(line_vertex_count_);

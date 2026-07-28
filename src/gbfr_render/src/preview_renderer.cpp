@@ -1,4 +1,5 @@
 #include <gbfr/render/preview_renderer.hpp>
+#include <gbfr/core/log.hpp>
 #include "preview_gpu_types.hpp"
 #include <DirectXMath.h>
 #include <d3dcompiler.h>
@@ -59,6 +60,11 @@ const char* texture_compression_name(DXGI_FORMAT format) {
     default:return "未知";
     }
 }
+
+std::string utf8_path(const fs::path& path) {
+    const auto value=path.generic_u8string();
+    return {reinterpret_cast<const char*>(value.data()),value.size()};
+}
 }
 
 namespace gbfr {
@@ -117,7 +123,10 @@ void PreviewRenderer::resize(unsigned width,unsigned height) { width=std::max(1u
 
 bool PreviewRenderer::load(const MeshAsset& mesh,const SkeletonAsset& skeleton,const std::vector<PreviewMaterialTextures>& materials,const SopAsset& sop) {
     clear();
-    if(skeleton.bones.empty()||skeleton.bones.size()>max_skin_bones)return false;
+    last_error_.clear();
+    const auto fail=[&](std::string message){last_error_=std::move(message);return false;};
+    if(skeleton.bones.empty())return fail("模型骨架为空");
+    if(skeleton.bones.size()>max_skin_bones)return fail("模型骨骼数超过 GPU 预览上限");
     skeleton_=skeleton;sop_=sop;
     visible_bones_.assign(skeleton.bones.size(),false);
     for(const auto& vertex:mesh.vertices)for(std::size_t influence=0;influence<vertex.weights.size();++influence){
@@ -143,12 +152,13 @@ bool PreviewRenderer::load(const MeshAsset& mesh,const SkeletonAsset& skeleton,c
         vertices.push_back(vertex);
         bounds_min_.x=std::min(bounds_min_.x,v.position.x);bounds_min_.y=std::min(bounds_min_.y,v.position.y);bounds_min_.z=std::min(bounds_min_.z,v.position.z);bounds_max_.x=std::max(bounds_max_.x,v.position.x);bounds_max_.y=std::max(bounds_max_.y,v.position.y);bounds_max_.z=std::max(bounds_max_.z,v.position.z);
     }
-    if(!create_buffer(device_,vertices,D3D11_BIND_VERTEX_BUFFER,vertices_)||!create_buffer(device_,mesh.indices,D3D11_BIND_INDEX_BUFFER,indices_)) return false;
+    if(!create_buffer(device_,vertices,D3D11_BIND_VERTEX_BUFFER,vertices_))return fail("GPU 模型顶点缓冲创建失败");
+    if(!create_buffer(device_,mesh.indices,D3D11_BIND_INDEX_BUFFER,indices_))return fail("GPU 模型索引缓冲创建失败");
     index_count_=static_cast<unsigned>(mesh.indices.size());
     draw_ranges_.reserve(mesh.chunks.size());
     for(const auto& chunk:mesh.chunks) {
         if(!chunk.count) continue;
-        if(chunk.offset>index_count_||chunk.count>index_count_-chunk.offset) return false;
+        if(chunk.offset>index_count_||chunk.count>index_count_-chunk.offset)return fail("模型分块索引范围越界");
         draw_ranges_.push_back({chunk.offset,chunk.count,chunk.material});
     }
     if(draw_ranges_.empty()) draw_ranges_.push_back({0,index_count_,0});
@@ -158,11 +168,21 @@ bool PreviewRenderer::load(const MeshAsset& mesh,const SkeletonAsset& skeleton,c
         auto& gpu=materials_[i];const auto& source=materials[i];
         gpu.alpha_clipped=source.alpha_clipped;
         gpu.alpha_blended=source.alpha_blended;
-        if(!source.albedo.empty()&&!load_dds(source.albedo,gpu.primary)) return false;
-        if(!source.alpha_mask.empty()){gpu.alpha_masked=load_dds(source.alpha_mask,gpu.alpha_mask);if(!gpu.alpha_masked)return false;}
+        if(!source.albedo.empty()&&!load_dds(source.albedo,gpu.primary))
+            Log::write(LogLevel::warning,"模型预览跳过无法加载的基础色贴图："+utf8_path(source.albedo));
+        if(!source.alpha_mask.empty()){
+            gpu.alpha_masked=load_dds(source.alpha_mask,gpu.alpha_mask);
+            if(!gpu.alpha_masked)Log::write(LogLevel::warning,"模型预览跳过无法加载的透明遮罩："+utf8_path(source.alpha_mask));
+        }
         if(!source.eye_conjunctiva.empty()&&!source.eye_iris.empty()&&!source.eye_highlight.empty()) {
-            gpu.eye=load_dds(source.eye_conjunctiva,gpu.primary)&&load_dds(source.eye_iris,gpu.iris)&&load_dds(source.eye_highlight,gpu.highlight);
-            if(!gpu.eye) return false;
+            ComPtr<ID3D11ShaderResourceView> conjunctiva,iris,highlight;
+            const bool conjunctiva_ok=load_dds(source.eye_conjunctiva,conjunctiva);
+            const bool iris_ok=load_dds(source.eye_iris,iris);
+            const bool highlight_ok=load_dds(source.eye_highlight,highlight);
+            gpu.eye=conjunctiva_ok&&iris_ok&&highlight_ok;
+            if(gpu.eye){gpu.primary=std::move(conjunctiva);gpu.iris=std::move(iris);gpu.highlight=std::move(highlight);}
+            else Log::write(LogLevel::warning,"模型预览跳过不完整或无法加载的眼部贴图组（材质 "+std::to_string(i)+"）："+
+                utf8_path(source.eye_conjunctiva)+" | "+utf8_path(source.eye_iris)+" | "+utf8_path(source.eye_highlight));
         }
     }
 
@@ -180,7 +200,8 @@ bool PreviewRenderer::load(const MeshAsset& mesh,const SkeletonAsset& skeleton,c
     std::vector<DebugVertex> ground;ground.reserve(static_cast<std::size_t>(grid_steps*2+1)*4);
     for(int step=-grid_steps;step<=grid_steps;++step){const float coordinate=step*grid_spacing;ground.push_back({{-grid_extent,grid_y,coordinate}});ground.push_back({{grid_extent,grid_y,coordinate}});ground.push_back({{coordinate,grid_y,-grid_extent}});ground.push_back({{coordinate,grid_y,grid_extent}});}
     ground_vertex_count_=static_cast<unsigned>(ground.size());if(!ground.empty())create_buffer(device_,ground,D3D11_BIND_VERTEX_BUFFER,ground_lines_);
-    return apply_animation(nullptr,0.0f);
+    if(!apply_animation(nullptr,0.0f))return fail(last_error_.empty()?"GPU 模型初始骨骼姿态创建失败":last_error_);
+    return true;
 }
 
 bool PreviewRenderer::load_texture_preview(const fs::path& dds) {

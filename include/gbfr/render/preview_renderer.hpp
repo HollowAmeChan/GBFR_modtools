@@ -76,6 +76,7 @@ public:
     unsigned width() const noexcept { return width_; }
     unsigned height() const noexcept { return height_; }
     bool has_model() const noexcept { return index_count_ != 0; }
+    const std::string& last_error() const noexcept { return last_error_; }
     const std::vector<Vec3>& bone_positions() const noexcept { return animated_bone_positions_; }
     std::size_t visible_bone_count() const noexcept { return visible_bone_count_; }
     std::size_t applied_sop_operation_count() const noexcept { return applied_sop_operation_count_; }
@@ -139,5 +140,6 @@ private:
     std::uint64_t pose_hash_{};
     float bone_marker_size_{.001f};
     TexturePreviewInfo texture_info_;
+    std::string last_error_;
 };
 }

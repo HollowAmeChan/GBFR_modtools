@@ -9,6 +9,7 @@
 #include "material_inspector.hpp"
 #include "sop_inspector.hpp"
 #include "texture_gallery.hpp"
+#include "imgui_texture_view.hpp"
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -743,7 +744,10 @@ bool load_model_previews(const std::vector<ModelPreviewKey>& keys,bool force) {
             merged_mesh.buffer_types|=part.mesh.buffer_types;merged_mesh.influence_count=std::max(merged_mesh.influence_count,part.mesh.influence_count);merged_mesh.has_uv1=merged_mesh.has_uv1||part.mesh.has_uv1;merged_mesh.has_color=merged_mesh.has_color||part.mesh.has_color;
             stats.lod_count+=part.info.lods.size();stats.shadow_lod_count+=part.info.shadow_lods.size();stats.mesh_count+=part.info.submesh_names.size();stats.chunk_count+=part.mesh.chunks.size();stats.vertex_count+=part.mesh.vertices.size();stats.triangle_count+=part.mesh.indices.size()/3;stats.influence_count=std::max(stats.influence_count,static_cast<unsigned>(part.mesh.influence_count));stats.has_uv1=stats.has_uv1||part.mesh.has_uv1;stats.has_color=stats.has_color||part.mesh.has_color;
         }
-        if(!g_preview->load(merged_mesh,merged_skeleton,merged_materials,parts.front().sop))throw std::runtime_error("GPU 多模型预览资源创建失败");
+        if(!g_preview->load(merged_mesh,merged_skeleton,merged_materials,parts.front().sop)){
+            const auto& detail=g_preview->last_error();
+            throw std::runtime_error(detail.empty()?"GPU 多模型预览资源创建失败":detail);
+        }
         std::vector<std::pair<std::size_t,std::size_t>> anchor_links;
         const auto body=std::find_if(diagnostics.begin(),diagnostics.end(),[](const auto& item){auto stem=item.minfo.stem().wstring();std::transform(stem.begin(),stem.end(),stem.begin(),[](wchar_t value){return static_cast<wchar_t>(std::towlower(value));});return stem.starts_with(L"pl")&&item.head.present;});
         if(g_link_head_anchor&&body!=diagnostics.end())for(auto& item:diagnostics){auto stem=item.minfo.stem().wstring();std::transform(stem.begin(),stem.end(),stem.begin(),[](wchar_t value){return static_cast<wchar_t>(std::towlower(value));});if(stem.starts_with(L"fp")&&item.head.present){anchor_links.emplace_back(body->head.bone_index,item.head.bone_index);item.head_linked=true;}}
@@ -1464,7 +1468,7 @@ void draw_editor_shell() {
         const float width=static_cast<float>(g_preview->texture_width()),height=static_cast<float>(g_preview->texture_height());
         const float scale=std::min(available.x/width,available.y/height);const ImVec2 image_size{width*scale,height*scale};
         const ImVec2 cursor=ImGui::GetCursorPos();ImGui::SetCursorPos({cursor.x+(available.x-image_size.x)*.5f,cursor.y+(available.y-image_size.y)*.5f});
-        ImGui::Image(reinterpret_cast<ImTextureID>(g_preview->texture_image()),image_size);
+        gbfr::editor::image_on_checkerboard(reinterpret_cast<ImTextureID>(g_preview->texture_image()),image_size);
     }else if(g_preview_mode==PreviewMode::material){
         g_material_inspector.draw(*g_preview,g_texture_gallery,*g_workspace);
         if(g_material_inspector.consume_file_changed()&&g_workspace)g_workspace->refresh();

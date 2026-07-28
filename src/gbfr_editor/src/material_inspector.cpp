@@ -1,4 +1,5 @@
 #include "material_inspector.hpp"
+#include "imgui_texture_view.hpp"
 #include "mmat_param_layouts.generated.hpp"
 #include "texture_gallery.hpp"
 
@@ -623,7 +624,7 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
                         const float scale=std::min(64.0f/std::max(1.0f,width),64.0f/std::max(1.0f,height));
                         const ImVec2 size{width*scale,height*scale};
                         const float x=ImGui::GetCursorPosX();ImGui::SetCursorPosX(x+(68.0f-size.x)*.5f);
-                        ImGui::Image(reinterpret_cast<ImTextureID>(thumbnail->image.Get()),size);
+                        image_on_checkerboard(reinterpret_cast<ImTextureID>(thumbnail->image.Get()),size,8.0f);
                     }else{
                         ImGui::Dummy(ImVec2(68,64));
                         const auto min=ImGui::GetItemRectMin(),max=ImGui::GetItemRectMax();

@@ -1,4 +1,5 @@
 #include "texture_gallery.hpp"
+#include "imgui_texture_view.hpp"
 
 #include <imgui.h>
 
@@ -119,7 +120,7 @@ void TextureGallery::draw(const Workspace& workspace,PreviewRenderer& renderer,s
                         const ImVec2 image_size{width*scale,height*scale};
                         ImGui::SetCursorPosX(ImGui::GetCursorPosX()+(thumbnail_size_-image_size.x)*0.5f+4.0f);
                         ImGui::SetCursorPosY(ImGui::GetCursorPosY()+(thumbnail_size_-image_size.y)*0.5f);
-                        ImGui::Image(reinterpret_cast<ImTextureID>(cached->texture.image.Get()),image_size);
+                        image_on_checkerboard(reinterpret_cast<ImTextureID>(cached->texture.image.Get()),image_size,10.0f);
                         activate=ImGui::IsItemClicked();
                     }else{
                         ImGui::Dummy(ImVec2(thumbnail_size_,thumbnail_size_));

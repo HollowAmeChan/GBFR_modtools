@@ -1,4 +1,5 @@
 #include <gbfr/core/workspace.hpp>
+#include <gbfr/core/log.hpp>
 #include <gbfr/render/preview_renderer.hpp>
 
 #include <d3d11.h>
@@ -162,6 +163,25 @@ int main(int argc,char** argv) {
         if(!build_and_reload(source,root/L"actual_workspace",preview)||preview.texture_width()!=width||preview.texture_height()!=height)return 6;
     }
     if(argc>2&&!build_workspace_textures(fs::absolute(fs::path(argv[2]))))return 8;
+    {
+        gbfr::PreviewRenderer model_preview;
+        if(!model_preview.initialize(device.Get(),context.Get(),executable.parent_path()/L"preview.hlsl"))return 9;
+        const auto damaged=root/L"damaged_material.dds";
+        {std::ofstream output(damaged,std::ios::binary);output<<"not a DDS";}
+        gbfr::SkeletonAsset skeleton;skeleton.bones.push_back({"_000",0xffff,{0,0,0},{0,0,0,1},{1,1,1},{0,0,0}});
+        gbfr::MeshAsset mesh;mesh.vertices.resize(3);mesh.indices={0,1,2};
+        mesh.vertices[0].position={0,0,0};mesh.vertices[1].position={1,0,0};mesh.vertices[2].position={0,1,0};
+        for(auto& vertex:mesh.vertices){vertex.joints[0]=0;vertex.weights[0]=1.0f;}
+        gbfr::PreviewMaterialTextures material;material.albedo=damaged;
+        gbfr::Log::clear();
+        if(!model_preview.load(mesh,skeleton,{material})||!model_preview.has_model()||!model_preview.last_error().empty()){
+            std::cerr<<"material fallback failed: "<<model_preview.last_error()<<'\n';
+            return 10;
+        }
+        const auto log=gbfr::Log::snapshot();
+        if(log.empty()||log.back().level!=gbfr::LogLevel::warning||log.back().message.find("damaged_material.dds")==std::string::npos)return 11;
+        if(model_preview.load(mesh,{})||model_preview.last_error().empty())return 12;
+    }
     fs::remove_all(root);
     return 0;
 }
