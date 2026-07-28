@@ -1432,6 +1432,19 @@ void draw_editor_shell() {
         if(file_error)ImGui::TextDisabled("分辨率 %u x %u  |  格式 %s  |  压缩 %s  |  Mip %u  |  方向 %s",info.width,info.height,info.format.c_str(),info.compression.c_str(),info.mip_count,orientation);
         else ImGui::TextDisabled("分辨率 %u x %u  |  格式 %s  |  压缩 %s  |  Mip %u  |  方向 %s  |  %.2f MiB",info.width,info.height,info.format.c_str(),info.compression.c_str(),info.mip_count,orientation,static_cast<double>(file_bytes)/(1024.0*1024.0));
         ImGui::PopTextWrapPos();
+        const std::array channel_modes={
+            std::pair{"正常",gbfr::TexturePreviewChannel::normal},std::pair{"R",gbfr::TexturePreviewChannel::red},
+            std::pair{"G",gbfr::TexturePreviewChannel::green},std::pair{"B",gbfr::TexturePreviewChannel::blue},
+            std::pair{"A",gbfr::TexturePreviewChannel::alpha}};
+        ImGui::TextUnformatted("通道");ImGui::SameLine();ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,ImVec2(2.0f,ImGui::GetStyle().ItemSpacing.y));
+        for(std::size_t channel_index=0;channel_index<channel_modes.size();++channel_index){
+            const auto [label,channel]=channel_modes[channel_index];const bool selected=g_preview->texture_preview_channel()==channel;
+            if(selected){ImGui::PushStyleColor(ImGuiCol_Button,ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));ImGui::PushStyleColor(ImGuiCol_ButtonHovered,ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));}
+            if(ImGui::SmallButton(label)&&!selected&&!g_preview->set_texture_preview_channel(channel))gbfr::Log::write(gbfr::LogLevel::warning,"GPU 贴图通道预览创建失败");
+            if(selected)ImGui::PopStyleColor(2);
+            if(channel_index+1<channel_modes.size())ImGui::SameLine();
+        }
+        ImGui::PopStyleVar();
         ImGui::Separator();
     }
     ImVec2 available = ImGui::GetContentRegionAvail();

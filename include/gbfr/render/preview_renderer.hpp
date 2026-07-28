@@ -13,6 +13,7 @@
 namespace gbfr {
 struct OrbitCamera { float yaw{0.0f}, pitch{0.12f}, distance{4.0f}; Vec3 target{0,1,0}; };
 enum class PreviewShadingMode { unlit, lit, wireframe };
+enum class TexturePreviewChannel { normal, red, green, blue, alpha };
 struct PreviewMaterialTextures {
     std::filesystem::path albedo;
     std::filesystem::path eye_conjunctiva;
@@ -52,6 +53,7 @@ public:
     bool load_texture_thumbnail(const std::filesystem::path& dds,
                                 TexturePreviewResource& output,
                                 unsigned maximum_dimension = 256);
+    bool set_texture_preview_channel(TexturePreviewChannel channel);
     void clear();
     bool apply_animation(const AnimationClip* clip, float frame);
     bool set_anchor_links(const std::vector<std::pair<std::size_t, std::size_t>>& links);
@@ -73,6 +75,7 @@ public:
     unsigned texture_width() const noexcept { return texture_info_.width; }
     unsigned texture_height() const noexcept { return texture_info_.height; }
     const TexturePreviewInfo& texture_info() const noexcept { return texture_info_; }
+    TexturePreviewChannel texture_preview_channel() const noexcept { return texture_preview_channel_; }
     unsigned width() const noexcept { return width_; }
     unsigned height() const noexcept { return height_; }
     bool has_model() const noexcept { return index_count_ != 0; }
@@ -104,6 +107,7 @@ private:
                   unsigned* width = nullptr, unsigned* height = nullptr,
                   bool display_encoded = false, unsigned maximum_dimension = 0,
                   TexturePreviewInfo* info = nullptr);
+    bool render_texture_channel();
     ID3D11Device* device_{};
     ID3D11DeviceContext* context_{};
     unsigned width_{1}, height_{1}, index_count_{}, line_vertex_count_{};
@@ -115,12 +119,17 @@ private:
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> color_rtv_;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> color_srv_;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> texture_preview_srv_;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> texture_source_srv_, texture_channel_srv_;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> texture_channel_;
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> texture_channel_rtv_;
     Microsoft::WRL::ComPtr<ID3D11DepthStencilView> depth_dsv_;
-    Microsoft::WRL::ComPtr<ID3D11Buffer> vertices_, indices_, lines_, bone_points_, constants_, bones_;
+    Microsoft::WRL::ComPtr<ID3D11Buffer> vertices_, indices_, lines_, bone_points_, constants_, bones_, texture_preview_constants_;
     Microsoft::WRL::ComPtr<ID3D11Buffer> collision_lines_, cloth_longitudinal_lines_, cloth_lateral_lines_, cloth_polygon_lines_, cloth_node_lines_, ground_lines_;
     Microsoft::WRL::ComPtr<ID3D11VertexShader> vertex_shader_;
     Microsoft::WRL::ComPtr<ID3D11VertexShader> debug_vertex_shader_;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> pixel_shader_;
+    Microsoft::WRL::ComPtr<ID3D11VertexShader> texture_preview_vertex_shader_;
+    Microsoft::WRL::ComPtr<ID3D11PixelShader> texture_preview_pixel_shader_;
     Microsoft::WRL::ComPtr<ID3D11InputLayout> input_layout_;
     Microsoft::WRL::ComPtr<ID3D11InputLayout> debug_input_layout_;
     Microsoft::WRL::ComPtr<ID3D11SamplerState> sampler_;
@@ -140,6 +149,7 @@ private:
     std::uint64_t pose_hash_{};
     float bone_marker_size_{.001f};
     TexturePreviewInfo texture_info_;
+    TexturePreviewChannel texture_preview_channel_{TexturePreviewChannel::normal};
     std::string last_error_;
 };
 }

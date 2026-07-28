@@ -116,7 +116,10 @@ XMMATRIX local_matrix(const gbfr::Vec3& position,const gbfr::Vec3& scale,FXMVECT
 
 namespace gbfr {
 bool PreviewRenderer::set_anchor_links(const std::vector<std::pair<std::size_t,std::size_t>>& links) {
-    for(const auto& [target,follower]:links)if(target>=skeleton_.bones.size()||follower>=skeleton_.bones.size())return false;
+    for(const auto& [target,follower]:links)if(target>=skeleton_.bones.size()||follower>=skeleton_.bones.size()){
+        last_error_="骨架锚点引用越界";
+        return false;
+    }
     anchor_links_=links;
     return apply_animation(nullptr,0.0f);
 }

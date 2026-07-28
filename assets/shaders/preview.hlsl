@@ -123,3 +123,33 @@ float4 PSMain(VSOut input) : SV_TARGET
     float shade = halfLambert > 0.72 ? 1.04 : (halfLambert > 0.43 ? 0.86 : 0.68);
     return float4(saturate(base * shade + float3(0.025, 0.03, 0.035)), outputAlpha);
 }
+
+cbuffer TexturePreviewSettings : register(b2)
+{
+    uint previewChannel;
+    float3 texturePreviewPadding;
+};
+
+struct TexturePreviewVSOut
+{
+    float4 position : SV_POSITION;
+};
+
+TexturePreviewVSOut VSTexturePreview(uint vertexId : SV_VertexID)
+{
+    TexturePreviewVSOut output;
+    float2 position = float2((vertexId << 1) & 2, vertexId & 2);
+    output.position = float4(position * float2(2.0, -2.0) + float2(-1.0, 1.0), 0.0, 1.0);
+    return output;
+}
+
+float4 PSTexturePreview(TexturePreviewVSOut input) : SV_TARGET
+{
+    float4 sampleValue = primaryTexture.Load(int3(uint2(input.position.xy), 0));
+    if (previewChannel == 0)
+        return sampleValue;
+    float channelValue = previewChannel == 1 ? sampleValue.r :
+                         previewChannel == 2 ? sampleValue.g :
+                         previewChannel == 3 ? sampleValue.b : sampleValue.a;
+    return float4(channelValue, channelValue, channelValue, 1.0);
+}

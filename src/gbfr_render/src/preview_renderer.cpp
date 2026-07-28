@@ -70,11 +70,14 @@ std::string utf8_path(const fs::path& path) {
 namespace gbfr {
 bool PreviewRenderer::initialize(ID3D11Device* device,ID3D11DeviceContext* context,const fs::path& shader_file) {
     device_=device; context_=context;
-    ComPtr<ID3DBlob> vs,debug_vs,ps;
-    if(!compile(shader_file,"VSMain","vs_5_0",vs)||!compile(shader_file,"VSDebug","vs_5_0",debug_vs)||!compile(shader_file,"PSMain","ps_5_0",ps)) return false;
+    ComPtr<ID3DBlob> vs,debug_vs,ps,texture_vs,texture_ps;
+    if(!compile(shader_file,"VSMain","vs_5_0",vs)||!compile(shader_file,"VSDebug","vs_5_0",debug_vs)||!compile(shader_file,"PSMain","ps_5_0",ps)||
+       !compile(shader_file,"VSTexturePreview","vs_5_0",texture_vs)||!compile(shader_file,"PSTexturePreview","ps_5_0",texture_ps))return false;
     if(FAILED(device_->CreateVertexShader(vs->GetBufferPointer(),vs->GetBufferSize(),nullptr,&vertex_shader_))||
        FAILED(device_->CreateVertexShader(debug_vs->GetBufferPointer(),debug_vs->GetBufferSize(),nullptr,&debug_vertex_shader_))||
-       FAILED(device_->CreatePixelShader(ps->GetBufferPointer(),ps->GetBufferSize(),nullptr,&pixel_shader_))) return false;
+       FAILED(device_->CreatePixelShader(ps->GetBufferPointer(),ps->GetBufferSize(),nullptr,&pixel_shader_))||
+       FAILED(device_->CreateVertexShader(texture_vs->GetBufferPointer(),texture_vs->GetBufferSize(),nullptr,&texture_preview_vertex_shader_))||
+       FAILED(device_->CreatePixelShader(texture_ps->GetBufferPointer(),texture_ps->GetBufferSize(),nullptr,&texture_preview_pixel_shader_)))return false;
     D3D11_INPUT_ELEMENT_DESC elements[]={
         {"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,0,D3D11_INPUT_PER_VERTEX_DATA,0},
         {"NORMAL",0,DXGI_FORMAT_R32G32B32_FLOAT,0,12,D3D11_INPUT_PER_VERTEX_DATA,0},
@@ -92,6 +95,8 @@ bool PreviewRenderer::initialize(ID3D11Device* device,ID3D11DeviceContext* conte
     if(FAILED(device_->CreateBuffer(&cb,nullptr,&constants_))) return false;
     cb.ByteWidth=sizeof(BoneConstants);
     if(FAILED(device_->CreateBuffer(&cb,nullptr,&bones_)))return false;
+    cb.ByteWidth=16;
+    if(FAILED(device_->CreateBuffer(&cb,nullptr,&texture_preview_constants_)))return false;
     D3D11_SAMPLER_DESC sd{}; sd.Filter=D3D11_FILTER_MIN_MAG_MIP_LINEAR; sd.AddressU=sd.AddressV=sd.AddressW=D3D11_TEXTURE_ADDRESS_WRAP; sd.MaxLOD=D3D11_FLOAT32_MAX;
     device_->CreateSamplerState(&sd,&sampler_);
     D3D11_RASTERIZER_DESC rd{}; rd.CullMode=D3D11_CULL_BACK; rd.FillMode=D3D11_FILL_SOLID; rd.DepthClipEnable=TRUE; rd.FrontCounterClockwise=TRUE;
@@ -208,7 +213,47 @@ bool PreviewRenderer::load_texture_preview(const fs::path& dds) {
     ComPtr<ID3D11ShaderResourceView> texture;
     TexturePreviewInfo info;
     if(!load_dds(dds,texture,nullptr,nullptr,true,0,&info)) return false;
-    texture_preview_srv_=std::move(texture);texture_info_=std::move(info);
+    texture_source_srv_=std::move(texture);texture_preview_srv_=texture_source_srv_;texture_info_=std::move(info);
+    texture_channel_.Reset();texture_channel_rtv_.Reset();texture_channel_srv_.Reset();
+    texture_preview_channel_=TexturePreviewChannel::normal;
+    return true;
+}
+
+bool PreviewRenderer::set_texture_preview_channel(TexturePreviewChannel channel) {
+    if(!texture_source_srv_)return false;
+    if(channel==TexturePreviewChannel::normal){texture_preview_channel_=channel;texture_preview_srv_=texture_source_srv_;return true;}
+    texture_preview_channel_=channel;
+    if(render_texture_channel())return true;
+    texture_preview_channel_=TexturePreviewChannel::normal;texture_preview_srv_=texture_source_srv_;
+    return false;
+}
+
+bool PreviewRenderer::render_texture_channel() {
+    if(!texture_source_srv_||!texture_info_.width||!texture_info_.height||texture_preview_channel_==TexturePreviewChannel::normal)return false;
+    if(!texture_channel_){
+        D3D11_TEXTURE2D_DESC desc{};desc.Width=texture_info_.width;desc.Height=texture_info_.height;desc.MipLevels=1;desc.ArraySize=1;
+        desc.Format=DXGI_FORMAT_R8G8B8A8_UNORM;desc.SampleDesc.Count=1;desc.BindFlags=D3D11_BIND_RENDER_TARGET|D3D11_BIND_SHADER_RESOURCE;
+        if(FAILED(device_->CreateTexture2D(&desc,nullptr,&texture_channel_))||
+           FAILED(device_->CreateRenderTargetView(texture_channel_.Get(),nullptr,&texture_channel_rtv_))||
+           FAILED(device_->CreateShaderResourceView(texture_channel_.Get(),nullptr,&texture_channel_srv_)))return false;
+    }
+    struct TexturePreviewConstants { std::uint32_t channel; float padding[3]; } constants{static_cast<std::uint32_t>(texture_preview_channel_),{}};
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    if(FAILED(context_->Map(texture_preview_constants_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped)))return false;
+    std::memcpy(mapped.pData,&constants,sizeof(constants));context_->Unmap(texture_preview_constants_.Get(),0);
+
+    ID3D11ShaderResourceView* null_source=nullptr;context_->PSSetShaderResources(0,1,&null_source);
+    ID3D11RenderTargetView* target=texture_channel_rtv_.Get();context_->OMSetRenderTargets(1,&target,nullptr);
+    const D3D11_VIEWPORT viewport{0,0,static_cast<float>(texture_info_.width),static_cast<float>(texture_info_.height),0,1};context_->RSSetViewports(1,&viewport);
+    context_->OMSetBlendState(nullptr,nullptr,0xffffffff);context_->OMSetDepthStencilState(nullptr,0);context_->RSSetState(solid_.Get());
+    context_->IASetInputLayout(nullptr);context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    context_->VSSetShader(texture_preview_vertex_shader_.Get(),nullptr,0);context_->PSSetShader(texture_preview_pixel_shader_.Get(),nullptr,0);
+    ID3D11Buffer* settings=texture_preview_constants_.Get();context_->PSSetConstantBuffers(2,1,&settings);
+    ID3D11ShaderResourceView* source=texture_source_srv_.Get();context_->PSSetShaderResources(0,1,&source);context_->PSSetSamplers(0,1,sampler_.GetAddressOf());
+    context_->Draw(3,0);
+    context_->PSSetShaderResources(0,1,&null_source);
+    context_->OMSetRenderTargets(0,nullptr,nullptr);
+    texture_preview_srv_=texture_channel_srv_;
     return true;
 }
 
@@ -226,7 +271,8 @@ void PreviewRenderer::clear() {
     cloth_longitudinal_lines_.Reset();cloth_lateral_lines_.Reset();cloth_polygon_lines_.Reset();cloth_node_lines_.Reset();
     draw_ranges_.clear(); materials_.clear();
     skeleton_={};sop_={};animated_bone_positions_.clear();animated_bone_world_.clear();visible_bones_.clear();anchor_links_.clear();visible_bone_count_=0;applied_sop_operation_count_=0;pose_hash_=0;
-    texture_preview_srv_.Reset();texture_info_={};
+    texture_preview_srv_.Reset();texture_source_srv_.Reset();texture_channel_srv_.Reset();texture_channel_rtv_.Reset();texture_channel_.Reset();
+    texture_preview_channel_=TexturePreviewChannel::normal;texture_info_={};
 }
 
 void PreviewRenderer::set_collision_lines(const std::vector<Vec3>& points) {

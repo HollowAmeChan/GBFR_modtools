@@ -6,6 +6,7 @@
 #include <wrl/client.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -134,6 +135,18 @@ bool build_workspace_textures(const fs::path& manifest) {
     std::cout<<"built_workspace_textures="<<built<<'\n';
     return built>0;
 }
+
+std::array<unsigned char,4> preview_pixel(gbfr::PreviewRenderer& preview,ID3D11Device* device,ID3D11DeviceContext* context) {
+    std::array<unsigned char,4> result{};
+    Microsoft::WRL::ComPtr<ID3D11Resource> resource;preview.texture_image()->GetResource(&resource);
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;if(FAILED(resource.As(&texture)))return result;
+    D3D11_TEXTURE2D_DESC desc{};texture->GetDesc(&desc);desc.Usage=D3D11_USAGE_STAGING;desc.BindFlags=0;desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;desc.MiscFlags=0;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> staging;if(FAILED(device->CreateTexture2D(&desc,nullptr,&staging)))return result;
+    context->CopyResource(staging.Get(),texture.Get());D3D11_MAPPED_SUBRESOURCE mapped{};
+    if(FAILED(context->Map(staging.Get(),0,D3D11_MAP_READ,0,&mapped)))return result;
+    std::copy_n(static_cast<const unsigned char*>(mapped.pData),4,result.begin());context->Unmap(staging.Get(),0);
+    return result;
+}
 }
 
 int main(int argc,char** argv) {
@@ -143,7 +156,7 @@ int main(int argc,char** argv) {
     bytes[0]='D';bytes[1]='D';bytes[2]='S';bytes[3]=' ';
     write_u32(bytes,4,124);write_u32(bytes,8,0x0000100f);write_u32(bytes,12,4);write_u32(bytes,16,4);write_u32(bytes,20,16);write_u32(bytes,28,1);
     write_u32(bytes,76,32);write_u32(bytes,80,0x41);write_u32(bytes,88,32);write_u32(bytes,92,0x000000ff);write_u32(bytes,96,0x0000ff00);write_u32(bytes,100,0x00ff0000);write_u32(bytes,104,0xff000000);write_u32(bytes,108,0x1000);
-    for(std::uint32_t y=0;y<4;++y)for(std::uint32_t x=0;x<4;++x){const auto offset=128+(y*4+x)*4;bytes[offset]=static_cast<unsigned char>(32+y*48);bytes[offset+1]=static_cast<unsigned char>(16+x*32);bytes[offset+3]=255;}
+    for(std::uint32_t y=0;y<4;++y)for(std::uint32_t x=0;x<4;++x){const auto offset=128+(y*4+x)*4;bytes[offset]=static_cast<unsigned char>(32+y*48);bytes[offset+1]=static_cast<unsigned char>(16+x*32);bytes[offset+2]=8;bytes[offset+3]=64;}
     const auto path=root/L"manual_rgba.dds";
     {std::ofstream output(path,std::ios::binary);output.write(reinterpret_cast<const char*>(bytes.data()),static_cast<std::streamsize>(bytes.size()));}
 
@@ -154,12 +167,28 @@ int main(int argc,char** argv) {
     if(!preview.initialize(device.Get(),context.Get(),executable.parent_path()/L"preview.hlsl"))return 2;
     if(!preview.load_texture_preview(path)||!preview.texture_image()||preview.texture_width()!=4||preview.texture_height()!=4||
        preview.texture_info().mip_count!=1||preview.texture_info().format!="R8G8B8A8_UNORM"||preview.texture_info().compression!="未压缩 RGBA8")return 3;
+    const std::array channel_checks={
+        std::pair{gbfr::TexturePreviewChannel::red,static_cast<unsigned char>(32)},
+        std::pair{gbfr::TexturePreviewChannel::green,static_cast<unsigned char>(16)},
+        std::pair{gbfr::TexturePreviewChannel::blue,static_cast<unsigned char>(8)},
+        std::pair{gbfr::TexturePreviewChannel::alpha,static_cast<unsigned char>(64)}};
+    for(const auto [channel,expected]:channel_checks){
+        if(!preview.set_texture_preview_channel(channel))return 13;
+        const auto pixel=preview_pixel(preview,device.Get(),context.Get());
+        if(pixel[0]!=expected||pixel[1]!=expected||pixel[2]!=expected||pixel[3]!=255)return 14;
+    }
+    if(!preview.set_texture_preview_channel(gbfr::TexturePreviewChannel::normal)||preview.texture_preview_channel()!=gbfr::TexturePreviewChannel::normal)return 15;
     if(!build_and_reload(path,root/L"synthetic_workspace",preview)||preview.texture_width()!=4||preview.texture_height()!=4)return 4;
     if(!verify_existing_wtb_orientation(path,root/L"wtb_orientation_workspace"))return 7;
     if(argc>1){
         const auto source=fs::absolute(fs::path(argv[1]));
         if(!preview.load_texture_preview(source))return 5;
         const auto width=preview.texture_width(),height=preview.texture_height();
+        for(const auto [channel,expected]:channel_checks){
+            (void)expected;
+            if(!preview.set_texture_preview_channel(channel)||!preview.texture_image())return 16;
+        }
+        if(!preview.set_texture_preview_channel(gbfr::TexturePreviewChannel::normal))return 17;
         if(!build_and_reload(source,root/L"actual_workspace",preview)||preview.texture_width()!=width||preview.texture_height()!=height)return 6;
     }
     if(argc>2&&!build_workspace_textures(fs::absolute(fs::path(argv[2]))))return 8;
