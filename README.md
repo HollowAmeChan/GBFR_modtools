@@ -20,7 +20,7 @@ build.bat
 2. 或直接选择已有工作区的 `workspace.json`。
 3. 每个输出目录都是可独立保存和再次打开的工程。只编辑其中的 `unpack/data/`；`source/data/` 是恢复基线，`build/data/` 是 Mod 输出。
 
-Blender 插件导出的 `.minfo/.skeleton/.mmesh` 也应覆盖到 `unpack/data/` 的对应原路径。角色工作区会登记 `model_streaming/lod#` 与 `shadowlod#` 中存在的全部流式网格；编辑器点击具体 `.mmesh` 时会预览对应普通/阴影 LOD，并识别多 Mesh 分段、4/8 权重、UV1 与顶点色。多选不同模型 ID（例如 `pl` 身体和 `fp` 头部）可在同一场景同步预览，视口提供正确的世界/屏幕左右手性、地板、`_005` 头部联动和位移锚点诊断。编辑器还会预览材质、DDS、角色 `UI-image` 与 cloth 中间态；“贴图库”分页可按类型、名称或路径过滤并同时浏览工作区中的全部 DDS。MOT 动画可在 `source` 基线与 Blender 写入的 `unpack` 结果之间切换预览，SOP 约束仍从只读的 `source` 加载。预览器不读取 `build`，`build` 只作为最终 Mod 输出。
+Blender 插件导出的 `.minfo/.skeleton/.mmesh` 也应覆盖到 `unpack/data/` 的对应原路径。角色工作区会登记 `model_streaming/lod#` 与 `shadowlod#` 中存在的全部流式网格；编辑器点击具体 `.mmesh` 时会预览对应普通/阴影 LOD，并识别多 Mesh 分段、4/8 权重、UV1 与顶点色。多选不同模型 ID（例如 `pl` 身体和 `fp` 头部）可在同一场景同步预览，视口提供正确的世界/屏幕左右手性、地板、`_005` 头部联动和位移锚点诊断。编辑器还会预览材质、DDS、角色 `UI-image` 与 cloth 中间态；“贴图库”分页可按类型、名称或路径过滤并同时浏览工作区中的全部 DDS。MOT 动画可在 `source` 基线与 Blender 写入的 `unpack` 结果之间切换预览；两种模式必须分别使用同区域 skeleton，详见 [MOT 骨架基准与旧动画迁移](docs/formats/MOT骨架基准与旧动画迁移.md)。SOP 约束仍从只读的 `source` 加载。预览器不读取 `build`，`build` 只作为最终 Mod 输出。
 
 选中资源后，右侧“快捷操作”页集中提供写入与恢复：普通贴图/UI-image 使用 source WTB 模板封回；手动放进 `unpack/data/texture/2k|4k` 的 DDS 会在刷新后显示为“手动 DDS”，先垂直翻转，再由 `nier_cli_mgrr 1.3.0_mgrr` 新建单槽 `.texture`。mmat 使用 GBFRDataTools 2.0.0 schema 解码和封回，独立检查器可显示 Shader 参数、渲染状态、贴图/Granite 缩略图与原始常量缓冲，也可新增、删除贴图槽并按工作区贴图名修改引用。Cloth 的 `clp/clh/sequence/reset` 可从 `unpack` XML 编码到 `build` BXM，编码后会立即回读并校验全部 XML 内容；也可逐项从 source BXM 重新解码并校验后恢复到 `unpack`，恢复后当前 Cloth 与碰撞预览会立即刷新。旧 `A1/A2/A4` JSON 会被禁止构建，必须先从 `source` 重新解码。清除 `granite_params` 后必须同时构建 `texture_maps.texture_name` 对应的 2k/4k 普通贴图。垂直翻转只用于新建普通 `.texture`，不影响已有 WTB 槽和 UI-image 的原样封回。所有写入都只进入 `build`，不会修改 `source`。
 
