@@ -6,6 +6,7 @@
 #include <wrl/client.h>
 #include <array>
 #include <filesystem>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -27,6 +28,14 @@ struct TexturePreviewResource {
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> image;
     unsigned width{};
     unsigned height{};
+};
+
+struct TexturePreviewInfo {
+    unsigned width{};
+    unsigned height{};
+    unsigned mip_count{};
+    std::string format;
+    std::string compression;
 };
 
 class PreviewRenderer {
@@ -61,8 +70,9 @@ public:
     bool project(Vec3 world, const OrbitCamera& camera, Vec2& screen) const;
     ID3D11ShaderResourceView* image() const noexcept { return color_srv_.Get(); }
     ID3D11ShaderResourceView* texture_image() const noexcept { return texture_preview_srv_.Get(); }
-    unsigned texture_width() const noexcept { return texture_width_; }
-    unsigned texture_height() const noexcept { return texture_height_; }
+    unsigned texture_width() const noexcept { return texture_info_.width; }
+    unsigned texture_height() const noexcept { return texture_info_.height; }
+    const TexturePreviewInfo& texture_info() const noexcept { return texture_info_; }
     unsigned width() const noexcept { return width_; }
     unsigned height() const noexcept { return height_; }
     bool has_model() const noexcept { return index_count_ != 0; }
@@ -91,10 +101,11 @@ private:
     bool load_dds(const std::filesystem::path& path,
                   Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>& output,
                   unsigned* width = nullptr, unsigned* height = nullptr,
-                  bool display_encoded = false, unsigned maximum_dimension = 0);
+                  bool display_encoded = false, unsigned maximum_dimension = 0,
+                  TexturePreviewInfo* info = nullptr);
     ID3D11Device* device_{};
     ID3D11DeviceContext* context_{};
-    unsigned width_{1}, height_{1}, texture_width_{}, texture_height_{}, index_count_{}, line_vertex_count_{};
+    unsigned width_{1}, height_{1}, index_count_{}, line_vertex_count_{};
     unsigned bone_point_vertex_count_{}, collision_vertex_count_{}, cloth_longitudinal_vertex_count_{};
     unsigned cloth_lateral_vertex_count_{}, cloth_polygon_vertex_count_{}, cloth_node_vertex_count_{};
     unsigned ground_vertex_count_{};
@@ -127,5 +138,6 @@ private:
     std::size_t applied_sop_operation_count_{};
     std::uint64_t pose_hash_{};
     float bone_marker_size_{.001f};
+    TexturePreviewInfo texture_info_;
 };
 }

@@ -67,7 +67,8 @@ int main(int argc,char** argv) {
     gbfr::PreviewRenderer preview;
     const auto executable=fs::absolute(fs::path(argv[0]));
     if(!preview.initialize(device.Get(),context.Get(),executable.parent_path()/L"preview.hlsl"))return 2;
-    if(!preview.load_texture_preview(path)||!preview.texture_image()||preview.texture_width()!=4||preview.texture_height()!=4)return 3;
+    if(!preview.load_texture_preview(path)||!preview.texture_image()||preview.texture_width()!=4||preview.texture_height()!=4||
+       preview.texture_info().mip_count!=1||preview.texture_info().format!="R8G8B8A8_UNORM"||preview.texture_info().compression!="未压缩 RGBA8")return 3;
     if(!build_and_reload(path,root/L"synthetic_workspace",preview)||preview.texture_width()!=4||preview.texture_height()!=4)return 4;
     if(argc>1){
         const auto source=fs::absolute(fs::path(argv[1]));

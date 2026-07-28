@@ -119,8 +119,7 @@ void TextureGallery::draw(const Workspace& workspace,PreviewRenderer& renderer,s
                         const ImVec2 image_size{width*scale,height*scale};
                         ImGui::SetCursorPosX(ImGui::GetCursorPosX()+(thumbnail_size_-image_size.x)*0.5f+4.0f);
                         ImGui::SetCursorPosY(ImGui::GetCursorPosY()+(thumbnail_size_-image_size.y)*0.5f);
-                        const bool ui=item.kind==AssetKind::ui_image;
-                        ImGui::Image(reinterpret_cast<ImTextureID>(cached->texture.image.Get()),image_size,ui?ImVec2(0,0):ImVec2(0,1),ui?ImVec2(1,1):ImVec2(1,0));
+                        ImGui::Image(reinterpret_cast<ImTextureID>(cached->texture.image.Get()),image_size,ImVec2(0,0),ImVec2(1,1));
                         activate=ImGui::IsItemClicked();
                     }else{
                         ImGui::Dummy(ImVec2(thumbnail_size_,thumbnail_size_));

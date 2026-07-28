@@ -29,6 +29,36 @@ template<class T> bool create_buffer(ID3D11Device* device,const std::vector<T>& 
     D3D11_BUFFER_DESC desc{}; desc.ByteWidth=static_cast<UINT>(data.size()*sizeof(T)); desc.Usage=D3D11_USAGE_DEFAULT; desc.BindFlags=bind;
     D3D11_SUBRESOURCE_DATA initial{data.data()}; return SUCCEEDED(device->CreateBuffer(&desc,&initial,&output));
 }
+
+const char* texture_format_name(DXGI_FORMAT format) {
+    switch(format) {
+    case DXGI_FORMAT_BC1_UNORM:return "BC1_UNORM";case DXGI_FORMAT_BC1_UNORM_SRGB:return "BC1_UNORM_SRGB";
+    case DXGI_FORMAT_BC2_UNORM:return "BC2_UNORM";case DXGI_FORMAT_BC2_UNORM_SRGB:return "BC2_UNORM_SRGB";
+    case DXGI_FORMAT_BC3_UNORM:return "BC3_UNORM";case DXGI_FORMAT_BC3_UNORM_SRGB:return "BC3_UNORM_SRGB";
+    case DXGI_FORMAT_BC4_UNORM:return "BC4_UNORM";case DXGI_FORMAT_BC4_SNORM:return "BC4_SNORM";
+    case DXGI_FORMAT_BC5_UNORM:return "BC5_UNORM";case DXGI_FORMAT_BC5_SNORM:return "BC5_SNORM";
+    case DXGI_FORMAT_BC7_UNORM:return "BC7_UNORM";case DXGI_FORMAT_BC7_UNORM_SRGB:return "BC7_UNORM_SRGB";
+    case DXGI_FORMAT_R8G8B8A8_UNORM:return "R8G8B8A8_UNORM";case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:return "R8G8B8A8_UNORM_SRGB";
+    case DXGI_FORMAT_B8G8R8A8_UNORM:return "B8G8R8A8_UNORM";case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:return "B8G8R8A8_UNORM_SRGB";
+    case DXGI_FORMAT_B8G8R8X8_UNORM:return "B8G8R8X8_UNORM";case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB:return "B8G8R8X8_UNORM_SRGB";
+    default:return "UNKNOWN";
+    }
+}
+
+const char* texture_compression_name(DXGI_FORMAT format) {
+    switch(format) {
+    case DXGI_FORMAT_BC1_UNORM:case DXGI_FORMAT_BC1_UNORM_SRGB:return "BC1";
+    case DXGI_FORMAT_BC2_UNORM:case DXGI_FORMAT_BC2_UNORM_SRGB:return "BC2";
+    case DXGI_FORMAT_BC3_UNORM:case DXGI_FORMAT_BC3_UNORM_SRGB:return "BC3";
+    case DXGI_FORMAT_BC4_UNORM:case DXGI_FORMAT_BC4_SNORM:return "BC4";
+    case DXGI_FORMAT_BC5_UNORM:case DXGI_FORMAT_BC5_SNORM:return "BC5";
+    case DXGI_FORMAT_BC7_UNORM:case DXGI_FORMAT_BC7_UNORM_SRGB:return "BC7";
+    case DXGI_FORMAT_R8G8B8A8_UNORM:case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:return "未压缩 RGBA8";
+    case DXGI_FORMAT_B8G8R8A8_UNORM:case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:return "未压缩 BGRA8";
+    case DXGI_FORMAT_B8G8R8X8_UNORM:case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB:return "未压缩 BGRX8";
+    default:return "未知";
+    }
+}
 }
 
 namespace gbfr {
@@ -155,9 +185,9 @@ bool PreviewRenderer::load(const MeshAsset& mesh,const SkeletonAsset& skeleton,c
 
 bool PreviewRenderer::load_texture_preview(const fs::path& dds) {
     ComPtr<ID3D11ShaderResourceView> texture;
-    unsigned width{},height{};
-    if(!load_dds(dds,texture,&width,&height,true)) return false;
-    texture_preview_srv_=std::move(texture);texture_width_=width;texture_height_=height;
+    TexturePreviewInfo info;
+    if(!load_dds(dds,texture,nullptr,nullptr,true,0,&info)) return false;
+    texture_preview_srv_=std::move(texture);texture_info_=std::move(info);
     return true;
 }
 
@@ -175,7 +205,7 @@ void PreviewRenderer::clear() {
     cloth_longitudinal_lines_.Reset();cloth_lateral_lines_.Reset();cloth_polygon_lines_.Reset();cloth_node_lines_.Reset();
     draw_ranges_.clear(); materials_.clear();
     skeleton_={};sop_={};animated_bone_positions_.clear();animated_bone_world_.clear();visible_bones_.clear();anchor_links_.clear();visible_bone_count_=0;applied_sop_operation_count_=0;pose_hash_=0;
-    texture_preview_srv_.Reset();texture_width_=0;texture_height_=0;
+    texture_preview_srv_.Reset();texture_info_={};
 }
 
 void PreviewRenderer::set_collision_lines(const std::vector<Vec3>& points) {
@@ -213,7 +243,7 @@ bool PreviewRenderer::transform_bone_point(std::size_t bone_index,Vec3 local,Vec
     return true;
 }
 
-bool PreviewRenderer::load_dds(const fs::path& path,ComPtr<ID3D11ShaderResourceView>& output,unsigned* output_width,unsigned* output_height,bool display_encoded,unsigned maximum_dimension) {
+bool PreviewRenderer::load_dds(const fs::path& path,ComPtr<ID3D11ShaderResourceView>& output,unsigned* output_width,unsigned* output_height,bool display_encoded,unsigned maximum_dimension,TexturePreviewInfo* info) {
     std::ifstream stream(path,std::ios::binary|std::ios::ate); if(!stream) return false; const auto file_size=stream.tellg(); if(file_size<128) return false;
     std::vector<std::byte> bytes(static_cast<std::size_t>(file_size));stream.seekg(0);stream.read(reinterpret_cast<char*>(bytes.data()),file_size);
     auto u32=[&](std::size_t p){std::uint32_t v{};std::memcpy(&v,bytes.data()+p,4);return v;};
@@ -270,7 +300,9 @@ bool PreviewRenderer::load_dds(const fs::path& path,ComPtr<ID3D11ShaderResourceV
     for(UINT i=0;i<selected_mips;++i){const auto [row,size]=mip_layout(w,h);if(offset+size>bytes.size())return false;levels.push_back({bytes.data()+offset,row,size});offset+=size;w=std::max(1u,w/2);h=std::max(1u,h/2);}
     D3D11_SHADER_RESOURCE_VIEW_DESC view{};view.Format=view_format;view.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2D;view.Texture2D.MipLevels=selected_mips;
     ComPtr<ID3D11Texture2D> texture;if(FAILED(device_->CreateTexture2D(&desc,levels.data(),&texture))||FAILED(device_->CreateShaderResourceView(texture.Get(),&view,&output)))return false;
-    if(output_width)*output_width=selected_width;if(output_height)*output_height=selected_height;return true;
+    if(output_width)*output_width=selected_width;if(output_height)*output_height=selected_height;
+    if(info)*info={selected_width,selected_height,selected_mips,texture_format_name(format),texture_compression_name(format)};
+    return true;
 }
 
 void PreviewRenderer::frame(OrbitCamera& camera) const { camera.target={(bounds_min_.x+bounds_max_.x)*.5f,(bounds_min_.y+bounds_max_.y)*.5f,(bounds_min_.z+bounds_max_.z)*.5f};const float dx=bounds_max_.x-bounds_min_.x,dy=bounds_max_.y-bounds_min_.y,dz=bounds_max_.z-bounds_min_.z;camera.distance=std::max(0.2f,std::sqrt(dx*dx+dy*dy+dz*dz)*0.85f); }
