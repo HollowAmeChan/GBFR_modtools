@@ -231,12 +231,22 @@ bool PreviewRenderer::load_dds(const fs::path& path,ComPtr<ID3D11ShaderResourceV
         format=static_cast<DXGI_FORMAT>(u32(128));data_offset=148;
     }else if(fourcc==make_fourcc('B','C','5','U')||fourcc==make_fourcc('A','T','I','2'))format=DXGI_FORMAT_BC5_UNORM;
     else if(fourcc==make_fourcc('B','C','5','S'))format=DXGI_FORMAT_BC5_SNORM;
+    else if((u32(80)&0x40u)&&u32(88)==32u){
+        const auto red=u32(92),green=u32(96),blue=u32(100),alpha=u32(104);
+        if(red==0x000000ffu&&green==0x0000ff00u&&blue==0x00ff0000u&&alpha==0xff000000u)format=DXGI_FORMAT_R8G8B8A8_UNORM;
+        else if(red==0x00ff0000u&&green==0x0000ff00u&&blue==0x000000ffu&&alpha==0xff000000u)format=DXGI_FORMAT_B8G8R8A8_UNORM;
+        else if(red==0x00ff0000u&&green==0x0000ff00u&&blue==0x000000ffu&&alpha==0u)format=DXGI_FORMAT_B8G8R8X8_UNORM;
+        else return false;
+    }
     else return false;
-    UINT block_bytes{};
+    UINT block_bytes{},bytes_per_pixel{};
     switch(format){
     case DXGI_FORMAT_BC1_UNORM:case DXGI_FORMAT_BC1_UNORM_SRGB:case DXGI_FORMAT_BC4_UNORM:case DXGI_FORMAT_BC4_SNORM:block_bytes=8;break;
     case DXGI_FORMAT_BC2_UNORM:case DXGI_FORMAT_BC2_UNORM_SRGB:case DXGI_FORMAT_BC3_UNORM:case DXGI_FORMAT_BC3_UNORM_SRGB:
     case DXGI_FORMAT_BC5_UNORM:case DXGI_FORMAT_BC5_SNORM:case DXGI_FORMAT_BC7_UNORM:case DXGI_FORMAT_BC7_UNORM_SRGB:block_bytes=16;break;
+    case DXGI_FORMAT_R8G8B8A8_UNORM:case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+    case DXGI_FORMAT_B8G8R8A8_UNORM:case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+    case DXGI_FORMAT_B8G8R8X8_UNORM:case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB:bytes_per_pixel=4;break;
     default:return false;
     }
     DXGI_FORMAT resource_format=format,view_format=format;
@@ -244,12 +254,20 @@ bool PreviewRenderer::load_dds(const fs::path& path,ComPtr<ID3D11ShaderResourceV
     else if(format==DXGI_FORMAT_BC2_UNORM_SRGB){resource_format=DXGI_FORMAT_BC2_TYPELESS;if(display_encoded)view_format=DXGI_FORMAT_BC2_UNORM;}
     else if(format==DXGI_FORMAT_BC3_UNORM_SRGB){resource_format=DXGI_FORMAT_BC3_TYPELESS;if(display_encoded)view_format=DXGI_FORMAT_BC3_UNORM;}
     else if(format==DXGI_FORMAT_BC7_UNORM_SRGB){resource_format=DXGI_FORMAT_BC7_TYPELESS;if(display_encoded)view_format=DXGI_FORMAT_BC7_UNORM;}
+    else if(format==DXGI_FORMAT_R8G8B8A8_UNORM_SRGB){resource_format=DXGI_FORMAT_R8G8B8A8_TYPELESS;if(display_encoded)view_format=DXGI_FORMAT_R8G8B8A8_UNORM;}
+    else if(format==DXGI_FORMAT_B8G8R8A8_UNORM_SRGB){resource_format=DXGI_FORMAT_B8G8R8A8_TYPELESS;if(display_encoded)view_format=DXGI_FORMAT_B8G8R8A8_UNORM;}
+    else if(format==DXGI_FORMAT_B8G8R8X8_UNORM_SRGB){resource_format=DXGI_FORMAT_B8G8R8X8_TYPELESS;if(display_encoded)view_format=DXGI_FORMAT_B8G8R8X8_UNORM;}
+    const auto mip_layout=[&](UINT w,UINT h){
+        const UINT row=block_bytes?std::max(1u,(w+3)/4)*block_bytes:w*bytes_per_pixel;
+        const UINT rows=block_bytes?std::max(1u,(h+3)/4):h;
+        return std::pair{row,row*rows};
+    };
     std::size_t offset=data_offset;UINT selected_width=width,selected_height=height,first_mip=0;
-    while(maximum_dimension&&first_mip+1<mips&&std::max(selected_width,selected_height)>maximum_dimension){const UINT row=std::max(1u,(selected_width+3)/4)*block_bytes;offset+=row*std::max(1u,(selected_height+3)/4);selected_width=std::max(1u,selected_width/2);selected_height=std::max(1u,selected_height/2);++first_mip;}
+    while(maximum_dimension&&first_mip+1<mips&&std::max(selected_width,selected_height)>maximum_dimension){offset+=mip_layout(selected_width,selected_height).second;selected_width=std::max(1u,selected_width/2);selected_height=std::max(1u,selected_height/2);++first_mip;}
     const UINT selected_mips=maximum_dimension?1u:mips-first_mip;
     D3D11_TEXTURE2D_DESC desc{};desc.Width=selected_width;desc.Height=selected_height;desc.MipLevels=selected_mips;desc.ArraySize=1;desc.Format=resource_format;desc.SampleDesc.Count=1;desc.BindFlags=D3D11_BIND_SHADER_RESOURCE;
     std::vector<D3D11_SUBRESOURCE_DATA> levels;levels.reserve(selected_mips);UINT w=selected_width,h=selected_height;
-    for(UINT i=0;i<selected_mips;++i){const UINT row=std::max(1u,(w+3)/4)*block_bytes;const UINT size=row*std::max(1u,(h+3)/4);if(offset+size>bytes.size())return false;levels.push_back({bytes.data()+offset,row,size});offset+=size;w=std::max(1u,w/2);h=std::max(1u,h/2);}
+    for(UINT i=0;i<selected_mips;++i){const auto [row,size]=mip_layout(w,h);if(offset+size>bytes.size())return false;levels.push_back({bytes.data()+offset,row,size});offset+=size;w=std::max(1u,w/2);h=std::max(1u,h/2);}
     D3D11_SHADER_RESOURCE_VIEW_DESC view{};view.Format=view_format;view.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2D;view.Texture2D.MipLevels=selected_mips;
     ComPtr<ID3D11Texture2D> texture;if(FAILED(device_->CreateTexture2D(&desc,levels.data(),&texture))||FAILED(device_->CreateShaderResourceView(texture.Get(),&view,&output)))return false;
     if(output_width)*output_width=selected_width;if(output_height)*output_height=selected_height;return true;

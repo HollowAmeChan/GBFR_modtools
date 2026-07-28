@@ -15,3 +15,12 @@ target_link_libraries(gbfr_cloth_tests PRIVATE gbfr_core)
 target_compile_options(gbfr_cloth_tests PRIVATE /W4 /permissive- /Zc:__cplusplus)
 target_compile_definitions(gbfr_cloth_tests PRIVATE GBFR_ROOT_DIR=L"${GBFR_ROOT_DIR}")
 add_test(NAME gbfr_cloth COMMAND gbfr_cloth_tests)
+
+add_executable(gbfr_texture_tests test_texture.cpp)
+target_link_libraries(gbfr_texture_tests PRIVATE gbfr_core gbfr_render)
+target_compile_options(gbfr_texture_tests PRIVATE /W4 /permissive- /Zc:__cplusplus)
+add_custom_command(TARGET gbfr_texture_tests POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${GBFR_ROOT_DIR}/assets/shaders/preview.hlsl"
+        "$<TARGET_FILE_DIR:gbfr_texture_tests>/preview.hlsl")
+add_test(NAME gbfr_texture COMMAND gbfr_texture_tests)
