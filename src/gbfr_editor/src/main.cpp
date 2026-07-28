@@ -93,7 +93,6 @@ std::optional<ModelPreviewKey> g_loaded_model;
 std::vector<ModelPreviewKey> g_loaded_models;
 ModelPreviewStats g_loaded_model_stats;
 std::filesystem::path g_loaded_texture;
-bool g_loaded_texture_flip_vertical = false;
 std::filesystem::path g_loaded_material;
 std::filesystem::path g_loaded_sop;
 std::vector<std::filesystem::path> g_loaded_materials;
@@ -280,7 +279,7 @@ bool load_workspace(const std::filesystem::path& path) {
         g_asset_selection.Clear();
         g_texture_gallery.clear();
         g_asset_function=AssetFunction::all;g_asset_search.fill('\0');
-        g_preview_mode=PreviewMode::none;g_preview_error.clear();g_loaded_model.reset();g_loaded_models.clear();g_model_preview_diagnostics.clear();g_model_material_bindings.clear();g_selected_model_material=-1;g_loaded_texture.clear();g_loaded_texture_flip_vertical=false;g_loaded_material.clear();g_loaded_sop.clear();g_loaded_materials.clear();g_loaded_sops.clear();
+        g_preview_mode=PreviewMode::none;g_preview_error.clear();g_loaded_model.reset();g_loaded_models.clear();g_model_preview_diagnostics.clear();g_model_material_bindings.clear();g_selected_model_material=-1;g_loaded_texture.clear();g_loaded_material.clear();g_loaded_sop.clear();g_loaded_materials.clear();g_loaded_sops.clear();
         g_skeleton.bones.clear(); g_clh_files.clear(); g_clp_files.clear();g_sop_inspector.clear();g_material_inspector.clear();
         if(g_preview) g_preview->clear();
         const auto settings_directory=g_workspace->root()/L".gbfr";
@@ -793,7 +792,6 @@ void preview_asset(std::size_t index) {
     }
     if(asset.kind==gbfr::AssetKind::texture||asset.kind==gbfr::AssetKind::ui_image||asset.kind==gbfr::AssetKind::new_texture||asset.kind==gbfr::AssetKind::granite_texture){
         if(!asset.available||asset.input.extension()!=L".dds"){g_preview_mode=PreviewMode::none;return;}
-        g_loaded_texture_flip_vertical=gbfr::editor::TextureGallery::needs_vertical_flip(*g_workspace,asset.input);
         if(g_loaded_texture==asset.input&&g_preview->texture_image()){g_preview_mode=PreviewMode::texture;return;}
         if(g_preview->load_texture_preview(asset.input)){g_loaded_texture=asset.input;g_preview_mode=PreviewMode::texture;gbfr::Log::write(gbfr::LogLevel::info,"DDS 预览已加载："+utf8(asset.input.filename().wstring()));}
         else {g_preview_mode=PreviewMode::none;gbfr::Log::write(gbfr::LogLevel::error,"DDS 预览加载失败："+utf8(asset.input.wstring()));}
@@ -805,9 +803,6 @@ void preview_asset(std::size_t index) {
 void preview_gallery_texture(std::size_t asset_index,const std::filesystem::path& path,bool /*is_ui*/) {
     if(!g_preview||!std::filesystem::is_regular_file(path))return;
     g_selected_asset=asset_index;
-    if(g_workspace&&asset_index<g_workspace->assets().size()){
-        g_loaded_texture_flip_vertical=gbfr::editor::TextureGallery::needs_vertical_flip(*g_workspace,path);
-    }
     if(g_loaded_texture==path&&g_preview->texture_image()){g_preview_mode=PreviewMode::texture;return;}
     if(g_preview->load_texture_preview(path)){g_loaded_texture=path;g_preview_mode=PreviewMode::texture;gbfr::Log::write(gbfr::LogLevel::info,"DDS 预览已加载："+utf8(path.filename().wstring()));}
     else {g_preview_mode=PreviewMode::none;gbfr::Log::write(gbfr::LogLevel::error,"DDS 预览加载失败："+utf8(path.wstring()));}
@@ -1164,7 +1159,7 @@ void draw_preview_controls() {
 void return_to_start() {
     if(!g_imgui_ini.empty()) ImGui::SaveIniSettingsToDisk(g_imgui_ini.c_str());
     g_workspace.reset(); g_selected_asset.reset(); g_asset_selection.Clear(); g_skeleton.bones.clear(); g_clh_files.clear(); g_clp_files.clear();g_sop_inspector.clear();g_material_inspector.clear();
-    g_preview_mode=PreviewMode::none;g_preview_error.clear();g_loaded_model.reset();g_loaded_models.clear();g_model_preview_diagnostics.clear();g_model_material_bindings.clear();g_selected_model_material=-1;g_loaded_texture.clear();g_loaded_texture_flip_vertical=false;g_loaded_material.clear();g_loaded_sop.clear();g_loaded_materials.clear();g_loaded_sops.clear();clear_motion_state();
+    g_preview_mode=PreviewMode::none;g_preview_error.clear();g_loaded_model.reset();g_loaded_models.clear();g_model_preview_diagnostics.clear();g_model_material_bindings.clear();g_selected_model_material=-1;g_loaded_texture.clear();g_loaded_material.clear();g_loaded_sop.clear();g_loaded_materials.clear();g_loaded_sops.clear();clear_motion_state();
     g_imgui_ini.clear(); ImGui::GetIO().IniFilename=nullptr; g_start_layout_built=false;
     g_texture_gallery.clear();
     if(g_preview) g_preview->clear();
@@ -1429,7 +1424,7 @@ void draw_editor_shell() {
         std::error_code file_error;const auto file_bytes=std::filesystem::file_size(g_loaded_texture,file_error);
         ImGui::TextWrapped("%s",utf8(g_loaded_texture.filename().wstring()).c_str());
         ImGui::PushTextWrapPos(0.0f);
-        const char* orientation=g_loaded_texture_flip_vertical?"原始 WTB（显示已校正）":"编辑方向";
+        const char* orientation="DDS 原样";
         if(file_error)ImGui::TextDisabled("分辨率 %u x %u  |  格式 %s  |  压缩 %s  |  Mip %u  |  方向 %s",info.width,info.height,info.format.c_str(),info.compression.c_str(),info.mip_count,orientation);
         else ImGui::TextDisabled("分辨率 %u x %u  |  格式 %s  |  压缩 %s  |  Mip %u  |  方向 %s  |  %.2f MiB",info.width,info.height,info.format.c_str(),info.compression.c_str(),info.mip_count,orientation,static_cast<double>(file_bytes)/(1024.0*1024.0));
         ImGui::PopTextWrapPos();
@@ -1469,9 +1464,7 @@ void draw_editor_shell() {
         const float width=static_cast<float>(g_preview->texture_width()),height=static_cast<float>(g_preview->texture_height());
         const float scale=std::min(available.x/width,available.y/height);const ImVec2 image_size{width*scale,height*scale};
         const ImVec2 cursor=ImGui::GetCursorPos();ImGui::SetCursorPos({cursor.x+(available.x-image_size.x)*.5f,cursor.y+(available.y-image_size.y)*.5f});
-        const ImVec2 uv_min=g_loaded_texture_flip_vertical?ImVec2(0,1):ImVec2(0,0);
-        const ImVec2 uv_max=g_loaded_texture_flip_vertical?ImVec2(1,0):ImVec2(1,1);
-        ImGui::Image(reinterpret_cast<ImTextureID>(g_preview->texture_image()),image_size,uv_min,uv_max);
+        ImGui::Image(reinterpret_cast<ImTextureID>(g_preview->texture_image()),image_size);
     }else if(g_preview_mode==PreviewMode::material){
         g_material_inspector.draw(*g_preview,g_texture_gallery,*g_workspace);
         if(g_material_inspector.consume_file_changed()&&g_workspace)g_workspace->refresh();

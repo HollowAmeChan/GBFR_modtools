@@ -77,7 +77,7 @@ bool verify_existing_wtb_orientation(const fs::path& canonical_dds,const fs::pat
     const auto source_hash=gbfr::sha256_file(source),input_hash=gbfr::sha256_file(input);
     {std::ofstream manifest(root/L"workspace.json");manifest<<"{\"Version\":1,\"CharacterId\":\"wtb_orientation\",\"Textures\":[{"
         "\"Source\":\"source/test.texture\",\"SourceSha256\":\""<<source_hash<<"\",\"Output\":\"build/test.texture\","
-        "\"DdsVerticalOrientation\":\"TopLeft\",\"Slots\":[{\"Index\":0,\"Path\":\"unpack/test_0.dds\",\"BaselineSha256\":\""<<input_hash<<"\"}]}]}";}
+        "\"Slots\":[{\"Index\":0,\"Path\":\"unpack/test_0.dds\",\"BaselineSha256\":\""<<input_hash<<"\"}]}]}";}
 
     auto workspace=gbfr::Workspace::load(root/L"workspace.json");
     if(workspace.assets().size()!=1||!workspace.assets()[0].wtb_top_left_editing)return false;

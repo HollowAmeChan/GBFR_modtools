@@ -623,8 +623,7 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
                         const float scale=std::min(64.0f/std::max(1.0f,width),64.0f/std::max(1.0f,height));
                         const ImVec2 size{width*scale,height*scale};
                         const float x=ImGui::GetCursorPosX();ImGui::SetCursorPosX(x+(68.0f-size.x)*.5f);
-                        const bool flip=TextureGallery::needs_vertical_flip(workspace,dds);
-                        ImGui::Image(reinterpret_cast<ImTextureID>(thumbnail->image.Get()),size,flip?ImVec2(0,1):ImVec2(0,0),flip?ImVec2(1,0):ImVec2(1,1));
+                        ImGui::Image(reinterpret_cast<ImTextureID>(thumbnail->image.Get()),size);
                     }else{
                         ImGui::Dummy(ImVec2(68,64));
                         const auto min=ImGui::GetItemRectMin(),max=ImGui::GetItemRectMax();

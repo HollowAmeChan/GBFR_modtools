@@ -18,8 +18,6 @@ public:
     void clear();
     const TexturePreviewResource* thumbnail(PreviewRenderer& renderer,
                                             const std::filesystem::path& path);
-    static bool needs_vertical_flip(const Workspace& workspace,
-                                    const std::filesystem::path& path);
     void draw(const Workspace& workspace, PreviewRenderer& renderer,
               std::optional<std::size_t> selected_asset,
               const SelectCallback& on_select);

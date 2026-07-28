@@ -523,8 +523,10 @@ Workspace Workspace::load(const fs::path& selected) {
         const auto slots=record.value("Slots",json::array()); if(slots.empty()) continue;
         const auto& first=slots.front(); append(kind,record.value("Category", std::string(default_subtype)) + " / " + std::to_string(slots.size()) + " 槽",required_string(first,"Path"),required_string(record,"Source"),required_string(record,"Output"),required_string(first,"BaselineSha256"),record.value("SourceSha256",""));
         auto& asset=result.assets_.back();
-        asset.wtb_top_left_editing = kind == AssetKind::texture &&
-            record.value("DdsVerticalOrientation", std::string{}) == "TopLeft";
+        // Ordinary .texture WTB payloads always cross a vertical-orientation
+        // boundary. DDS files in the workspace use the same top-left editing
+        // orientation as Granite; restore/build perform the inverse conversion.
+        asset.wtb_top_left_editing = kind == AssetKind::texture;
         for(std::size_t slot_index=0;slot_index<slots.size();++slot_index) {
             const auto& slot=slots[slot_index];
             asset.wtb_slots.emplace_back(slot.value("Index",0u),result.resolve(required_string(slot,"Path")));
