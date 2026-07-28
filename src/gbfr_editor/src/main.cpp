@@ -113,7 +113,9 @@ bool g_show_alpha_overlays = true;
 bool g_show_ground = true;
 bool g_cull_backfaces = false;
 bool g_link_head_anchor = true;
+enum class MotionArea { source, unpack };
 std::vector<std::filesystem::path> g_motion_files;
+MotionArea g_motion_area = MotionArea::source;
 std::optional<gbfr::AnimationClip> g_motion;
 std::optional<gbfr::ClothSequenceAsset> g_cloth_sequence;
 std::filesystem::path g_cloth_sequence_path;
@@ -550,23 +552,35 @@ std::filesystem::path resolve_base_albedo(const std::filesystem::path& workspace
 }
 
 void clear_motion_state() {
-    g_motion_files.clear();g_motion.reset();g_cloth_sequence.reset();g_cloth_sequence_path.clear();g_motion_search.fill('\0');g_selected_motion=-1;g_motion_frame=0.0f;g_applied_motion_frame=-1.0f;g_motion_playing=false;
+    g_motion_files.clear();g_motion_area=MotionArea::source;g_motion.reset();g_cloth_sequence.reset();g_cloth_sequence_path.clear();g_motion_search.fill('\0');g_selected_motion=-1;g_motion_frame=0.0f;g_applied_motion_frame=-1.0f;g_motion_playing=false;
 }
 
-void discover_motions(const ModelPreviewKey& key) {
+void discover_motions(const std::vector<ModelPreviewKey>& keys) {
     clear_motion_state();
     if(!g_workspace)return;
-    const auto model_id=key.minfo.stem().wstring();
-    if(model_id.size()<2)return;
-    const auto prefix=model_id.substr(0,2);
-    if(prefix!=L"pl"&&prefix!=L"fp")return;
-    const auto model_id_utf8=utf8(model_id);
-    for(const auto& asset:g_workspace->assets())if(asset.kind==gbfr::AssetKind::animation&&asset.subtype==model_id_utf8&&asset.available)g_motion_files.push_back(asset.input);
-    if(g_motion_files.empty()){
-        const auto directory=g_workspace->root()/L"source/data"/prefix/model_id;
-        if(std::filesystem::is_directory(directory))for(const auto& entry:std::filesystem::directory_iterator(directory))if(entry.is_regular_file()&&entry.path().extension()==L".mot")g_motion_files.push_back(entry.path());
+    const auto append=[&](const std::filesystem::path& path){
+        if(!std::filesystem::is_regular_file(path))return;
+        const auto normalized=path.lexically_normal();
+        if(std::find(g_motion_files.begin(),g_motion_files.end(),normalized)==g_motion_files.end())g_motion_files.push_back(normalized);
+    };
+    for(const auto& key:keys){
+        const auto model_id=key.minfo.stem().wstring();
+        if(model_id.size()<2)continue;
+        const auto prefix=model_id.substr(0,2);
+        if(prefix!=L"pl"&&prefix!=L"fp")continue;
+        const auto model_id_utf8=utf8(model_id);
+        for(const auto& asset:g_workspace->assets())if(asset.kind==gbfr::AssetKind::animation&&asset.subtype==model_id_utf8){append(asset.input);append(asset.source);}
+        for(const auto area:{L"unpack",L"source"}){
+            const auto directory=g_workspace->root()/area/L"data"/prefix/model_id;
+            if(std::filesystem::is_directory(directory))for(const auto& entry:std::filesystem::directory_iterator(directory))if(entry.is_regular_file()&&_wcsicmp(entry.path().extension().c_str(),L".mot")==0)append(entry.path());
+        }
     }
-    std::sort(g_motion_files.begin(),g_motion_files.end(),[](const auto& a,const auto& b){return gbfr::natural_less_case_insensitive(a.filename().native(),b.filename().native());});
+    std::sort(g_motion_files.begin(),g_motion_files.end(),[](const auto& a,const auto& b){
+        if(gbfr::natural_less_case_insensitive(a.filename().native(),b.filename().native()))return true;
+        if(gbfr::natural_less_case_insensitive(b.filename().native(),a.filename().native()))return false;
+        return workspace_area(a)==WorkspaceArea::unpack&&workspace_area(b)!=WorkspaceArea::unpack;
+    });
+    if(std::any_of(g_motion_files.begin(),g_motion_files.end(),[](const auto& path){return workspace_area(path)==WorkspaceArea::unpack;}))g_motion_area=MotionArea::unpack;
 }
 
 bool select_motion(int index) {
@@ -739,7 +753,7 @@ bool load_model_previews(const std::vector<ModelPreviewKey>& keys,bool force) {
         const auto& primary=parts.front();g_sop_inspector.set_asset(primary.sop,primary.sop_path);g_loaded_material=primary.material_json;g_loaded_sop=primary.sop_path;
         g_loaded_materials.clear();g_loaded_sops.clear();for(const auto& part:parts){g_loaded_materials.push_back(part.material_json);if(!part.sop_path.empty())g_loaded_sops.push_back(part.sop_path);}
         g_skeleton=std::move(merged_skeleton);g_loaded_model=keys.front();g_loaded_models=keys;g_model_preview_diagnostics=std::move(diagnostics);g_model_material_bindings=std::move(material_bindings);g_selected_model_material=g_model_material_bindings.empty()?-1:0;g_loaded_texture.clear();g_preview_mode=PreviewMode::model;g_preview_error.clear();g_loaded_model_stats=stats;
-        discover_motions(keys.front());g_preview->frame(g_camera);
+        discover_motions(keys);g_preview->frame(g_camera);
         g_clh_files.clear();g_clp_files.clear();g_selected_collision=-1;g_selected_bone=-1;g_selected_bone_index=-1;g_selected_clh=0;g_selected_clp=0;g_all_clp_groups=false;
         const auto model_id=keys.front().minfo.stem().wstring(),cloth_prefix=model_id+L"_";
         for(const auto& asset:g_workspace->assets())if(asset.kind==gbfr::AssetKind::cloth&&asset.available&&asset.input.filename().wstring().starts_with(cloth_prefix)){try{if(asset.subtype=="clh")g_clh_files.push_back({asset.input,gbfr::load_clh(asset.input),cloth_file_group_id(asset.input)});else if(asset.subtype=="clp")g_clp_files.push_back({asset.input,gbfr::load_clp(asset.input)});}catch(const std::exception& error){gbfr::Log::write(gbfr::LogLevel::warning,std::string("cloth 跳过：")+error.what());}}
@@ -770,8 +784,10 @@ void preview_asset(std::size_t index) {
         return;
     }
     if(asset.kind==gbfr::AssetKind::animation){
-        if(!g_loaded_model||g_loaded_model->minfo.stem()!=wide(asset.subtype)){g_preview_mode=PreviewMode::none;return;}
-        const auto found=std::find(g_motion_files.begin(),g_motion_files.end(),asset.input);
+        const auto loaded=std::find_if(g_loaded_models.begin(),g_loaded_models.end(),[&](const auto& key){return key.minfo.stem()==wide(asset.subtype);});
+        if(loaded==g_loaded_models.end()){g_preview_mode=PreviewMode::none;return;}
+        g_workspace->refresh();discover_motions(g_loaded_models);g_motion_area=MotionArea::unpack;
+        const auto found=std::find(g_motion_files.begin(),g_motion_files.end(),asset.input.lexically_normal());
         if(found!=g_motion_files.end())select_motion(static_cast<int>(std::distance(g_motion_files.begin(),found)));
         return;
     }
@@ -1012,6 +1028,16 @@ void build_start_dock_layout(ImGuiID dockspace) {
 }
 
 void draw_motion_controls() {
+    const auto motion_count=[](WorkspaceArea area){return std::count_if(g_motion_files.begin(),g_motion_files.end(),[&](const auto& path){return workspace_area(path)==area;});};
+    const auto unpack_count=motion_count(WorkspaceArea::unpack),source_count=motion_count(WorkspaceArea::source);
+    ImGui::TextUnformatted("动画来源");ImGui::SameLine();
+    ImGui::BeginDisabled(unpack_count==0);
+    if(ImGui::RadioButton(("unpack ("+std::to_string(unpack_count)+")##motion_unpack").c_str(),g_motion_area==MotionArea::unpack)){g_motion_area=MotionArea::unpack;reset_motion_pose();}
+    ImGui::EndDisabled();ImGui::SameLine();
+    ImGui::BeginDisabled(source_count==0);
+    if(ImGui::RadioButton(("source ("+std::to_string(source_count)+")##motion_source").c_str(),g_motion_area==MotionArea::source)){g_motion_area=MotionArea::source;reset_motion_pose();}
+    ImGui::EndDisabled();ImGui::SameLine();
+    if(ImGui::Button("重新扫描##motions")&&g_workspace&&!g_loaded_models.empty()){g_workspace->refresh();discover_motions(g_loaded_models);reset_motion_pose();}
     if(g_selected_motion>=0){
         draw_preview_source_inline("动画",g_motion_files[static_cast<std::size_t>(g_selected_motion)]);
         if(!g_cloth_sequence_path.empty())draw_preview_source("cloth 覆盖",g_cloth_sequence_path);
@@ -1025,6 +1051,8 @@ void draw_motion_controls() {
         if(ImGui::Selectable("静止姿态",g_selected_motion<0))reset_motion_pose();
         const std::string filter=g_motion_search.data();
         for(int i=0;i<static_cast<int>(g_motion_files.size());++i){
+            const auto area=workspace_area(g_motion_files[static_cast<std::size_t>(i)]);
+            if((g_motion_area==MotionArea::unpack&&area!=WorkspaceArea::unpack)||(g_motion_area==MotionArea::source&&area!=WorkspaceArea::source))continue;
             const auto name=utf8(g_motion_files[static_cast<std::size_t>(i)].filename().wstring());
             if(!filter.empty()&&name.find(filter)==std::string::npos)continue;
             if(ImGui::Selectable(name.c_str(),i==g_selected_motion))select_motion(i);
@@ -1295,7 +1323,7 @@ void draw_editor_shell() {
     ImGui::SameLine();
     if (ImGui::Button("重置布局")) g_reset_layout=true;
     ImGui::SameLine();
-    if (g_workspace && ImGui::Button("刷新")) {g_workspace->refresh();g_texture_gallery.clear();}
+    if (g_workspace && ImGui::Button("刷新")) {g_workspace->refresh();g_texture_gallery.clear();g_material_inspector.refresh_texture_names();if(!g_loaded_models.empty()){discover_motions(g_loaded_models);reset_motion_pose();}}
         ImGui::SameLine();
         ImGui::SameLine();
     if (!g_workspace) {

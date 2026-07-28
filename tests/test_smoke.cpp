@@ -332,7 +332,8 @@ int main() {
                 for(const auto& texture:document.value("GraniteTextures",nlohmann::json::array()))for(const auto& file:texture.value("Files",nlohmann::json::array()))if(file.is_string()&&std::find(registered.begin(),registered.end(),file.get<std::string>())==registered.end())++count;
                 return count;
             }();
-        if (pl1400.assets().size() != expected_assets) return 6;
+        // Refresh may additionally discover user-authored DDS files that are intentionally absent from workspace.json.
+        if (pl1400.assets().size() < expected_assets) return 6;
         for(std::size_t i=1;i<pl1400.assets().size();++i)if(gbfr::natural_less_case_insensitive(pl1400.assets()[i].input.filename().native(),pl1400.assets()[i-1].input.filename().native()))return 32;
         if(!gbfr::natural_less_case_insensitive(L"2.mmat.json",L"10.mmat.json")||gbfr::natural_less_case_insensitive(L"10.mmat.json",L"2.mmat.json"))return 45;
         {

@@ -4,8 +4,10 @@
 
 #include <nlohmann/json.hpp>
 
+#include <array>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 namespace gbfr { class PreviewRenderer; }
 
@@ -20,6 +22,7 @@ public:
     bool consume_file_changed() noexcept;
     bool save_changes();
     void reload_if_open(const std::filesystem::path& path);
+    void refresh_texture_names();
 
 private:
     bool load_document();
@@ -34,5 +37,8 @@ private:
     bool dirty_{};
     bool file_changed_{};
     std::string edit_status_;
+    std::vector<std::string> texture_names_;
+    int new_texture_map_option_{6};
+    std::array<char, 256> new_texture_name_{};
 };
 }

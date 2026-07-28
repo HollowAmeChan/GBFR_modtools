@@ -533,6 +533,7 @@ Workspace Workspace::load(const fs::path& selected) {
             result.assets_.push_back(std::move(asset));
         }
     }
+    result.discover_manual_textures();
     std::stable_sort(result.assets_.begin(), result.assets_.end(), [](const auto& left, const auto& right) {
         const auto left_name = left.input.filename().native();
         const auto right_name = right.input.filename().native();
@@ -554,7 +555,44 @@ fs::path Workspace::resolve(const std::string& relative) const {
     return candidate;
 }
 
+void Workspace::discover_manual_textures() {
+    const auto unpack_texture_root = root_ / L"unpack/data/texture";
+    for (const auto& resolution : {L"2k", L"4k"}) {
+        const auto input_root = unpack_texture_root / resolution;
+        if (!fs::is_directory(input_root)) continue;
+        for (const auto& entry : fs::recursive_directory_iterator(input_root)) {
+            if (!entry.is_regular_file()) continue;
+            auto extension = entry.path().extension().wstring();
+            std::transform(extension.begin(), extension.end(), extension.begin(),
+                           [](wchar_t value) { return static_cast<wchar_t>(std::towlower(value)); });
+            if (extension != L".dds") continue;
+
+            const auto input = fs::weakly_canonical(entry.path());
+            if (std::any_of(assets_.begin(), assets_.end(), [&](const auto& asset) {
+                    if (asset.input == input) return true;
+                    return std::any_of(asset.wtb_slots.begin(), asset.wtb_slots.end(),
+                                       [&](const auto& slot) { return slot.second == input; });
+                })) continue;
+
+            auto relative = fs::relative(input, input_root);
+            auto stem = relative.stem().wstring();
+            if (stem.size() > 2 && stem.ends_with(L"_0")) stem.resize(stem.size() - 2);
+            relative.replace_filename(stem + L".texture");
+            const auto output = root_ / L"build/data/texture" / resolution / relative;
+            if (std::any_of(assets_.begin(), assets_.end(),
+                            [&](const auto& asset) { return asset.output == output; })) continue;
+
+            const std::string subtype = std::wstring_view(resolution) == L"2k" ? "手动 DDS / 2k" : "手动 DDS / 4k";
+            WorkspaceAsset asset{AssetKind::new_texture, subtype,
+                                 input, {}, output, sha256_file(input), ""};
+            asset.monitored_inputs.emplace_back(asset.input, asset.baseline_sha256);
+            assets_.push_back(std::move(asset));
+        }
+    }
+}
+
 void Workspace::refresh() {
+    discover_manual_textures();
     for (auto& asset : assets_) {
         asset.available = false; asset.changed = false;
         for(const auto& [path,baseline]:asset.monitored_inputs) if(fs::is_regular_file(path)){asset.available=true;if(sha256_file(path)!=baseline)asset.changed=true;}

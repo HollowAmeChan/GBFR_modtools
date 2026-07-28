@@ -47,6 +47,7 @@ public:
 
 private:
     std::filesystem::path resolve(const std::string& relative) const;
+    void discover_manual_textures();
     void restore_granite_texture(std::size_t index);
     std::filesystem::path root_;
     std::filesystem::path game_data_root_;

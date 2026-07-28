@@ -35,11 +35,17 @@ unk2 / bool3 / bool4 / bool5
 
 - “渲染状态”：shader type/subtype、shadow type、`ignore_alpha`、`g_TwoSided`、Alpha 参数和未知布尔值。
 - “Shader 参数”：哈希/名称、U8/U16/浮点向量类型、值或浮点池偏移、已解码值、用途与置信度。
-- “贴图与 Granite”：每条引用最前显示工作区中已解包 DDS 的缩略图，并列出 shader map、贴图名、意义、A/C/D 证据、实际命中的 `unpack` 相对路径、page file、layer 对应关系和 tile set。含 `granite_params` 的材质优先匹配 Granite DDS，普通材质优先匹配 `data/texture`；右键缩略图或该行文字可打开命中文件所在的 `unpack` 文件夹。当前仅剩的两个无 RDEF 槽会显示 C 级推断名 `g_OutlineTexture` 与 `g_Mask5`，但封回时仍保留原始哈希。
+- “贴图与 Granite”：每条引用最前显示工作区中已解包 DDS 的缩略图，并列出 shader map、贴图名、意义、A/C/D 证据、实际命中的 `unpack` 相对路径、page file、layer 对应关系和 tile set。含 `granite_params` 的材质优先匹配 Granite DDS，普通材质优先匹配 `data/texture`；右键缩略图或该行文字可打开命中文件所在的 `unpack` 文件夹。该页支持按工作区贴图名修改或填充引用、添加常用 Shader map 槽以及精确删除一行。当前仅剩的两个无 RDEF 槽会显示 C 级推断名 `g_OutlineTexture` 与 `g_Mask5`，但封回时仍保留原始哈希。
 - “常量缓冲”：首 buffer 在 shader type、基准 Shader 和字节数三者精确匹配时，按 RDEF `ParamBuffer` 字段显示颜色、roughness、光照、变体、植被、冰、水面等值；当前目录覆盖 27 个 shader type，并覆盖完整样本中全部 27,491 条带首缓冲 material。字段名标为 A 级 DXBC RDEF，MMAT type 到具体 DXBC 的绑定单独标为 C 级全量契约。其余 489 条 material 本身没有首缓冲；所有原始 buffer 仍保留每个 32 位 word 的十六进制、uint 和 float 重解释。
 - “文件信息”：magic、根级标志和数据规模。
 
-当前阶段只提供无损检查和安全封回。未知常量缓冲不提供猜测性编辑；后续编辑器必须在写入前保留未修改字段、校验参数排序和索引范围，并提供 source 差异视图。
+当前阶段提供无损检查、安全封回、已知字段编辑与贴图引用编辑。未知常量缓冲不提供猜测性编辑；后续编辑器必须在写入前保留未修改字段、校验参数排序和索引范围，并提供 source 差异视图。
+
+### 面部描边遮罩
+
+面部材质的 MMAT 槽是 `g_5A2C820C`（界面按 C 级证据显示 `g_OutlineTexture`）。Face 描边顶点 Shader 中对应资源的 RDEF 名为 `g_AnimeMask`：它使用 UV0 采样 DDS 红通道，并把采样值直接乘进描边外扩距离。因此红通道黑色 `0` 会取消该区域描边，白色 `1` 保留描边，灰色提供连续衰减；眼眶和嘴周应在红通道画黑。Alpha 不参与这条已确认的外扩路径。
+
+现有材质若已经有 `g_5A2C820C` 行，只需把该行引用改为自定义贴图名，不要再添加重复槽。若该行缺失，可在“添加贴图引用”中选择“描边遮罩”。把 DDS 放到 `unpack/data/texture/2k` 或 `4k` 后刷新工作区，再分别构建 mmat 和该“手动 DDS”资源；最终 Mod 中需要同时存在修改后的 `.mmat` 和生成的 `.texture`。
 
 Shader 参数页会按 A/B/C/D 显示证据来源：A 为 DXBC RDEF 或正式 schema 命名，B 为游戏 EXE 的运行时行为，C 为完整游戏样本推断，D 为少量样本相关。已经恢复的 RDEF 名称优先于旧 schema 中的 `g_XXXXXXXX` 显示，但 B/C/D 级解释不会改写原哈希。完整统计、反汇编位置和当前未知参数结论见 [MMAT 未知参数与 Shader 研究](MMAT未知参数研究.md)。
 

@@ -302,14 +302,43 @@ std::filesystem::path find_unpack_root(std::filesystem::path path) {
 std::filesystem::path resolve_texture_dds(const std::filesystem::path& unpack_root,const std::string& texture_name,bool prefer_granite) {
     if(unpack_root.empty()||texture_name.empty())return {};
     std::u8string encoded(reinterpret_cast<const char8_t*>(texture_name.data()),texture_name.size());
-    encoded+=u8".dds";
-    const std::filesystem::path filename(encoded);
-    const auto granite2k=unpack_root/L"data/granite/2k"/filename,texture2k=unpack_root/L"data/texture/2k"/filename;
-    const auto granite4k=unpack_root/L"data/granite/4k"/filename,texture4k=unpack_root/L"data/texture/4k"/filename;
-    const std::array candidates=prefer_granite?std::array{granite2k,granite4k,texture2k,texture4k}:std::array{texture2k,texture4k,granite2k,granite4k};
-    for(const auto& candidate:candidates)if(std::filesystem::is_regular_file(candidate))return candidate;
+    const std::filesystem::path base(encoded);
+    const std::array filenames={base.wstring()+L".dds",base.wstring()+L"_0.dds"};
+    const std::array directories=prefer_granite?
+        std::array{unpack_root/L"data/granite/2k",unpack_root/L"data/granite/4k",unpack_root/L"data/texture/2k",unpack_root/L"data/texture/4k"}:
+        std::array{unpack_root/L"data/texture/2k",unpack_root/L"data/texture/4k",unpack_root/L"data/granite/2k",unpack_root/L"data/granite/4k"};
+    for(const auto& directory:directories)for(const auto& filename:filenames){const auto candidate=directory/filename;if(std::filesystem::is_regular_file(candidate))return candidate;}
     return {};
 }
+
+std::vector<std::string> workspace_texture_names(const std::filesystem::path& unpack_root) {
+    std::vector<std::string> result;
+    if(unpack_root.empty())return result;
+    for(const auto& relative:{L"data/texture/2k",L"data/texture/4k",L"data/granite/2k",L"data/granite/4k"}){
+        const auto directory=unpack_root/relative;if(!std::filesystem::is_directory(directory))continue;
+        for(const auto& entry:std::filesystem::recursive_directory_iterator(directory)){
+            if(!entry.is_regular_file()||_wcsicmp(entry.path().extension().c_str(),L".dds")!=0)continue;
+            auto stem=entry.path().stem().wstring();if(stem.size()>2&&stem.ends_with(L"_0"))stem.resize(stem.size()-2);
+            result.push_back(utf8(std::filesystem::path(stem)));
+        }
+    }
+    std::sort(result.begin(),result.end());result.erase(std::unique(result.begin(),result.end()),result.end());return result;
+}
+
+struct TextureMapOption { const char* label; const char* json_name; std::uint32_t hash; };
+constexpr std::array texture_map_options{
+    TextureMapOption{"基础色", "g_AlbedoMap", 0x3F2B4D59u},
+    TextureMapOption{"法线", "g_NormalMap", 0xADBA7C37u},
+    TextureMapOption{"Mask 1", "g_Mask1", 0x847A6CBDu},
+    TextureMapOption{"Mask 2", "g_Mask2", 0x6137BA13u},
+    TextureMapOption{"Mask 3", "g_Mask3", 0x35091AFAu},
+    TextureMapOption{"Mask 4", "g_Mask4", 0x393263EFu},
+    TextureMapOption{"描边遮罩", "g_5A2C820C", 0x5A2C820Cu},
+    TextureMapOption{"Mask 5", "g_8A0507FB", 0x8A0507FBu},
+    TextureMapOption{"眼部高光", "g_EyeHighLightTexture", 0x00B36A70u},
+    TextureMapOption{"虹膜", "g_EyeIrisTexture", 0x637A19F3u},
+    TextureMapOption{"眼白", "g_EyeWhiteTexture", 0xAEDB57AEu}
+};
 
 void open_directory(const std::filesystem::path& path) {
     if(!path.empty()&&std::filesystem::is_directory(path))ShellExecuteW(nullptr,L"open",path.c_str(),nullptr,nullptr,SW_SHOWNORMAL);
@@ -339,6 +368,7 @@ void MaterialInspector::set_asset(MaterialAsset asset, std::filesystem::path pat
     dirty_=false;
     edit_status_.clear();
     load_document();
+    refresh_texture_names();
 }
 
 void MaterialInspector::clear() {
@@ -347,6 +377,7 @@ void MaterialInspector::clear() {
     document_ = {};
     path_.clear();
     unpack_root_.clear();
+    texture_names_.clear();
     selected_material_ = 0;
     dirty_=false;
     file_changed_=false;
@@ -397,6 +428,10 @@ void MaterialInspector::reload_if_open(const std::filesystem::path& path) {
     if(path_!=path)return;
     dirty_=false;
     discard_changes();
+}
+
+void MaterialInspector::refresh_texture_names() {
+    texture_names_=workspace_texture_names(unpack_root_);
 }
 
 void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_gallery) {
@@ -563,7 +598,9 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("贴图与 Granite")) {
-            if (ImGui::BeginTable("mmat_textures",6,resizable_scrolling_table_flags,ImVec2(0,std::max(180.0f,ImGui::GetContentRegionAvail().y*.62f)))) {
+            const auto& texture_names=texture_names_;
+            std::optional<std::size_t> delete_texture;
+            if (ImGui::BeginTable("mmat_textures",7,resizable_scrolling_table_flags,ImVec2(0,std::max(180.0f,ImGui::GetContentRegionAvail().y*.58f)))) {
                 ImGui::TableSetupScrollFreeze(0,1);
                 ImGui::TableSetupColumn("预览",ImGuiTableColumnFlags_WidthFixed,90);
                 ImGui::TableSetupColumn("Shader map",ImGuiTableColumnFlags_WidthFixed,240);
@@ -571,6 +608,7 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
                 ImGui::TableSetupColumn("意义",ImGuiTableColumnFlags_WidthFixed,200);
                 ImGui::TableSetupColumn("证据",ImGuiTableColumnFlags_WidthFixed,280);
                 ImGui::TableSetupColumn("已解包路径",ImGuiTableColumnFlags_WidthFixed,420);
+                ImGui::TableSetupColumn("操作",ImGuiTableColumnFlags_WidthFixed,115);
                 ImGui::TableHeadersRow();
                 for(std::size_t texture_index=0;texture_index<material.texture_maps.size();++texture_index){
                     auto& texture=material.texture_maps[texture_index];
@@ -604,10 +642,58 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
                     ImGui::TableNextColumn();
                     if(dds.empty())ImGui::TextDisabled("未找到");else ImGui::TextWrapped("%s",utf8(dds.lexically_relative(unpack_root_)).c_str());
                     texture_context_menu("##texture_context_path",dds);
+                    ImGui::TableNextColumn();
+                    ImGui::BeginDisabled(source_texture==nullptr);
+                    if(ImGui::BeginCombo("##workspace_texture", "选择引用")){
+                        for(const auto& name:texture_names)if(ImGui::Selectable(name.c_str(),texture.texture_name==name)){
+                            texture.texture_name=name;(*source_texture)["texture_name"]=name;dirty_=true;edit_status_.clear();
+                        }
+                        ImGui::EndCombo();
+                    }
+                    if(ImGui::Button("删除行"))delete_texture=texture_index;
+                    ImGui::EndDisabled();
                     ImGui::PopID();
                 }
                 ImGui::EndTable();
             }
+            if(delete_texture&&editable&&source_material->contains("texture_maps")&&(*source_material)["texture_maps"].is_array()){
+                auto& source_maps=(*source_material)["texture_maps"];
+                if(*delete_texture<source_maps.size()&&*delete_texture<material.texture_maps.size()){
+                    source_maps.erase(source_maps.begin()+static_cast<std::ptrdiff_t>(*delete_texture));
+                    material.texture_maps.erase(material.texture_maps.begin()+static_cast<std::ptrdiff_t>(*delete_texture));
+                    dirty_=true;edit_status_.clear();
+                }
+            }
+            ImGui::SeparatorText("添加贴图引用");
+            new_texture_map_option_=std::clamp(new_texture_map_option_,0,static_cast<int>(texture_map_options.size()-1));
+            const auto& new_map=texture_map_options[static_cast<std::size_t>(new_texture_map_option_)];
+            ImGui::SetNextItemWidth(220);
+            if(ImGui::BeginCombo("Shader map##new_texture_map",new_map.label)){
+                for(int option=0;option<static_cast<int>(texture_map_options.size());++option){
+                    const auto& candidate=texture_map_options[static_cast<std::size_t>(option)];
+                    const auto label=std::string(candidate.label)+" ("+candidate.json_name+")";
+                    if(ImGui::Selectable(label.c_str(),option==new_texture_map_option_))new_texture_map_option_=option;
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::SameLine();ImGui::SetNextItemWidth(330);
+            ImGui::InputTextWithHint("贴图名##new_texture_name","例如 fp1400_face_lod0_outline",new_texture_name_.data(),new_texture_name_.size());
+            ImGui::SameLine();
+            if(ImGui::BeginCombo("##new_texture_choice","从工作区选择")){
+                for(const auto& name:texture_names)if(ImGui::Selectable(name.c_str()))std::snprintf(new_texture_name_.data(),new_texture_name_.size(),"%s",name.c_str());
+                ImGui::EndCombo();
+            }
+            const bool duplicate_map=std::any_of(material.texture_maps.begin(),material.texture_maps.end(),[&](const auto& texture){return texture.hash==new_map.hash;});
+            ImGui::SameLine();ImGui::BeginDisabled(!editable||new_texture_name_[0]=='\0'||duplicate_map);
+            if(ImGui::Button("添加引用")){
+                if(!source_material->contains("texture_maps")||!(*source_material)["texture_maps"].is_array())(*source_material)["texture_maps"]=nlohmann::json::array();
+                const std::string texture_name=new_texture_name_.data();
+                (*source_material)["texture_maps"].push_back({{"shader_map_name_hash",new_map.json_name},{"texture_name",texture_name}});
+                material.texture_maps.push_back({new_map.hash,new_map.json_name,texture_name});
+                new_texture_name_.fill('\0');dirty_=true;edit_status_.clear();
+            }
+            ImGui::EndDisabled();
+            if(duplicate_map){ImGui::SameLine();ImGui::TextDisabled("当前材质已有该 Shader map；请直接修改现有行的贴图名。");}
             ImGui::SeparatorText("Granite streaming");
             if (!material.granite) ImGui::TextUnformatted("未设置 granite_params：游戏将按普通 texture 路径加载。");
             else {
