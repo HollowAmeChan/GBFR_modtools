@@ -3,6 +3,7 @@
 #include "mmat_param_layouts.generated.hpp"
 #include "texture_gallery.hpp"
 
+#include <gbfr/formats/material_variants.hpp>
 #include <gbfr/render/preview_renderer.hpp>
 
 #include <imgui.h>
@@ -417,6 +418,20 @@ bool MaterialInspector::discard_changes() {
     }catch(const std::exception& error){edit_status_=std::string("重新加载失败：")+error.what();return false;}
 }
 
+bool MaterialInspector::propagate_selected_material_settings() {
+    if(asset_.legacy_schema||document_.empty()||asset_.entries.empty()){
+        edit_status_="批量覆盖失败：当前不是可编辑的新 schema MMAT";return false;
+    }
+    if(!save_document())return false;
+    try{
+        const auto selected=static_cast<std::size_t>(std::clamp(selected_material_,0,static_cast<int>(asset_.entries.size()-1)));
+        const auto updated=propagate_mmat_material_render_settings(path_,selected);
+        file_changed_=true;
+        edit_status_="已将材质槽 "+std::to_string(selected)+" 的渲染设置覆盖到 "+std::to_string(updated)+" 个配色 JSON";
+        return true;
+    }catch(const std::exception& error){edit_status_=std::string("批量覆盖失败：")+error.what();return false;}
+}
+
 bool MaterialInspector::consume_file_changed() noexcept {
     const bool result=file_changed_;file_changed_=false;return result;
 }
@@ -445,6 +460,20 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
     if(ImGui::Button("保存到 unpack"))save_document();
     ImGui::SameLine();if(ImGui::Button("放弃修改"))discard_changes();
     ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(asset_.legacy_schema||document_.empty()||asset_.entries.empty()||adjacent_mmat_variant_jsons(path_).empty());
+    if(ImGui::Button("覆盖同槽设置到 0~10"))ImGui::OpenPopup("批量覆盖配色材质设置");
+    ImGui::EndDisabled();
+    if(ImGui::BeginPopupModal("批量覆盖配色材质设置",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){
+        const auto selected=asset_.entries.empty()?0:std::clamp(selected_material_,0,static_cast<int>(asset_.entries.size()-1));
+        const auto target_count=adjacent_mmat_variant_jsons(path_).size();
+        ImGui::Text("将材质槽 %d 的渲染设置覆盖到同目录其余 %zu 个配色 JSON。",selected,target_count);
+        ImGui::TextUnformatted("每个配色的贴图、Granite、材质哈希与配色常量会保留。");
+        ImGui::Spacing();
+        if(ImGui::Button("确认覆盖")){propagate_selected_material_settings();ImGui::CloseCurrentPopup();}
+        ImGui::SameLine();if(ImGui::Button("取消"))ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
     if(dirty_&&ImGui::GetIO().KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_S)&&ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))save_document();
     if(!edit_status_.empty()){ImGui::SameLine(0,14);ImGui::TextDisabled("%s",edit_status_.c_str());}
     if (asset_.legacy_schema) {

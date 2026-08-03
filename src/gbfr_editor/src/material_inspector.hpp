@@ -29,6 +29,7 @@ private:
     bool load_document();
     bool save_document();
     bool discard_changes();
+    bool propagate_selected_material_settings();
 
     MaterialAsset asset_;
     nlohmann::json document_;
