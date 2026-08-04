@@ -663,6 +663,7 @@ void Workspace::discover_sop_files() {
 }
 
 void Workspace::refresh() {
+    discover_sop_files();
     discover_manual_textures();
     for (auto& asset : assets_) {
         asset.available = false; asset.changed = false;

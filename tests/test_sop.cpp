@@ -15,7 +15,7 @@ bool near(float left, float right) {
 }
 }
 
-int main() {
+int wmain(int argc, wchar_t** argv) {
     const auto root = fs::temp_directory_path() / L"gbfr_sop_workflow_test";
     std::error_code ec;
     fs::remove_all(root, ec);
@@ -71,6 +71,14 @@ int main() {
 
     workspace.restore_asset(sop_index);
     if (workspace.assets()[sop_index].changed || gbfr::load_sop(input).operations.size() != 1) return 8;
+
+    if (argc > 1) {
+        const fs::path sample = argv[1];
+        const auto sample_asset = gbfr::load_sop(sample);
+        const auto rebuilt = root / L"sample_roundtrip.sop";
+        gbfr::save_sop(rebuilt, sample_asset);
+        if (gbfr::sha256_file(sample) != gbfr::sha256_file(rebuilt)) return 9;
+    }
 
     fs::remove_all(root, ec);
     return 0;

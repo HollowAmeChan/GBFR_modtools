@@ -1598,10 +1598,17 @@ void draw_editor_shell() {
         const bool action_available=asset.available||(restorable_native&&!asset.source.empty()&&std::filesystem::is_regular_file(asset.source));
         ImGui::BeginDisabled(!action_available);
         if(asset.kind==gbfr::AssetKind::model){
-            ImGui::TextWrapped("模型通常由 minfo、skeleton 和多个 mmesh 组成；要完整封回，请在列表中多选相关模型文件后执行构建选中项。\n");
-            if(ImGui::Button("重新加载模型预览"))load_model_preview(index,true);
-            if(ImGui::Button("复制模型到 build"))run_selected_asset_action(false);
-            if(ImGui::Button("从 source 恢复模型"))run_selected_asset_action(true);
+            if(asset.subtype=="sop"){
+                ImGui::TextWrapped("在 Skeleton & Cloth 的 SOP 页编辑 unpack 副本；构建会将已保存的 SOP 复制到 build。");
+                if(ImGui::Button("加载 SOP 模型预览"))load_model_preview(index,true);
+                if(ImGui::Button("复制 SOP 到 build"))run_selected_asset_action(false);
+                if(ImGui::Button("从 source 恢复 SOP"))run_selected_asset_action(true);
+            }else{
+                ImGui::TextWrapped("模型通常由 minfo、skeleton 和多个 mmesh 组成；要完整封回，请在列表中多选相关模型文件后执行构建选中项。\n");
+                if(ImGui::Button("重新加载模型预览"))load_model_preview(index,true);
+                if(ImGui::Button("复制模型到 build"))run_selected_asset_action(false);
+                if(ImGui::Button("从 source 恢复模型"))run_selected_asset_action(true);
+            }
         }else if(asset.kind==gbfr::AssetKind::texture||asset.kind==gbfr::AssetKind::ui_image){
             if(ImGui::Button("重新加载 DDS 预览"))preview_asset(index);
             if(ImGui::Button("封回 WTB 到 build"))run_selected_asset_action(false);

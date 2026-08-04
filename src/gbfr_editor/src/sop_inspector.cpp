@@ -193,6 +193,7 @@ bool SopInspector::draw(const SkeletonAsset& skeleton,
     if (ImGui::Button("保存 SOP")) {
         try {
             save_sop(path_, asset_);
+            asset_ = load_sop(path_);
             dirty_ = false;
             status_message_ = "SOP 已保存，正在刷新模型预览。";
             status_error_ = false;
@@ -221,7 +222,14 @@ bool SopInspector::draw(const SkeletonAsset& skeleton,
         ImGui::SliderFloat("Swing 比例##new_swing", &new_swing_rate_, 0.0f, 1.0f, "%.2f");
         ImGui::SetNextItemWidth(160);
         ImGui::SliderFloat("Twist 比例##new_twist", &new_twist_rate_, 0.0f, 1.0f, "%.2f");
+        if (ImGui::Button("奶刀式 0.5")) { new_swing_rate_ = 0.5f; new_twist_rate_ = 0.0f; new_axis_ = 1; }
+        ImGui::SameLine();
+        if (ImGui::Button("奶刀式 0.6")) { new_swing_rate_ = 0.6f; new_twist_rate_ = 0.0f; new_axis_ = 1; }
+        ImGui::SameLine();
         if (ImGui::Button("完整复制 1:1")) new_swing_rate_ = new_twist_rate_ = 1.0f;
+        if (ImGui::Button("来源：右大腿 _00e")) new_source_ = 0x00e;
+        ImGui::SameLine();
+        if (ImGui::Button("来源：左大腿 _012")) new_source_ = 0x012;
         ImGui::SameLine();
         ImGui::BeginDisabled(!editable_ || new_target_ < 0 || new_source_ < 0 || new_target_ == new_source_);
         if (ImGui::Button("添加约束")) {
