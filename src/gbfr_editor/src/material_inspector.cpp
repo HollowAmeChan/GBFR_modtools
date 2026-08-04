@@ -425,9 +425,9 @@ bool MaterialInspector::propagate_selected_material_settings() {
     if(!save_document())return false;
     try{
         const auto selected=static_cast<std::size_t>(std::clamp(selected_material_,0,static_cast<int>(asset_.entries.size()-1)));
-        const auto updated=propagate_mmat_material_render_settings(path_,selected);
+        const auto updated=propagate_mmat_json(path_,selected);
         file_changed_=true;
-        edit_status_="已将材质槽 "+std::to_string(selected)+" 的渲染设置覆盖到 "+std::to_string(updated)+" 个配色 JSON";
+        edit_status_="已将当前 MMAT JSON 完整覆盖到 "+std::to_string(updated)+" 个配色 JSON";
         return true;
     }catch(const std::exception& error){edit_status_=std::string("批量覆盖失败：")+error.what();return false;}
 }
@@ -462,13 +462,12 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
     ImGui::EndDisabled();
     ImGui::SameLine();
     ImGui::BeginDisabled(asset_.legacy_schema||document_.empty()||asset_.entries.empty()||adjacent_mmat_variant_jsons(path_).empty());
-    if(ImGui::Button("覆盖同槽设置到 0~10"))ImGui::OpenPopup("批量覆盖配色材质设置");
+    if(ImGui::Button("完整覆盖 JSON 到 0~10"))ImGui::OpenPopup("批量覆盖配色材质设置");
     ImGui::EndDisabled();
     if(ImGui::BeginPopupModal("批量覆盖配色材质设置",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){
-        const auto selected=asset_.entries.empty()?0:std::clamp(selected_material_,0,static_cast<int>(asset_.entries.size()-1));
         const auto target_count=adjacent_mmat_variant_jsons(path_).size();
-        ImGui::Text("将材质槽 %d 的渲染设置覆盖到同目录其余 %zu 个配色 JSON。",selected,target_count);
-        ImGui::TextUnformatted("每个配色的贴图、Granite、材质哈希与配色常量会保留。");
+        ImGui::Text("将当前 MMAT JSON 完整覆盖到同目录其余 %zu 个配色 JSON。",target_count);
+        ImGui::TextUnformatted("目标文件的全部材质、贴图、Granite、常量和配色字段都会被替换。");
         ImGui::Spacing();
         if(ImGui::Button("确认覆盖")){propagate_selected_material_settings();ImGui::CloseCurrentPopup();}
         ImGui::SameLine();if(ImGui::Button("取消"))ImGui::CloseCurrentPopup();

@@ -57,29 +57,17 @@ int main() {
     write_json(target10_path,fixture("target10_albd",333u,false));
 
     if(gbfr::adjacent_mmat_variant_jsons(source_path).size()!=2)return 1;
-    if(gbfr::propagate_mmat_material_render_settings(source_path,0)!=2)return 2;
+    if(gbfr::propagate_mmat_json(source_path,0)!=2)return 2;
     const auto updated=read_json(target0_path);
-    const auto& material=updated["materials"][0];
-    if(material["shadow_type"]!="ShadowEnable_AlphaBlend"||material["ignore_alpha"]!=false||
-       material["bool9"]!=true||material["bool12"]!=true)return 3;
-    if(material["shader_params"][0]["value_or_offset"]!=1||
-       material["shader_params"][1]["value_or_offset"]!=2)return 4;
-    if(updated["shader_param_float_data_pool"]!=json::array({9.0f,8.0f,1.25f,2.5f}))return 5;
-    if(material["texture_maps"][0]["texture_name"]!="target0_albd"||
-       material["granite_params"]["page_file"][0]!="target0_albd_page"||
-       material["unique_material_name_hash_maybe"]!=222u||
-       updated["constant_buffers"][0]["buffer"][0]!=42u)return 6;
-
-    const auto before_failed_batch=updated;
+    if(updated!=read_json(source_path)||read_json(target10_path)!=read_json(source_path))return 3;
     auto incompatible=read_json(target10_path);
     incompatible["materials"][0]["shader_sub_type"]=8;
     write_json(target10_path,incompatible);
     auto changed_source=read_json(source_path);
     changed_source["materials"][0]["shadow_type"]="NoShadow";
     write_json(source_path,changed_source);
-    bool rejected{};
-    try{gbfr::propagate_mmat_material_render_settings(source_path,0);}catch(const std::exception&){rejected=true;}
-    if(!rejected||read_json(target0_path)!=before_failed_batch)return 7;
+    if(gbfr::propagate_mmat_json(source_path,0)!=2)return 4;
+    if(read_json(target0_path)!=read_json(source_path)||read_json(target10_path)!=read_json(source_path))return 5;
 
     fs::remove_all(root);
     return 0;
