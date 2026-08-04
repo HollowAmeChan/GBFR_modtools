@@ -20,6 +20,7 @@ public:
     void clear();
     void draw(PreviewRenderer& renderer, TextureGallery& texture_gallery,
               const Workspace& workspace);
+    void draw_quick_actions();
     bool consume_file_changed() noexcept;
     bool save_changes();
     void reload_if_open(const std::filesystem::path& path);

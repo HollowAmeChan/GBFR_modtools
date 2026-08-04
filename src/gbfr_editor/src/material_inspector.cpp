@@ -450,18 +450,10 @@ void MaterialInspector::refresh_texture_names() {
     texture_names_=workspace_texture_names(unpack_root_);
 }
 
-void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_gallery,const Workspace& workspace) {
-    ImGui::Text("%s | materials %zu | constant buffers %zu | float pool %zu",
-                path_.filename().string().c_str(), asset_.entries.size(), asset_.constant_buffers.size(), asset_.shader_parameter_float_pool.size());
-    ImGui::SameLine(0,14);
-    if(dirty_)ImGui::TextColored(ImVec4(1.0f,.72f,.18f,1.0f),"未保存");else ImGui::TextColored(ImVec4(.35f,.85f,.48f,1.0f),"已保存");
-    ImGui::SameLine(0,14);
-    ImGui::BeginDisabled(!dirty_||asset_.legacy_schema||document_.empty());
-    if(ImGui::Button("保存到 unpack"))save_document();
-    ImGui::SameLine();if(ImGui::Button("放弃修改"))discard_changes();
-    ImGui::EndDisabled();
-    ImGui::SameLine();
-    ImGui::BeginDisabled(asset_.legacy_schema||document_.empty()||asset_.entries.empty()||adjacent_mmat_variant_jsons(path_).empty());
+void MaterialInspector::draw_quick_actions() {
+    const bool available=!asset_.legacy_schema&&!document_.empty()&&!asset_.entries.empty()&&
+                          !adjacent_mmat_variant_jsons(path_).empty();
+    ImGui::BeginDisabled(!available);
     if(ImGui::Button("完整覆盖 JSON 到 0~10"))ImGui::OpenPopup("批量覆盖配色材质设置");
     ImGui::EndDisabled();
     if(ImGui::BeginPopupModal("批量覆盖配色材质设置",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){
@@ -473,6 +465,18 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
         ImGui::SameLine();if(ImGui::Button("取消"))ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
+}
+
+void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_gallery,const Workspace& workspace) {
+    ImGui::Text("%s | materials %zu | constant buffers %zu | float pool %zu",
+                path_.filename().string().c_str(), asset_.entries.size(), asset_.constant_buffers.size(), asset_.shader_parameter_float_pool.size());
+    ImGui::SameLine(0,14);
+    if(dirty_)ImGui::TextColored(ImVec4(1.0f,.72f,.18f,1.0f),"未保存");else ImGui::TextColored(ImVec4(.35f,.85f,.48f,1.0f),"已保存");
+    ImGui::SameLine(0,14);
+    ImGui::BeginDisabled(!dirty_||asset_.legacy_schema||document_.empty());
+    if(ImGui::Button("保存到 unpack"))save_document();
+    ImGui::SameLine();if(ImGui::Button("放弃修改"))discard_changes();
+    ImGui::EndDisabled();
     if(dirty_&&ImGui::GetIO().KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_S)&&ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))save_document();
     if(!edit_status_.empty()){ImGui::SameLine(0,14);ImGui::TextDisabled("%s",edit_status_.c_str());}
     if (asset_.legacy_schema) {

@@ -62,10 +62,12 @@ std::size_t propagate_mmat_json(const std::filesystem::path& current,
             remove_file_noexcept(file.temporary);remove_file_noexcept(file.backup);
             staged.push_back(std::move(file));
             const auto& staged_file=staged.back();
-            std::ofstream output(staged_file.temporary,std::ios::trunc);
-            if(!output)throw std::runtime_error("无法创建 "+utf8(staged_file.temporary.filename()));
-            output<<source_document.dump(2)<<'\n';
-            if(!output)throw std::runtime_error("无法写入 "+utf8(staged_file.temporary.filename()));
+            {
+                std::ofstream output(staged_file.temporary,std::ios::trunc);
+                if(!output)throw std::runtime_error("无法创建 "+utf8(staged_file.temporary.filename()));
+                output<<source_document.dump(2)<<'\n';
+                if(!output)throw std::runtime_error("无法写入 "+utf8(staged_file.temporary.filename()));
+            }
             load_mmat_json(staged_file.temporary);
         }
         for(const auto& file:staged){

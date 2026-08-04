@@ -1624,6 +1624,7 @@ void draw_editor_shell() {
             if(ImGui::Button("生成 .texture 到 build"))run_selected_asset_action(false);
             ImGui::TextWrapped("该贴图没有原始 .texture 模板，将使用 nier_cli_mgrr 新建单槽 WTB。");
         }else if(asset.kind==gbfr::AssetKind::material){
+            g_material_inspector.draw_quick_actions();
             std::size_t a4_count{};std::string a4_error;
             bool legacy_schema{};
             try{a4_count=g_workspace->material_granite_count(index);}catch(const std::exception& error){a4_error=error.what();}
