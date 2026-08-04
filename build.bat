@@ -104,6 +104,29 @@ if errorlevel 1 (
 )
 pushd %BUILD_DRIVE%\cmake
 
+for /d %%S in ("%BUILD_DRIVE%\.deps\*-subbuild") do (
+  set "SUBBUILD_CACHE=%%~fS\CMakeCache.txt"
+  if exist "!SUBBUILD_CACHE!" (
+    findstr /i /l /c:"CMAKE_CACHEFILE_DIR:INTERNAL=%BUILD_DRIVE%/.deps/%%~nxS" "!SUBBUILD_CACHE!" >nul
+    if errorlevel 1 (
+      echo [INFO] Refreshing CMake dependency state for %%~nxS.
+      del /f /q "!SUBBUILD_CACHE!" >nul 2>&1
+      if exist "%%~fS\CMakeFiles" rmdir /s /q "%%~fS\CMakeFiles"
+    )
+  )
+)
+
+set "CACHE_FILE=%BUILD_DRIVE%\out\build\%PRESET%\CMakeCache.txt"
+set "CACHE_FILES=%BUILD_DRIVE%\out\build\%PRESET%\CMakeFiles"
+if exist "!CACHE_FILE!" (
+  findstr /i /l /c:"CMAKE_CACHEFILE_DIR:INTERNAL=%BUILD_DRIVE%/out/build/%PRESET%" "!CACHE_FILE!" >nul
+  if errorlevel 1 (
+    echo [INFO] CMake cache belongs to another temporary drive; refreshing configure state.
+    del /f /q "!CACHE_FILE!" >nul 2>&1
+    if exist "!CACHE_FILES!" rmdir /s /q "!CACHE_FILES!"
+  )
+)
+
 "%CMAKE%" --preset %PRESET% -DCMAKE_MAKE_PROGRAM="%NINJA%"
 set "RESULT=!errorlevel!"
 if not "!RESULT!"=="0" (
