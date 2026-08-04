@@ -1,0 +1,32 @@
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+. (Join-Path $PSScriptRoot '..\scripts\workspace\ui_asset_rules.ps1')
+
+$cases = @(
+    @{ Path = 'ui/fhd/layouts/common/chara_plprm/noatlastextures/cmn_chrprm_1400_00.wtb'; Id = 'pl1400'; Expected = 'status_portrait' }
+    @{ Path = 'ui/layouts/common/chara_voice/noatlastextures/cmn_chrvo_pl1400_08.wtb'; Id = 'pl1400'; Expected = 'voice_portrait' }
+    @{ Path = 'ui/fhd/layouts/common/image_chara02/noatlastextures/cmn_imgchr02_1400_glow.wtb'; Id = 'pl1400'; Expected = 'character_art_alt' }
+    @{ Path = 'ui/layouts/common/image_chara_s/noatlastextures/cmn_imgchr_s_1400.wtb'; Id = 'pl1400'; Expected = 'character_art_small' }
+    @{ Path = 'ui/fhd/layouts/common/image_fate/noatlastextures/cmn_imgfate_1400_13_02.wtb'; Id = 'pl1400'; Expected = 'fate_episode' }
+    @{ Path = 'ui/layouts/common/image_sboard/noatlastextures/cmn_img_sboard02_pl1400_03.wtb'; Id = 'pl1400'; Expected = 'sboard' }
+    @{ Path = 'ui/fhd/layouts/pause/background03/noatlastextures/ps_bg03_pl1400_b_wp1405_c10.wtb'; Id = 'pl1400'; Expected = 'menu_background' }
+    @{ Path = 'ui/layouts/common/image_equip/noatlastextures/cmn_imgequ_wp1405_glow.wtb'; Id = 'pl1400'; Expected = 'weapon_preview' }
+    @{ Path = 'ui/fhd/layouts/common/image_equip_s/noatlastextures/cmn_imgequ_s_wp1402.wtb'; Id = 'pl1400'; Expected = 'weapon_preview_small' }
+    @{ Path = 'ui/layouts/blacksmith/weapon/noatlastextures/bs_wpn_pl1400.wtb'; Id = 'pl1400'; Expected = 'weapon_overview' }
+    @{ Path = 'ui/fhd/layouts/common/image_item/noatlastextures/cmn_imgitm_01_1400.wtb'; Id = 'pl1400'; Expected = $null }
+    @{ Path = 'ui/fhd/layouts/common/image_summon/noatlastextures/cmn_imgsmn_1400.wtb'; Id = 'pl1400'; Expected = $null }
+    @{ Path = 'ui/atlas/common_icon_mini.wtb'; Id = 'pl1400'; Expected = $null }
+    @{ Path = 'ui/layouts/common/image_fate/noatlastextures/cmn_imgfate_1400_01_01.wtb'; Id = 'fp1400'; Expected = $null }
+    @{ Path = 'ui/layouts/common/image_chara/noatlastextures/cmn_imgchr_1400.wtb'; Id = 'fp1400'; Expected = 'character_art' }
+    @{ Path = 'ui/layouts/common/image_equip/noatlastextures/cmn_imgequ_wp1500.wtb'; Id = 'pl1400'; Expected = $null }
+)
+
+foreach ($case in $cases) {
+    $actual = Get-CharacterUiAssetCategory -RelativePath $case.Path -CharacterId $case.Id
+    if ($actual -ne $case.Expected) {
+        throw "UI rule mismatch for $($case.Id) / $($case.Path): expected '$($case.Expected)', got '$actual'"
+    }
+}
+
+Write-Host "UI asset rule tests passed: $($cases.Count)"

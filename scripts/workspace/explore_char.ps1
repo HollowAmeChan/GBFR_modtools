@@ -103,7 +103,7 @@ function Get-FileSizeStr([string]$path) {
 }
 
 function Get-UiImageCategoryLabel([string]$category) {
-    return switch ($category) {
+    $label = switch ($category) {
         'status_portrait' { '状态头像' }
         'voice_portrait' { '对话头像' }
         'sba_chain' { '奥义链图' }
@@ -122,6 +122,7 @@ function Get-UiImageCategoryLabel([string]$category) {
         'weapon_preview_small' { '小尺寸武器预览' }
         default { '角色 UI' }
     }
+    return $label
 }
 
 function Extract-MmatHashes([string]$mmatPath) {
