@@ -690,13 +690,15 @@ bool load_model_previews(const std::vector<ModelPreviewKey>& keys,bool force) {
             std::vector<gbfr::PreviewMaterialTextures> preview_materials;
             gbfr::SopAsset sop;
             std::filesystem::path material_json,sop_path;
+            bool sop_editable{};
             std::size_t resolved_materials{};
         };
         std::vector<LoadedPart> parts;parts.reserve(keys.size());
         std::vector<ModelMaterialBinding> material_bindings;
         for(const auto& key:keys){
             LoadedPart part;part.key=key;part.info=gbfr::load_minfo(key.minfo);part.skeleton=gbfr::load_skeleton(key.skeleton);part.mesh=gbfr::load_mmesh(key.mesh,part.info,key.lod_index,key.shadow_lod);
-            part.sop_path=g_workspace->root()/L"source/data"/key.minfo.lexically_relative(g_workspace->root()/L"unpack/data");part.sop_path.replace_extension(L".sop");
+            part.sop_path=key.minfo;part.sop_path.replace_extension(L".sop");part.sop_editable=std::filesystem::is_regular_file(part.sop_path);
+            if(!part.sop_editable){part.sop_path=g_workspace->root()/L"source/data"/key.minfo.lexically_relative(g_workspace->root()/L"unpack/data");part.sop_path.replace_extension(L".sop");}
             if(std::filesystem::is_regular_file(part.sop_path))part.sop=gbfr::load_sop(part.sop_path);else part.sop_path.clear();
             part.material_json=key.minfo.parent_path()/L"vars/0.mmat.json";if(!std::filesystem::is_regular_file(part.material_json))throw std::runtime_error("找不到 "+utf8(key.minfo.stem().wstring())+" 的 vars/0.mmat.json");
             part.materials=gbfr::load_mmat_json(part.material_json);part.preview_materials.resize(part.materials.entries.size());
@@ -753,7 +755,7 @@ bool load_model_previews(const std::vector<ModelPreviewKey>& keys,bool force) {
         if(g_link_head_anchor&&body!=diagnostics.end())for(auto& item:diagnostics){auto stem=item.minfo.stem().wstring();std::transform(stem.begin(),stem.end(),stem.begin(),[](wchar_t value){return static_cast<wchar_t>(std::towlower(value));});if(stem.starts_with(L"fp")&&item.head.present){anchor_links.emplace_back(body->head.bone_index,item.head.bone_index);item.head_linked=true;}}
         if(!g_preview->set_anchor_links(anchor_links))throw std::runtime_error("_005 预览联动配置失败");
 
-        const auto& primary=parts.front();g_sop_inspector.set_asset(primary.sop,primary.sop_path);g_loaded_material=primary.material_json;g_loaded_sop=primary.sop_path;
+        const auto& primary=parts.front();g_sop_inspector.set_asset(primary.sop,primary.sop_path,primary.sop_editable);g_loaded_material=primary.material_json;g_loaded_sop=primary.sop_path;
         g_loaded_materials.clear();g_loaded_sops.clear();for(const auto& part:parts){g_loaded_materials.push_back(part.material_json);if(!part.sop_path.empty())g_loaded_sops.push_back(part.sop_path);}
         g_skeleton=std::move(merged_skeleton);g_loaded_model=keys.front();g_loaded_models=keys;g_model_preview_diagnostics=std::move(diagnostics);g_model_material_bindings=std::move(material_bindings);g_selected_model_material=g_model_material_bindings.empty()?-1:0;g_loaded_texture.clear();g_preview_mode=PreviewMode::model;g_preview_error.clear();g_loaded_model_stats=stats;
         discover_motions(keys);g_preview->frame(g_camera);
@@ -1660,7 +1662,11 @@ void draw_editor_shell() {
         ImGui::BeginChild("cloth",ImVec2(0,0));
         if(ImGui::BeginTabBar("skeleton_details")){
         if(ImGui::BeginTabItem("SOP 约束")){
-            g_sop_inspector.draw(g_skeleton,g_bone_names,g_selected_bone);
+            if(g_sop_inspector.draw(g_skeleton,g_bone_names,g_selected_bone)){
+                const auto loaded_models=g_loaded_models;
+                if(g_workspace)g_workspace->refresh();
+                load_model_previews(loaded_models,true);
+            }
             ImGui::EndTabItem();
         }
         if(ImGui::BeginTabItem("Cloth 物理")){

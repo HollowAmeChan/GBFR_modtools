@@ -4,9 +4,14 @@
 #include <cstddef>
 #include <cstring>
 #include <fstream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 
 namespace fs = std::filesystem;
 namespace {
@@ -49,6 +54,41 @@ float SopProperty::floating() const noexcept {
 const SopProperty* SopOperation::find(std::uint32_t hash) const noexcept {
     for (const auto& property : properties) if (property.hash == hash) return &property;
     return nullptr;
+}
+
+SopProperty* SopOperation::find(std::uint32_t hash) noexcept {
+    for (auto& property : properties) if (property.hash == hash) return &property;
+    return nullptr;
+}
+
+SopOperation make_swing_twist_operation(std::uint32_t target_bone,
+                                        std::uint32_t source_bone,
+                                        SopAxis axis,
+                                        float swing_rate,
+                                        float twist_rate) {
+    const float axis_x = axis == SopAxis::x ? 1.0f : 0.0f;
+    const float axis_y = axis == SopAxis::y ? 1.0f : 0.0f;
+    const float axis_z = axis == SopAxis::z ? 1.0f : 0.0f;
+    const auto floating = [](std::uint32_t hash, float value) {
+        return SopProperty{hash, SopPropertyType::floating, std::bit_cast<std::uint32_t>(value)};
+    };
+    SopOperation operation;
+    operation.type_hash = sop_swing_twist_operation;
+    operation.metadata = 0x00090101u;
+    operation.target_bone = target_bone;
+    operation.source_bone = source_bone;
+    operation.properties = {
+        {sop_common_zero_property, SopPropertyType::integer, 0u},
+        floating(sop_axis_x_property, axis_x),
+        floating(sop_axis_y_property, axis_y),
+        floating(sop_axis_z_property, axis_z),
+        floating(sop_twist_rate_property, twist_rate),
+        floating(sop_swing_rate_property, swing_rate),
+        floating(sop_offset_x_property, 0.0f),
+        floating(sop_offset_y_property, 0.0f),
+        floating(sop_offset_z_property, 0.0f),
+    };
+    return operation;
 }
 
 SopAsset load_sop(const fs::path& path) {
@@ -105,5 +145,70 @@ SopAsset load_sop(const fs::path& path) {
         result.operations.push_back(std::move(operation));
     }
     return result;
+}
+
+void save_sop(const fs::path& path, const SopAsset& asset) {
+    if (asset.version != sop_version_20200309) throw std::runtime_error("Unsupported SOP version");
+    if (asset.operations.size() > 100'000u) throw std::runtime_error("Unreasonable SOP operation count");
+
+    std::size_t byte_count = 12 + asset.operations.size() * 4;
+    for (const auto& operation : asset.operations) {
+        if (operation.properties.size() > 0xffu) throw std::runtime_error("SOP operation has too many properties");
+        byte_count += 24 + operation.properties.size() * 12;
+    }
+    if (byte_count > std::numeric_limits<std::uint32_t>::max()) throw std::runtime_error("SOP file is too large");
+
+    std::vector<std::byte> bytes(byte_count);
+    const auto write_u32 = [&](std::size_t offset, std::uint32_t value) {
+        std::memcpy(bytes.data() + offset, &value, sizeof(value));
+    };
+    std::memcpy(bytes.data(), "sop\0", 4);
+    write_u32(4, asset.version);
+    write_u32(8, static_cast<std::uint32_t>(asset.operations.size()));
+
+    std::size_t operation_offset = 12 + asset.operations.size() * 4;
+    for (std::size_t index = 0; index < asset.operations.size(); ++index) {
+        const auto& operation = asset.operations[index];
+        write_u32(12 + index * 4, static_cast<std::uint32_t>(operation_offset));
+        write_u32(operation_offset, operation.type_hash);
+        const auto metadata = (operation.metadata & ~0x00ff0000u) |
+            (static_cast<std::uint32_t>(operation.properties.size()) << 16);
+        write_u32(operation_offset + 4, metadata);
+        write_u32(operation_offset + 8, sop_target_bone_property);
+        write_u32(operation_offset + 12, operation.target_bone);
+        write_u32(operation_offset + 16, sop_source_bone_property);
+        write_u32(operation_offset + 20, operation.source_bone);
+        for (std::size_t property_index = 0; property_index < operation.properties.size(); ++property_index) {
+            const auto& property = operation.properties[property_index];
+            const auto type = static_cast<std::uint32_t>(property.type);
+            if (type > static_cast<std::uint32_t>(SopPropertyType::floating))
+                throw std::runtime_error("Unsupported SOP property type");
+            const auto property_offset = operation_offset + 24 + property_index * 12;
+            write_u32(property_offset, property.hash);
+            write_u32(property_offset + 4, type);
+            write_u32(property_offset + 8, property.raw_value);
+        }
+        operation_offset += 24 + operation.properties.size() * 12;
+    }
+
+    if (!path.parent_path().empty()) fs::create_directories(path.parent_path());
+    auto temporary = path;
+    temporary += L".tmp";
+    {
+        std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+        if (!output) throw std::runtime_error("Cannot create temporary SOP file");
+        output.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+        output.flush();
+        if (!output) {
+            output.close();
+            fs::remove(temporary);
+            throw std::runtime_error("Cannot write temporary SOP file");
+        }
+    }
+    if (!MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        const auto error = GetLastError();
+        fs::remove(temporary);
+        throw std::runtime_error("Cannot replace SOP file (Win32 " + std::to_string(error) + ")");
+    }
 }
 }

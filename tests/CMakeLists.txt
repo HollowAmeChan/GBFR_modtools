@@ -21,6 +21,11 @@ target_compile_options(gbfr_cloth_tests PRIVATE /W4 /permissive- /Zc:__cplusplus
 target_compile_definitions(gbfr_cloth_tests PRIVATE GBFR_ROOT_DIR=L"${GBFR_ROOT_DIR}")
 add_test(NAME gbfr_cloth COMMAND gbfr_cloth_tests)
 
+add_executable(gbfr_sop_tests test_sop.cpp)
+target_link_libraries(gbfr_sop_tests PRIVATE gbfr_core gbfr_formats)
+target_compile_options(gbfr_sop_tests PRIVATE /W4 /permissive- /Zc:__cplusplus)
+add_test(NAME gbfr_sop COMMAND gbfr_sop_tests)
+
 add_executable(gbfr_texture_tests test_texture.cpp)
 target_link_libraries(gbfr_texture_tests PRIVATE gbfr_core gbfr_render)
 target_compile_options(gbfr_texture_tests PRIVATE /W4 /permissive- /Zc:__cplusplus)

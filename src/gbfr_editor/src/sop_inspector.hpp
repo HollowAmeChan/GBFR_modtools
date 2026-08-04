@@ -23,9 +23,9 @@ struct SopOperationDescription {
 class SopInspector {
 public:
     bool load_catalog(const std::filesystem::path& path);
-    void set_asset(SopAsset asset, std::filesystem::path path);
+    void set_asset(SopAsset asset, std::filesystem::path path, bool editable);
     void clear();
-    void draw(const SkeletonAsset& skeleton,
+    bool draw(const SkeletonAsset& skeleton,
               const std::unordered_map<std::string, std::string>& bone_names,
               int& selected_bone);
 
@@ -39,5 +39,14 @@ private:
     int status_filter_{};
     int selected_operation_{-1};
     bool selected_bone_only_{};
+    bool editable_{};
+    bool dirty_{};
+    int new_target_{-1};
+    int new_source_{-1};
+    int new_axis_{1};
+    float new_swing_rate_{0.5f};
+    float new_twist_rate_{};
+    std::string status_message_;
+    bool status_error_{};
 };
 }

@@ -577,6 +577,7 @@ Workspace Workspace::load(const fs::path& selected) {
             result.assets_.push_back(std::move(asset));
         }
     }
+    result.discover_sop_files();
     result.discover_manual_textures();
     std::stable_sort(result.assets_.begin(), result.assets_.end(), [](const auto& left, const auto& right) {
         const auto left_name = left.input.filename().native();
@@ -632,6 +633,32 @@ void Workspace::discover_manual_textures() {
             asset.monitored_inputs.emplace_back(asset.input, asset.baseline_sha256);
             assets_.push_back(std::move(asset));
         }
+    }
+}
+
+void Workspace::discover_sop_files() {
+    const auto source_root = root_ / L"source/data/model";
+    if (!fs::is_directory(source_root)) return;
+    for (const auto& entry : fs::recursive_directory_iterator(source_root)) {
+        if (!entry.is_regular_file()) continue;
+        auto extension = entry.path().extension().wstring();
+        std::transform(extension.begin(), extension.end(), extension.begin(),
+                       [](wchar_t value) { return static_cast<wchar_t>(std::towlower(value)); });
+        if (extension != L".sop") continue;
+
+        const auto source = fs::weakly_canonical(entry.path());
+        const auto relative = fs::relative(source, source_root);
+        const auto input = root_ / L"unpack/data/model" / relative;
+        const auto output = root_ / L"build/data/model" / relative;
+        if (std::any_of(assets_.begin(), assets_.end(), [&](const auto& asset) {
+                return asset.kind == AssetKind::model && (asset.input == input || asset.output == output);
+            })) continue;
+
+        const auto source_hash = sha256_file(source);
+        if (!fs::is_regular_file(input)) copy_atomic(source, input);
+        WorkspaceAsset asset{AssetKind::model, "sop", input, source, output, source_hash, source_hash};
+        asset.monitored_inputs.emplace_back(asset.input, asset.baseline_sha256);
+        assets_.push_back(std::move(asset));
     }
 }
 

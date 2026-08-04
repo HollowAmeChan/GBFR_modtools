@@ -21,6 +21,7 @@ $texconvExe = Join-Path $toolsRoot "texconv.exe"
 $gbfrDataToolsExe = Join-Path $toolsRoot "GBFRDataTools\GBFRDataTools.exe"
 $schemaFbs = Join-Path $libRoot "MMat_ModelMaterial.fbs"
 . (Join-Path $PSScriptRoot "workspace_lib.ps1")
+. (Join-Path $PSScriptRoot "ui_asset_rules.ps1")
 . (Join-Path $PSScriptRoot "sop_report.ps1")
 
 # Load Chinese strings from JSON at runtime (no parse-time encoding issues)
@@ -99,6 +100,28 @@ function Format-FileSize([long]$bytes) {
 function Get-FileSizeStr([string]$path) {
     if (Test-Path $path) { return Format-FileSize (Get-Item $path).Length }
     return "(not found)"
+}
+
+function Get-UiImageCategoryLabel([string]$category) {
+    return switch ($category) {
+        'status_portrait' { '状态头像' }
+        'voice_portrait' { '对话头像' }
+        'sba_chain' { '奥义链图' }
+        'character_art' { '角色立绘' }
+        'color_preview' { '配色预览' }
+        'character_art_alt' { '第二套角色图' }
+        'character_art_small' { '小尺寸角色图' }
+        'fate_episode' { '命运篇章插图' }
+        'sboard' { '角色牌面' }
+        'link_hud' { 'Link HUD' }
+        'menu_background' { '角色菜单背景' }
+        'mastery_art' { '技能树角色图' }
+        'chain_burst' { '连锁爆发图' }
+        'weapon_overview' { '武器总览' }
+        'weapon_preview' { '武器预览' }
+        'weapon_preview_small' { '小尺寸武器预览' }
+        default { '角色 UI' }
+    }
 }
 
 function Extract-MmatHashes([string]$mmatPath) {
@@ -315,7 +338,7 @@ function Initialize-WorkspaceArtifacts {
 
         $extension = [IO.Path]::GetExtension($source).ToLowerInvariant()
         $relativeParent = ConvertTo-WorkspacePath ([IO.Path]::GetDirectoryName($relativeDataPath))
-        $isEditableModelFile = $extension -in @(".minfo", ".skeleton") -and
+        $isEditableModelFile = $extension -in @(".minfo", ".skeleton", ".sop") -and
             $relativeParent -match '^model/[^/]+/[^/]+$'
         $isEditableStreamMesh = $extension -eq ".mmesh" -and
             $relativeParent -match '^model_streaming/(?:lod|shadowlod)\d+$'
@@ -385,14 +408,8 @@ function Initialize-WorkspaceArtifacts {
                     $record | Add-Member -NotePropertyName DdsVerticalOrientation -NotePropertyValue "TopLeft"
                 }
                 if ($extension -ieq ".wtb") {
-                    $category = switch -Regex ($relativeDataPath.Replace('\','/')) {
-                        '/chara_plprm/' { '状态头像'; break }
-                        '/chara_voice/' { '对话头像'; break }
-                        '/image_chain/' { '奥义链图'; break }
-                        '/image_chara/' { '角色立绘'; break }
-                        '/image_chrcolor/' { '配色预览'; break }
-                        default { '角色 UI'; break }
-                    }
+                    $categoryKey = Get-CharacterUiAssetCategory -RelativePath $relativeDataPath -CharacterId $charId
+                    $category = Get-UiImageCategoryLabel $categoryKey
                     $record | Add-Member -NotePropertyName Category -NotePropertyValue $category
                     $uiImages.Add($record)
                 } else {
@@ -1064,8 +1081,6 @@ L ""
 # Character UI Images
 # ================================================================
 $uiRoot = Join-Path $dataRoot "ui"
-$uiIdentityPattern = (@($numId, $charId) | Where-Object { $_ } | Select-Object -Unique | ForEach-Object { [regex]::Escape($_) }) -join '|'
-$uiFilePattern = "^(?:cmn_chrprm_(?:$uiIdentityPattern)_\d+|cmn_chrvo_(?:$uiIdentityPattern)_\d+|cmn_imgchain_(?:$uiIdentityPattern)(?:_glow)?|cmn_imgchr_(?:$uiIdentityPattern)(?:_glow)?|cmn_imgcol_(?:$uiIdentityPattern)_c\d+)\.wtb$"
 L ""
 L "---"
 L ""
@@ -1076,29 +1091,27 @@ L ""
 
 $uiFiles = @()
 if (Test-Path -LiteralPath $uiRoot -PathType Container) {
-    $uiFiles = @(Get-ChildItem -LiteralPath $uiRoot -Recurse -Filter "*.wtb" -File | Where-Object {
-        $_.Name -match $uiFilePattern -and
-        $_.FullName.Substring($dataRootPrefix.Length).Replace('\','/') -match '^ui/(?:fhd/)?layouts/common/(?:chara_plprm|chara_voice|image_chain|image_chara|image_chrcolor)/noatlastextures/'
-    } | Sort-Object FullName)
+    $uiFiles = @(Get-ChildItem -LiteralPath $uiRoot -Recurse -Filter "*.wtb" -File | ForEach-Object {
+        $relative = $_.FullName.Substring($dataRootPrefix.Length).Replace('\','/')
+        $categoryKey = Get-CharacterUiAssetCategory -RelativePath $relative -CharacterId $charId
+        if ($categoryKey) {
+            [PSCustomObject]@{
+                File = $_
+                Relative = $relative
+                Category = Get-UiImageCategoryLabel $categoryKey
+            }
+        }
+    } | Sort-Object Relative)
 }
 if ($uiFiles.Count -eq 0) {
     L "> 未找到与 ``$charId`` 匹配的角色 UI WTB。"
 } else {
     L "| 分辨率 | 类别 | 文件 | 大小 |"
     L "|---|---|---|---:|"
-    foreach ($uiFile in $uiFiles) {
-        Add-SourceFile $uiFile
-        $relative = $uiFile.FullName.Substring($dataRootPrefix.Length).Replace('\','/')
-        $resolution = if ($relative -match '^ui/fhd/') { '1080p' } else { '4K' }
-        $category = switch -Regex ($relative) {
-            '/chara_plprm/' { '状态头像'; break }
-            '/chara_voice/' { '对话头像'; break }
-            '/image_chain/' { '奥义链图'; break }
-            '/image_chara/' { '角色立绘'; break }
-            '/image_chrcolor/' { '配色预览'; break }
-            default { '角色 UI'; break }
-        }
-        L "| $resolution | $category | ``$relative`` | $(Format-FileSize $uiFile.Length) |"
+    foreach ($uiRecord in $uiFiles) {
+        Add-SourceFile $uiRecord.File
+        $resolution = if ($uiRecord.Relative -match '^ui/fhd/') { '1080p' } else { '4K' }
+        L "| $resolution | $($uiRecord.Category) | ``$($uiRecord.Relative)`` | $(Format-FileSize $uiRecord.File.Length) |"
     }
     L ""
     L "> 共 $($uiFiles.Count) 个角色专属 UI WTB；解码后的 DDS 位于 ``unpack/data/ui``，编辑器中归类为 ``UI-image``。"
