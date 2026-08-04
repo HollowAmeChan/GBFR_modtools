@@ -1,0 +1,19 @@
+{
+  "status_portrait": "状态头像",
+  "voice_portrait": "对话头像",
+  "sba_chain": "奥义链图",
+  "character_art": "角色立绘",
+  "color_preview": "配色预览",
+  "character_art_alt": "第二套角色图",
+  "character_art_small": "小尺寸角色图",
+  "fate_episode": "命运篇章插图",
+  "sboard": "角色牌面",
+  "link_hud": "Link HUD",
+  "menu_background": "角色菜单背景",
+  "mastery_art": "技能树角色图",
+  "chain_burst": "连锁爆发图",
+  "weapon_overview": "武器总览",
+  "weapon_preview": "武器预览",
+  "weapon_preview_small": "小尺寸武器预览",
+  "default": "角色 UI"
+}

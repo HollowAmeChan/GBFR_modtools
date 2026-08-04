@@ -2,6 +2,10 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot '..\scripts\workspace\ui_asset_rules.ps1')
+$labels = ConvertFrom-Json ([IO.File]::ReadAllText(
+    (Join-Path $PSScriptRoot '..\_lib\ui_asset_categories_zh.json'),
+    [Text.Encoding]::UTF8
+))
 
 $cases = @(
     @{ Path = 'ui/fhd/layouts/common/chara_plprm/noatlastextures/cmn_chrprm_1400_00.wtb'; Id = 'pl1400'; Expected = 'status_portrait' }
@@ -26,6 +30,9 @@ foreach ($case in $cases) {
     $actual = Get-CharacterUiAssetCategory -RelativePath $case.Path -CharacterId $case.Id
     if ($actual -ne $case.Expected) {
         throw "UI rule mismatch for $($case.Id) / $($case.Path): expected '$($case.Expected)', got '$actual'"
+    }
+    if ($null -ne $actual -and $null -eq $labels.PSObject.Properties[$actual]) {
+        throw "UI category label is missing: $actual"
     }
 }
 

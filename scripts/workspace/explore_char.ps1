@@ -27,6 +27,8 @@ $schemaFbs = Join-Path $libRoot "MMat_ModelMaterial.fbs"
 # Load Chinese strings from JSON at runtime (no parse-time encoding issues)
 $stringsFile = Join-Path $libRoot "explore_strings_zh.json"
 $S = ConvertFrom-Json ([IO.File]::ReadAllText($stringsFile, [Text.Encoding]::UTF8))
+$uiCategoryLabelsFile = Join-Path $libRoot "ui_asset_categories_zh.json"
+$UI_CATEGORY_LABELS = ConvertFrom-Json ([IO.File]::ReadAllText($uiCategoryLabelsFile, [Text.Encoding]::UTF8))
 $sopCatalog = Import-SopOperationCatalog (Join-Path $libRoot "sop_operations_zh.json")
 $sopBoneNames = Import-SopBoneNames (Join-Path $libRoot "humanoid_bone_names.json")
 
@@ -103,26 +105,9 @@ function Get-FileSizeStr([string]$path) {
 }
 
 function Get-UiImageCategoryLabel([string]$category) {
-    $label = switch ($category) {
-        'status_portrait' { '状态头像' }
-        'voice_portrait' { '对话头像' }
-        'sba_chain' { '奥义链图' }
-        'character_art' { '角色立绘' }
-        'color_preview' { '配色预览' }
-        'character_art_alt' { '第二套角色图' }
-        'character_art_small' { '小尺寸角色图' }
-        'fate_episode' { '命运篇章插图' }
-        'sboard' { '角色牌面' }
-        'link_hud' { 'Link HUD' }
-        'menu_background' { '角色菜单背景' }
-        'mastery_art' { '技能树角色图' }
-        'chain_burst' { '连锁爆发图' }
-        'weapon_overview' { '武器总览' }
-        'weapon_preview' { '武器预览' }
-        'weapon_preview_small' { '小尺寸武器预览' }
-        default { '角色 UI' }
-    }
-    return $label
+    $property = $UI_CATEGORY_LABELS.PSObject.Properties[$category]
+    if ($null -ne $property) { return [string]$property.Value }
+    return [string]$UI_CATEGORY_LABELS.default
 }
 
 function Extract-MmatHashes([string]$mmatPath) {
