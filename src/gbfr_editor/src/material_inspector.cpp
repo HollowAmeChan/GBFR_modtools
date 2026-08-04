@@ -27,6 +27,31 @@ std::string hex32(std::uint32_t value) {
     return text;
 }
 
+std::string inferred_material_name(const gbfr::MaterialEntry& material) {
+    std::string texture;
+    if(!material.albedo_name.empty()) texture=material.albedo_name;
+    else if(!material.eye_conjunctiva_name.empty()) texture=material.eye_conjunctiva_name;
+    else if(!material.eye_iris_name.empty()) texture=material.eye_iris_name;
+    else if(!material.eye_highlight_name.empty()) texture=material.eye_highlight_name;
+    else for(const auto& map:material.texture_maps) if(!map.texture_name.empty()){texture=map.texture_name;break;}
+    if(texture.empty())return {};
+    static constexpr std::string_view suffixes[]={
+        "_albd","_msk1","_msk2","_msk3","_nrml","_emsv","_rough","_spec","_ao"
+    };
+    for(const auto suffix:suffixes){
+        if(texture.size()>suffix.size()&&texture.ends_with(suffix)){
+            texture.erase(texture.size()-suffix.size());
+            break;
+        }
+    }
+    return texture;
+}
+
+std::string material_display_name(const gbfr::MaterialEntry& material) {
+    const auto name=inferred_material_name(material);
+    return name.empty()?hex32(material.material_name_hash):name+" ("+hex32(material.material_name_hash)+")";
+}
+
 const char* shader_type_name(std::uint8_t value) {
     switch (value) {
     case 0: return "player_silhouette?";
@@ -489,7 +514,7 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
     ImGui::BeginChild("mmat_material_list", ImVec2(280, 0), ImGuiChildFlags_Borders | ImGuiChildFlags_ResizeX);
     for (std::size_t index = 0; index < asset_.entries.size(); ++index) {
         const auto& material = asset_.entries[index];
-        const auto label = std::to_string(index) + "  " + hex32(material.material_name_hash) + "##mmat" + std::to_string(index);
+        const auto label = std::to_string(index) + "  " + material_display_name(material) + "##mmat" + std::to_string(index);
         if (ImGui::Selectable(label.c_str(), selected_material_ == static_cast<int>(index))) selected_material_ = static_cast<int>(index);
         ImGui::SameLine();
         ImGui::TextDisabled("%u/%u", material.shader_type, material.shader_sub_type);
@@ -529,8 +554,8 @@ void MaterialInspector::draw(PreviewRenderer& renderer,TextureGallery& texture_g
                     ImGui::TableNextRow();ImGui::TableNextColumn();ImGui::TextUnformatted(label);ImGui::TableNextColumn();ImGui::BeginDisabled(!editable);
                     if(ImGui::Checkbox(id,&value)){(*source_material)[key]=value;dirty_=true;edit_status_.clear();}ImGui::EndDisabled();ImGui::TableNextColumn();ImGui::TextWrapped("%s",meaning);
                 };
-                ImGui::TableNextRow();ImGui::TableNextColumn();ImGui::TextUnformatted("material hash");ImGui::TableNextColumn();ImGui::SetNextItemWidth(-FLT_MIN);ImGui::BeginDisabled(!editable);
-                if(ImGui::InputScalar("##material_hash",ImGuiDataType_U32,&material.material_name_hash,nullptr,nullptr,"%08X",ImGuiInputTextFlags_CharsHexadecimal)){(*source_material)["unique_material_name_hash_maybe"]=material.material_name_hash;dirty_=true;edit_status_.clear();}ImGui::EndDisabled();ImGui::TableNextColumn();ImGui::TextUnformatted(hex32(material.material_name_hash).c_str());
+                ImGui::TableNextRow();ImGui::TableNextColumn();ImGui::TextUnformatted("material hash / name");ImGui::TableNextColumn();ImGui::SetNextItemWidth(-FLT_MIN);ImGui::BeginDisabled(!editable);
+                if(ImGui::InputScalar("##material_hash",ImGuiDataType_U32,&material.material_name_hash,nullptr,nullptr,"%08X",ImGuiInputTextFlags_CharsHexadecimal)){(*source_material)["unique_material_name_hash_maybe"]=material.material_name_hash;dirty_=true;edit_status_.clear();}ImGui::EndDisabled();ImGui::TableNextColumn();ImGui::TextUnformatted(material_display_name(material).c_str());
                 uint_row("shader_type","##shader_type",material.shader_type,"shader_type",shader_type_name(material.shader_type));
                 uint_row("shader_sub_type","##shader_sub_type",material.shader_sub_type,"shader_sub_type",shader_sub_type_name(material.shader_sub_type));
                 ImGui::TableNextRow();ImGui::TableNextColumn();ImGui::TextUnformatted("shadow_type");ImGui::TableNextColumn();ImGui::SetNextItemWidth(-FLT_MIN);ImGui::BeginDisabled(!editable);
