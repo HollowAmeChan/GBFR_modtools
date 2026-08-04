@@ -33,23 +33,23 @@
     },
     {
       "Hash": "0x448815BE",
-      "Name": "限幅旋转重映射",
+      "Name": "双分量 Swing 旋转修正",
       "Category": "Corrective",
-      "Discovery": "partial",
-      "DiscoveryLabel": "部分探明",
+      "Discovery": "confirmed",
+      "DiscoveryLabel": "核心行为已探明",
       "Runtime": "not_implemented",
       "RuntimeLabel": "预览器未实现",
-      "Purpose": "把来源旋转在上下限区间内重映射到 corrective 骨；边界含 -179..179 等角度值，轴与组合规则未完全确认。"
+      "Purpose": "跟踪来源骨指定局部轴的 swing，把方向投影为两个正交分量，分别乘倍率和按角度限幅后生成 target 局部旋转；随后应用欧拉限幅与 offset。"
     },
     {
       "Hash": "0x6BE3DB64",
-      "Name": "多轴/分段 Corrective",
+      "Name": "Swing 驱动缩放修正",
       "Category": "Corrective",
-      "Discovery": "partial",
-      "DiscoveryLabel": "部分探明",
+      "Discovery": "confirmed",
+      "DiscoveryLabel": "核心行为已探明",
       "Runtime": "not_implemented",
       "RuntimeLabel": "预览器未实现",
-      "Purpose": "在同一 target 上与其他操作叠加的多轴或分段姿态修正；参数用途和累积公式尚未完整确认。"
+      "Purpose": "根据来源骨相对指定轴的 swing 生成标量，乘 XYZ 响应向量并逐轴限幅，以 scale = max(1 + delta, 0.001) 写入 target；可直接作用于 CLP 物理根骨。"
     },
     {
       "Hash": "0xA0530081",
