@@ -159,6 +159,7 @@ $modelDir  = [IO.Path]::GetDirectoryName($minfoDir)
 $modelRoot = [IO.Path]::GetDirectoryName($modelDir)
 $dataRoot  = [IO.Path]::GetDirectoryName($modelRoot)
 $gameRoot  = [IO.Path]::GetDirectoryName($dataRoot)
+$uiIdentityAliases = @(Get-CharacterUiIdentityAliases -GameDataRoot $dataRoot -CharacterId $charId)
 
 $prefixLabel = if ($PREFIX_DESC.ContainsKey($prefix)) { $PREFIX_DESC[$prefix] } else { "Unknown ($prefix)" }
 
@@ -168,6 +169,9 @@ Write-Host "  GBFR $($S.app_title) -- $charId" -ForegroundColor Cyan
 Write-Host "================================================="  -ForegroundColor Cyan
 Write-Host "  $($S.k_gamedir) : $gameRoot" -ForegroundColor DarkGray
 Write-Host "  $($S.k_pfxtype)    : $prefix ($prefixLabel)" -ForegroundColor DarkGray
+if ($uiIdentityAliases.Count -gt 0) {
+    Write-Host "  UI aliases : $($uiIdentityAliases -join ', ')" -ForegroundColor DarkGray
+}
 Write-Host ""
 
 # --- Output file setup ---
@@ -394,7 +398,7 @@ function Initialize-WorkspaceArtifacts {
                     $record | Add-Member -NotePropertyName DdsVerticalOrientation -NotePropertyValue "TopLeft"
                 }
                 if ($extension -ieq ".wtb") {
-                    $categoryKey = Get-CharacterUiAssetCategory -RelativePath $relativeDataPath -CharacterId $charId
+                    $categoryKey = Get-CharacterUiAssetCategory -RelativePath $relativeDataPath -CharacterId $charId -IdentityAliases $uiIdentityAliases
                     $category = Get-UiImageCategoryLabel $categoryKey
                     $record | Add-Member -NotePropertyName Category -NotePropertyValue $category
                     $uiImages.Add($record)
@@ -477,6 +481,7 @@ function Initialize-WorkspaceArtifacts {
     $workspace = [ordered]@{
         Version = 1
         CharacterId = $charId
+        UIIdentityAliases = @($uiIdentityAliases)
         GeneratedAt = (Get-Date).ToString("o")
         GameDataRoot = $dataRoot
         Manifest = "manifest.md"
@@ -1073,13 +1078,16 @@ L ""
 L "## $H_UI"
 L ""
 L "角色专属 UI WTB；``ui/fhd`` 是 1080p 资源，移除 ``fhd`` 的同路径是 4K 资源。"
+if ($uiIdentityAliases.Count -gt 0) {
+    L "历史 UI 标识：``$($uiIdentityAliases -join '``、``')``（来自 ``system/table/chara_icon.tbl``）。"
+}
 L ""
 
 $uiFiles = @()
 if (Test-Path -LiteralPath $uiRoot -PathType Container) {
     $uiFiles = @(Get-ChildItem -LiteralPath $uiRoot -Recurse -Filter "*.wtb" -File | ForEach-Object {
         $relative = $_.FullName.Substring($dataRootPrefix.Length).Replace('\','/')
-        $categoryKey = Get-CharacterUiAssetCategory -RelativePath $relative -CharacterId $charId
+        $categoryKey = Get-CharacterUiAssetCategory -RelativePath $relative -CharacterId $charId -IdentityAliases $uiIdentityAliases
         if ($categoryKey) {
             [PSCustomObject]@{
                 File = $_

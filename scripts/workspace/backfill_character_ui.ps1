@@ -26,6 +26,15 @@ if (-not (Test-Path -LiteralPath $workspaceJson -PathType Leaf)) {
 $workspace = ConvertFrom-Json ([IO.File]::ReadAllText($workspaceJson, [Text.Encoding]::UTF8))
 $characterId = [string]$workspace.CharacterId
 $gameDataRoot = [IO.Path]::GetFullPath([string]$workspace.GameDataRoot).TrimEnd([char[]]@('\', '/'))
+$storedAliases = @()
+$storedAliasesProperty = $workspace.PSObject.Properties['UIIdentityAliases']
+if ($null -ne $storedAliasesProperty) { $storedAliases = @($storedAliasesProperty.Value) }
+$uiIdentityAliases = @(
+    @($storedAliases) + @(Get-CharacterUiIdentityAliases -GameDataRoot $gameDataRoot -CharacterId $characterId) |
+        Where-Object { $_ -match '^[a-z]+\d+$' } |
+        ForEach-Object { $_.ToLowerInvariant() } |
+        Sort-Object -Unique
+)
 $gameUiRoot = Join-Path $gameDataRoot 'ui'
 if (-not (Test-Path -LiteralPath $gameUiRoot -PathType Container)) {
     throw "Game UI root not found: $gameUiRoot"
@@ -39,7 +48,7 @@ foreach ($record in $existingRecords) { $existingSources.Add([string]$record.Sou
 
 $candidates = @(Get-ChildItem -LiteralPath $gameUiRoot -Recurse -File -Filter '*.wtb' | ForEach-Object {
     $relativeDataPath = $_.FullName.Substring($gameDataRoot.Length + 1).Replace('\', '/')
-    $categoryKey = Get-CharacterUiAssetCategory -RelativePath $relativeDataPath -CharacterId $characterId
+    $categoryKey = Get-CharacterUiAssetCategory -RelativePath $relativeDataPath -CharacterId $characterId -IdentityAliases $uiIdentityAliases
     if ($categoryKey) {
         $sourceRelative = ConvertTo-WorkspacePath (Join-Path 'source\data' $relativeDataPath)
         if (-not $existingSources.Contains($sourceRelative)) {
@@ -56,6 +65,7 @@ $candidates = @(Get-ChildItem -LiteralPath $gameUiRoot -Recurse -File -Filter '*
 $candidateBytes = ($candidates | ForEach-Object { $_.File.Length } | Measure-Object -Sum).Sum
 if ($null -eq $candidateBytes) { $candidateBytes = 0 }
 Write-Host "CharacterId=$characterId"
+Write-Host "UIIdentityAliases=$($uiIdentityAliases -join ',')"
 Write-Host "ExistingUIImages=$($existingRecords.Count)"
 Write-Host "NewUIImages=$($candidates.Count)"
 Write-Host ("NewSourceMiB={0:F1}" -f ($candidateBytes / 1MB))
@@ -123,6 +133,11 @@ try {
     }
 
     $workspace.UIImages = @($existingRecords + @($newRecords) | Sort-Object Source)
+    if ($null -ne $storedAliasesProperty) {
+        $storedAliasesProperty.Value = @($uiIdentityAliases)
+    } else {
+        $workspace | Add-Member -NotePropertyName UIIdentityAliases -NotePropertyValue @($uiIdentityAliases)
+    }
     $json = $workspace | ConvertTo-Json -Depth 10
     $temporaryJson = Join-Path $backupDir "workspace.$stamp.tmp"
     [IO.File]::WriteAllText($temporaryJson, $json, [Text.UTF8Encoding]::new($false))
