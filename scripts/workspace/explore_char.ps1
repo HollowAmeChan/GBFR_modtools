@@ -181,7 +181,6 @@ switch ($prefix) {
     "pl" {
         Add-RelatedModelRef "pl" $charId $S.sec_main
         Add-RelatedModelRef "fp" "fp$numId" $S.sec_fp
-        Add-RelatedModelRef "wp" "wp$numId" $S.sec_wp
     }
     "np" {
         Add-RelatedModelRef "np" $charId $S.sec_main
@@ -217,6 +216,18 @@ $modelDir  = [IO.Path]::GetDirectoryName($minfoDir)
 $modelRoot = [IO.Path]::GetDirectoryName($modelDir)
 $dataRoot  = [IO.Path]::GetDirectoryName($modelRoot)
 $gameRoot  = [IO.Path]::GetDirectoryName($dataRoot)
+if ($prefix -eq "pl") {
+    # A player character owns every weapon in its two-digit family. The
+    # transformation model pl2000 uses Id's wp19xx family in the game data.
+    $weaponFamily = if ($charId -ieq "pl2000") { "19" } elseif ($numId.Length -ge 2) { $numId.Substring(0, 2) } else { "" }
+    $weaponRoot = Join-Path $dataRoot "model\wp"
+    if ($weaponFamily -and (Test-Path -LiteralPath $weaponRoot -PathType Container)) {
+        foreach ($weaponDirectory in @(Get-ChildItem -LiteralPath $weaponRoot -Directory |
+            Where-Object { $_.Name -match "^wp$weaponFamily\d{2}$" } | Sort-Object Name)) {
+            Add-RelatedModelRef "wp" $weaponDirectory.Name $S.sec_wp
+        }
+    }
+}
 if ($prefix -ne "pl") {
     $relatedModelRefs = @($relatedModelRefs | Where-Object {
         Test-Path -LiteralPath (Join-Path $dataRoot "model\$($_.Prefix)\$($_.Id)") -PathType Container
@@ -1265,18 +1276,14 @@ if (Test-Path $texRoot) {
 }
 
 # MOT is a first-class editable asset for every selected model component.
-# Preserve the existing player scope (body + face); NPC extraction also
-# collects the independent fn/wn behavior directories.
-$motionModelIds = if ($prefix -eq "pl") {
-    @($charId, "fp$numId")
-} else {
-    @($relatedBehaviorRefs | ForEach-Object { $_.Id } | Sort-Object -Unique)
-}
+# Player extraction now includes all weapon-family behavior directories;
+# NPC extraction uses its independent fn/wn behavior directories as before.
+$motionModelIds = @($relatedBehaviorRefs | ForEach-Object { $_.Id } | Sort-Object -Unique)
 foreach ($motionModelId in $motionModelIds) {
     $motionPrefix = [regex]::Match($motionModelId, '^[a-z]+').Value
     $motionDirectory = Join-Path $gameRoot "data\$motionPrefix\$motionModelId"
     if (Test-Path -LiteralPath $motionDirectory) {
-        $motionFiles = if ($prefix -eq "pl") {
+        $motionFiles = if ($prefix -eq "pl" -and $motionPrefix -ne "wp") {
             @(Get-ChildItem -LiteralPath $motionDirectory -Filter "*.mot" -File)
         } else {
             @(Get-ChildItem -LiteralPath $motionDirectory -Recurse -File)
