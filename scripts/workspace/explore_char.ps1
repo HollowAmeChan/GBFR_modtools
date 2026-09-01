@@ -161,7 +161,7 @@ $numId   = [regex]::Match($charId, "\d+").Value
 $relatedModelRefs = [System.Collections.Generic.List[PSCustomObject]]::new()
 $relatedModelKeys = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 $npcExtraModelIds = @{
-    np0300 = @("wn0301", "wn0390")
+    np0300 = @("wn0300", "wn0301", "wn0390")
 }
 function Add-RelatedModelRef([string]$modelPrefix, [string]$modelId, [string]$sectionLabel) {
     if ([string]::IsNullOrWhiteSpace($modelId)) { return }
@@ -212,15 +212,19 @@ switch ($prefix) {
     }
 }
 
-$relatedBehaviorRefs = @($relatedModelRefs | Where-Object {
-    $_.Prefix -in @("pl", "fp", "wp", "np", "fn", "wn")
-})
-
 $minfoDir  = [IO.Path]::GetDirectoryName($MinfoPath)
 $modelDir  = [IO.Path]::GetDirectoryName($minfoDir)
 $modelRoot = [IO.Path]::GetDirectoryName($modelDir)
 $dataRoot  = [IO.Path]::GetDirectoryName($modelRoot)
 $gameRoot  = [IO.Path]::GetDirectoryName($dataRoot)
+if ($prefix -ne "pl") {
+    $relatedModelRefs = @($relatedModelRefs | Where-Object {
+        Test-Path -LiteralPath (Join-Path $dataRoot "model\$($_.Prefix)\$($_.Id)") -PathType Container
+    })
+}
+$relatedBehaviorRefs = @($relatedModelRefs | Where-Object {
+    $_.Prefix -in @("pl", "fp", "wp", "np", "fn", "wn")
+})
 $uiIdentityAliases = @(Get-CharacterUiIdentityAliases -GameDataRoot $dataRoot -CharacterId $charId)
 
 $prefixLabel = if ($PREFIX_DESC.ContainsKey($prefix)) { $PREFIX_DESC[$prefix] } else { "Unknown ($prefix)" }
@@ -1272,7 +1276,12 @@ foreach ($motionModelId in $motionModelIds) {
     $motionPrefix = [regex]::Match($motionModelId, '^[a-z]+').Value
     $motionDirectory = Join-Path $gameRoot "data\$motionPrefix\$motionModelId"
     if (Test-Path -LiteralPath $motionDirectory) {
-        Add-SourceFiles @(Get-ChildItem -LiteralPath $motionDirectory -Recurse -File)
+        $motionFiles = if ($prefix -eq "pl") {
+            @(Get-ChildItem -LiteralPath $motionDirectory -Filter "*.mot" -File)
+        } else {
+            @(Get-ChildItem -LiteralPath $motionDirectory -Recurse -File)
+        }
+        Add-SourceFiles $motionFiles
     }
 }
 
