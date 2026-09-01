@@ -84,6 +84,13 @@ function Get-CharacterUiAssetCategory {
         "^ui/(?:fhd/)?layouts/common/image_chrcolor/noatlastextures/cmn_imgcol_${identityPattern}_c\d+\.wtb$" { return 'color_preview' }
     }
 
+    # Rolan's memo is a character-specific standalone image rather than a
+    # model-id named portrait, so include it when extracting NP0300.
+    if ($character -eq 'np0300' -and
+        $normalized -match '^ui/(?:fhd/)?layouts/tutorial/tutorial_image/noatlastextures/(?:eng|jpn)/tu_win_image_rolanmemo_00\.wtb$') {
+        return 'character_art'
+    }
+
     if ($prefix -ne 'pl') { return $null }
 
     $playerId = "pl$number"

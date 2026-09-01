@@ -77,12 +77,12 @@ $BXM_TYPE = @{
 
 $PREFIX_DESC = @{
     pl = $S.pfx_pl; fn = $S.pfx_fn; fp = $S.pfx_fp
-    np = $S.pfx_np; wp = $S.pfx_wp; em = $S.pfx_em; bg = $S.pfx_bg
+    np = $S.pfx_np; wp = $S.pfx_wp; wn = "NPC 武器模型"; em = $S.pfx_em; bg = $S.pfx_bg
 }
 
 $MMESH_DESC = @{
     pl = $S.mmesh_pl; fn = $S.mmesh_fn; fp = $S.mmesh_fp
-    np = $S.mmesh_np; wp = $S.mmesh_wp
+    np = $S.mmesh_np; wp = $S.mmesh_wp; wn = "NPC 武器网格"
 }
 
 $MMAT_SLOT = @{
@@ -153,6 +153,68 @@ if ([IO.Path]::GetExtension($MinfoPath) -ne ".minfo") {
 $charId  = [IO.Path]::GetFileNameWithoutExtension($MinfoPath)
 $prefix  = [regex]::Match($charId, "^([a-z]+)").Value
 $numId   = [regex]::Match($charId, "\d+").Value
+
+# A player body owns fp/wp companions, while an NPC body/face/weapon uses
+# the independent np/fn/wn prefixes. Rolan has three explicit NPC weapon
+# assets; these are props in the native game, but must travel with an NPC
+# extraction so a playable-role mod has the complete source set.
+$relatedModelRefs = [System.Collections.Generic.List[PSCustomObject]]::new()
+$relatedModelKeys = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+$npcExtraModelIds = @{
+    np0300 = @("wn0301", "wn0390")
+}
+function Add-RelatedModelRef([string]$modelPrefix, [string]$modelId, [string]$sectionLabel) {
+    if ([string]::IsNullOrWhiteSpace($modelId)) { return }
+    $key = "$modelPrefix/$modelId"
+    if ($relatedModelKeys.Add($key)) {
+        $relatedModelRefs.Add([PSCustomObject]@{
+            Prefix = $modelPrefix
+            Id = $modelId
+            Section = $sectionLabel
+        })
+    }
+}
+
+$npcBaseNumber = $numId
+if ($prefix -eq "wn" -and $numId -in @("0301", "0390")) { $npcBaseNumber = "0300" }
+switch ($prefix) {
+    "pl" {
+        Add-RelatedModelRef "pl" $charId $S.sec_main
+        Add-RelatedModelRef "fp" "fp$numId" $S.sec_fp
+        Add-RelatedModelRef "wp" "wp$numId" $S.sec_wp
+    }
+    "np" {
+        Add-RelatedModelRef "np" $charId $S.sec_main
+        Add-RelatedModelRef "fn" "fn$npcBaseNumber" $S.sec_fn
+        Add-RelatedModelRef "wn" "wn$npcBaseNumber" "NPC 武器模型"
+        foreach ($extraModelId in @($npcExtraModelIds[$charId])) {
+            Add-RelatedModelRef ([regex]::Match($extraModelId, '^[a-z]+').Value) $extraModelId "NPC 附属模型"
+        }
+    }
+    "fn" {
+        Add-RelatedModelRef "fn" $charId $S.sec_fn
+        Add-RelatedModelRef "np" "np$npcBaseNumber" $S.sec_np
+        Add-RelatedModelRef "wn" "wn$npcBaseNumber" "NPC 武器模型"
+        foreach ($extraModelId in @($npcExtraModelIds["np$npcBaseNumber"])) {
+            Add-RelatedModelRef ([regex]::Match($extraModelId, '^[a-z]+').Value) $extraModelId "NPC 附属模型"
+        }
+    }
+    "wn" {
+        Add-RelatedModelRef "wn" $charId "NPC 武器模型"
+        Add-RelatedModelRef "np" "np$npcBaseNumber" $S.sec_np
+        Add-RelatedModelRef "fn" "fn$npcBaseNumber" $S.sec_fn
+        foreach ($extraModelId in @($npcExtraModelIds["np$npcBaseNumber"])) {
+            Add-RelatedModelRef ([regex]::Match($extraModelId, '^[a-z]+').Value) $extraModelId "NPC 附属模型"
+        }
+    }
+    default {
+        Add-RelatedModelRef $prefix $charId $S.sec_main
+    }
+}
+
+$relatedBehaviorRefs = @($relatedModelRefs | Where-Object {
+    $_.Prefix -in @("pl", "fp", "wp", "np", "fn", "wn")
+})
 
 $minfoDir  = [IO.Path]::GetDirectoryName($MinfoPath)
 $modelDir  = [IO.Path]::GetDirectoryName($minfoDir)
@@ -353,7 +415,7 @@ function Initialize-WorkspaceArtifacts {
             }
         } elseif ($extension -ieq ".mot") {
             try {
-                $ownerMatch = [regex]::Match($relativeParent, '^(pl|fp|wp)/([^/]+)$')
+                $ownerMatch = [regex]::Match($relativeParent, '^(pl|fp|wp|np|fn|wn|em|fe|we)/([^/]+)$')
                 if (-not $ownerMatch.Success) { continue }
                 $inputRelative = ConvertTo-WorkspacePath (Join-Path "unpack\data" $relativeDataPath)
                 $inputPath = Resolve-WorkspaceFile $outDir $inputRelative
@@ -427,12 +489,18 @@ function Initialize-WorkspaceArtifacts {
             }
         } elseif ($extension -ieq ".bxm") {
             $fileName = [IO.Path]::GetFileName($relativeDataPath)
-            $clothParent = "pl/$charId/cloth"
-            $characterParent = "pl/$charId"
+            $ownerMatch = [regex]::Match($relativeParent, '^(pl|fp|wp|np|fn|wn)/([^/]+)$')
+            $clothOwnerMatch = [regex]::Match($relativeParent, '^(pl|fp|wp|np|fn|wn)/([^/]+)/cloth$')
+            $activeOwnerMatch = if ($clothOwnerMatch.Success) { $clothOwnerMatch } else { $ownerMatch }
+            if (-not $activeOwnerMatch.Success) { continue }
+            $ownerPrefix = $activeOwnerMatch.Groups[1].Value.ToLowerInvariant()
+            $ownerId = $activeOwnerMatch.Groups[2].Value
+            $clothParent = "$ownerPrefix/$ownerId/cloth"
+            $characterParent = "$ownerPrefix/$ownerId"
             $isBaseCloth = $relativeParent -ieq $clothParent
             $sequenceMatch = [regex]::Match(
                 $fileName,
-                "^$([regex]::Escape($charId))_([0-9a-fA-F]{4})_(\d+)_seq_edit_cloth\.bxm$"
+                "^$([regex]::Escape($ownerId))_([0-9a-fA-F]{4})_(\d+)_seq_edit_cloth\.bxm$"
             )
             $isSequenceCloth = $relativeParent -ieq $characterParent -and $sequenceMatch.Success
             if (-not $isBaseCloth -and -not $isSequenceCloth) { continue }
@@ -849,10 +917,8 @@ function Scan-ModelDir([string]$dp, [string]$dc, [string]$sectionLabel) {
     }
 }
 
-Scan-ModelDir $prefix $charId $S.sec_main
-if ($prefix -eq "pl") {
-    Scan-ModelDir "fp" "fp$numId" $S.sec_fp
-    Scan-ModelDir "wp" "wp$numId" $S.sec_wp
+foreach ($modelRef in $relatedModelRefs) {
+    Scan-ModelDir $modelRef.Prefix $modelRef.Id $modelRef.Section
 }
 
 # ================================================================
@@ -872,8 +938,7 @@ $lodRoot = Join-Path $dataRoot "model_streaming"
 if (Test-Path $lodRoot) {
     foreach ($lodDir in (Get-ChildItem $lodRoot -Directory | Sort-Object Name)) {
         $lod         = $lodDir.Name
-        $relPrefixes = @($charId)
-        if ($prefix -eq "pl") { $relPrefixes += @("fp$numId","wp$numId") }
+        $relPrefixes = @($relatedModelRefs | ForEach-Object { $_.Id })
         foreach ($rp in $relPrefixes) {
             $f = Join-Path $lodDir.FullName "$rp.mmesh"
             if (Test-Path $f) {
@@ -1128,8 +1193,7 @@ $MSK_DESC = @{
     msk4 = $S.msk_msk4; msk5 = $S.msk_msk5
 }
 
-$searchIds = @($charId)
-if ($prefix -eq "pl") { $searchIds += @("fp$numId","wp$numId") }
+$searchIds = @($relatedModelRefs | ForEach-Object { $_.Id } | Sort-Object -Unique)
 
 if (Test-Path $texRoot) {
     Write-Host "  [scan] data/texture/" -ForegroundColor Gray
@@ -1196,15 +1260,19 @@ if (Test-Path $texRoot) {
     L "> $($S.tex_not_found): ``$texRoot``"
 }
 
-# MOT is a first-class editable asset for the selected model. A pl workspace
-# also owns the matching fp facial clips used by the companion head model.
-$motionModelIds = @($charId)
-if ($prefix -eq "pl") { $motionModelIds += "fp$numId" }
+# MOT is a first-class editable asset for every selected model component.
+# Preserve the existing player scope (body + face); NPC extraction also
+# collects the independent fn/wn behavior directories.
+$motionModelIds = if ($prefix -eq "pl") {
+    @($charId, "fp$numId")
+} else {
+    @($relatedBehaviorRefs | ForEach-Object { $_.Id } | Sort-Object -Unique)
+}
 foreach ($motionModelId in $motionModelIds) {
     $motionPrefix = [regex]::Match($motionModelId, '^[a-z]+').Value
     $motionDirectory = Join-Path $gameRoot "data\$motionPrefix\$motionModelId"
     if (Test-Path -LiteralPath $motionDirectory) {
-        Add-SourceFiles @(Get-ChildItem -LiteralPath $motionDirectory -Filter "*.mot" -File)
+        Add-SourceFiles @(Get-ChildItem -LiteralPath $motionDirectory -Recurse -File)
     }
 }
 
